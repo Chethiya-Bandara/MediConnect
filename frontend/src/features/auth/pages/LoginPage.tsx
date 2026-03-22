@@ -2,15 +2,17 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight, Lock, Mail } from "lucide-react";
-import { AlertMessage, Button, InputField } from "../../../components/ui";
-import { useAuth } from "../context/AuthContext";
+import { ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
 import { loginSchema } from "../schemas";
 import type { LoginFormValues } from "../types";
+import { useAuth } from "../context/AuthContext";
+import { AlertBanner, PrimaryButton, TextField } from "../../../components/ui";
+import { PortalFooter, PortalTopNav } from "../components";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
+  const [showPassword, setShowPassword] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
@@ -22,6 +24,7 @@ export function LoginPage() {
     defaultValues: {
       email: "",
       password: "",
+      remember: true,
     },
   });
 
@@ -29,68 +32,108 @@ export function LoginPage() {
     setSubmitError(null);
     const result = await login(values);
 
-    if (result.success) {
-      navigate("/dashboard");
+    if (!result.success) {
+      setSubmitError(result.message ?? "Login failed.");
       return;
     }
 
-    setSubmitError(result.message ?? "Login failed. Please try again.");
+    navigate("/dashboard");
   };
 
   return (
-    <section className="auth-view">
-      <header className="auth-view-header">
-        <h2>Welcome Back</h2>
-        <p>Log in to your MediConnect account.</p>
-      </header>
+    <div className="portal-page">
+      <PortalTopNav />
 
-      <form className="form-grid" onSubmit={handleSubmit(onSubmit)} noValidate>
-        {submitError && <AlertMessage type="error" message={submitError} />}
+      <main className="auth-main login-layout">
+        <section className="login-hero">
+          <p className="hero-kicker">Clinical Portal Access</p>
+          <h1>
+            Securing National Health Data
+            <br />
+            with Clinical Precision.
+          </h1>
+          <p>
+            Access unified health records, manage appointments, and collaborate
+            across Sri Lanka's digital healthcare network.
+          </p>
 
-        <InputField
-          id="email"
-          type="email"
-          label="Email Address"
-          placeholder="name@example.com"
-          leadingIcon={<Mail size={18} />}
-          error={errors.email?.message}
-          {...register("email")}
-        />
+          <div className="hero-cards">
+            <article>
+              <ShieldCheck size={18} />
+              <h3>Encrypted Vault</h3>
+              <p>AES-grade protection for every patient record.</p>
+            </article>
+            <article>
+              <ShieldCheck size={18} />
+              <h3>Verified ID</h3>
+              <p>National identity verification integrated in flow.</p>
+            </article>
+          </div>
+        </section>
 
-        <div className="field-inline-head">
-          <span>Password</span>
-          <button type="button">Forgot Password?</button>
-        </div>
+        <section className="auth-card">
+          <header>
+            <h2>Welcome Back</h2>
+            <p>Please enter your clinical credentials to continue.</p>
+          </header>
 
-        <InputField
-          id="password"
-          type="password"
-          label=""
-          aria-label="Password"
-          placeholder="••••••••"
-          leadingIcon={<Lock size={18} />}
-          error={errors.password?.message}
-          {...register("password")}
-        />
+          <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
+            {submitError && <AlertBanner type="error" message={submitError} />}
 
-        <Button type="submit" className="auth-submit" isLoading={isSubmitting}>
-          <span>Sign In</span>
-          {!isSubmitting && <ArrowRight size={16} />}
-        </Button>
-      </form>
+            <TextField
+              id="email"
+              type="email"
+              label="Email Address"
+              placeholder="name@healthcare.gov"
+              icon={<Mail size={18} />}
+              error={errors.email?.message}
+              {...register("email")}
+            />
 
-      <div className="auth-demo-box">
-        <p>Quick demo accounts:</p>
-        <ul>
-          <li>patient@mediconnect.lk / Patient123</li>
-          <li>doctor@mediconnect.lk / Doctor123</li>
-          <li>admin@mediconnect.lk / Admin123</li>
-        </ul>
-      </div>
+            <div className="password-row">
+              <span>Password</span>
+              <button type="button">Forgot Password?</button>
+            </div>
 
-      <p className="auth-footer-text">
-        No account yet? <Link to="/register">Register now</Link>
-      </p>
-    </section>
+            <div className="password-wrap">
+              <TextField
+                id="password"
+                type={showPassword ? "text" : "password"}
+                label=""
+                aria-label="Password"
+                placeholder="••••••••"
+                icon={<Lock size={18} />}
+                error={errors.password?.message}
+                {...register("password")}
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword((current) => !current)}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+
+            <label className="remember-row" htmlFor="remember">
+              <input id="remember" type="checkbox" {...register("remember")} />
+              <span>Remember this device</span>
+            </label>
+
+            <PrimaryButton type="submit" loading={isSubmitting}>
+              <span>Login to Portal</span>
+              {!isSubmitting && <ArrowRight size={18} />}
+            </PrimaryButton>
+          </form>
+
+          <p className="switch-row">
+            New to the National Health Portal?
+            <Link to="/register">Create an Account</Link>
+          </p>
+        </section>
+      </main>
+
+      <PortalFooter />
+    </div>
   );
 }
