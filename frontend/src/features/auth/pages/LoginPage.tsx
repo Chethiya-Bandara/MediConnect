@@ -6,7 +6,7 @@ import { ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
 import { loginSchema } from "../schemas";
 import type { LoginFormValues } from "../types";
 import { useAuth } from "../context/AuthContext";
-import { AlertBanner, PrimaryButton, TextField } from "../../../components/ui";
+import { AlertMessage, Button, InputField } from "../../../components/ui";
 import { PortalFooter, PortalTopNav } from "../components";
 
 export function LoginPage() {
@@ -24,7 +24,6 @@ export function LoginPage() {
     defaultValues: {
       email: "",
       password: "",
-      remember: true,
     },
   });
 
@@ -78,14 +77,14 @@ export function LoginPage() {
           </header>
 
           <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
-            {submitError && <AlertBanner type="error" message={submitError} />}
+            {submitError && <AlertMessage type="error" message={submitError} />}
 
-            <TextField
+            <InputField
               id="email"
               type="email"
               label="Email Address"
               placeholder="name@healthcare.gov"
-              icon={<Mail size={18} />}
+              leadingIcon={<Mail size={18} />}
               error={errors.email?.message}
               {...register("email")}
             />
@@ -96,13 +95,13 @@ export function LoginPage() {
             </div>
 
             <div className="password-wrap">
-              <TextField
+              <InputField
                 id="password"
                 type={showPassword ? "text" : "password"}
                 label=""
                 aria-label="Password"
                 placeholder="••••••••"
-                icon={<Lock size={18} />}
+                leadingIcon={<Lock size={18} />}
                 error={errors.password?.message}
                 {...register("password")}
               />
@@ -115,15 +114,10 @@ export function LoginPage() {
               </button>
             </div>
 
-            <label className="remember-row" htmlFor="remember">
-              <input id="remember" type="checkbox" {...register("remember")} />
-              <span>Remember this device</span>
-            </label>
-
-            <PrimaryButton type="submit" loading={isSubmitting}>
+            <Button type="submit" className="primary-button" isLoading={isSubmitting}>
               <span>Login to Portal</span>
               {!isSubmitting && <ArrowRight size={18} />}
-            </PrimaryButton>
+            </Button>
           </form>
 
           <p className="switch-row">

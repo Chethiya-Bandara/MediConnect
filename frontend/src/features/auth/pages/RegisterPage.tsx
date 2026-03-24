@@ -2,55 +2,34 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import {
-  Activity,
-  AlertCircle,
-  Building2,
-  ChevronLeft,
-  IdCard,
-  Lock,
-  Mail,
-  Pill,
-  Shield,
-  User,
-} from "lucide-react";
+import { BadgeCheck, Upload } from "lucide-react";
 import { AlertMessage, Button, InputField } from "../../../components/ui";
-import { roleOptions } from "../data/roles";
 import { useAuth } from "../context/AuthContext";
+import { roleOptions } from "../data/roles";
 import { registrationSchema } from "../schemas";
-import type { RegisterFormValues, UserRole } from "../types";
+import type { RegisterFormValues } from "../types";
 import { calculateAge } from "../utils";
-
-const roleIconMap = {
-  PATIENT: User,
-  DOCTOR: Activity,
-  PHARMACIST: Pill,
-  HOSPITAL_ADMIN: Building2,
-  PHARMACY_ADMIN: Pill,
-  HEALTH_MINISTRY_ADMIN: Shield,
-} as const;
+import { PortalFooter, PortalTopNav } from "../components";
 
 export function RegisterPage() {
   const navigate = useNavigate();
   const { register: registerUser } = useAuth();
-  const [step, setStep] = useState<1 | 2>(1);
   const [submitMessage, setSubmitMessage] = useState<{
-    type: "success" | "error";
+    type: "error" | "success";
     text: string;
   } | null>(null);
 
   const {
     register,
-    setValue,
     watch,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registrationSchema),
     defaultValues: {
+      role: "PATIENT",
       fullName: "",
       email: "",
-      role: "PATIENT",
       nic: "",
       dob: "",
       parentNic: "",
@@ -61,18 +40,10 @@ export function RegisterPage() {
 
   const selectedRole = watch("role");
   const selectedDob = watch("dob");
-
-  const selectedRoleMeta = roleOptions.find((role) => role.value === selectedRole);
-
   const showParentNic = useMemo(() => {
     const age = calculateAge(selectedDob);
     return selectedRole === "PATIENT" && age !== null && age < 18;
-  }, [selectedDob, selectedRole]);
-
-  const chooseRole = (role: UserRole) => {
-    setValue("role", role, { shouldValidate: true });
-    setStep(2);
-  };
+  }, [selectedRole, selectedDob]);
 
   const onSubmit = async (values: RegisterFormValues) => {
     setSubmitMessage(null);
@@ -88,149 +59,155 @@ export function RegisterPage() {
 
     setSubmitMessage({
       type: "success",
-      text: result.message ?? "Registration successful.",
+      text: result.message ?? "Account created successfully.",
     });
     window.setTimeout(() => navigate("/login"), 1200);
   };
 
   return (
-    <section className="auth-view">
-      {step === 1 && (
-        <>
-          <header className="auth-view-header">
-            <h2>Create Account</h2>
-            <p>Step 1: Select your role</p>
-          </header>
+    <div className="portal-page">
+      <PortalTopNav />
 
-          <div className="role-grid">
-            {roleOptions.map((role) => {
-              const Icon = roleIconMap[role.value];
-              return (
-                <button
-                  key={role.value}
-                  type="button"
-                  className="role-card"
-                  onClick={() => chooseRole(role.value)}
-                >
-                  <span className="role-card-icon">
-                    <Icon size={20} />
-                  </span>
-                  <span className="role-card-body">
-                    <strong>{role.label}</strong>
-                    <small>{role.description}</small>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+      <main className="auth-main register-layout">
+        <section className="register-card">
+          <aside className="register-side">
+            <p className="side-kicker">Vitalis Nexus</p>
+            <h2>Secure Health Identity</h2>
+            <p>
+              Join the centralized national framework for seamless healthcare
+              delivery. One ID, a lifetime of care.
+            </p>
 
-          <p className="auth-footer-text">
-            Already have an account? <Link to="/login">Back to login</Link>
-          </p>
-        </>
-      )}
-
-      {step === 2 && (
-        <>
-          <header className="auth-view-header auth-view-header-row">
-            <button type="button" className="back-btn" onClick={() => setStep(1)}>
-              <ChevronLeft size={18} />
-            </button>
-            <div>
-              <h2>Register as {selectedRoleMeta?.label ?? "User"}</h2>
-              <p>Step 2: Enter your details</p>
+            <div className="side-badge">
+              <BadgeCheck size={18} />
+              <div>
+                <strong>Encrypted Vault</strong>
+                <small>Healthcare-grade compliance workflow.</small>
+              </div>
             </div>
-          </header>
+          </aside>
 
-          <form className="form-grid" onSubmit={handleSubmit(onSubmit)} noValidate>
-            {submitMessage && (
-              <AlertMessage type={submitMessage.type} message={submitMessage.text} />
-            )}
+          <section className="register-form-wrap">
+            <div className="step-strip">
+              <div className="active">1 Account Setup</div>
+              <div className="line" />
+              <div>2 Verification</div>
+            </div>
 
-            <InputField
-              id="fullName"
-              label="Full Name"
-              placeholder="John Doe"
-              leadingIcon={<User size={18} />}
-              error={errors.fullName?.message}
-              {...register("fullName")}
-            />
+            <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
+              {submitMessage && (
+                <AlertMessage type={submitMessage.type} message={submitMessage.text} />
+              )}
 
-            <InputField
-              id="email"
-              type="email"
-              label="Email Address"
-              placeholder="name@example.com"
-              leadingIcon={<Mail size={18} />}
-              error={errors.email?.message}
-              {...register("email")}
-            />
+              <label className="field-wrapper">
+                <span className="field-label">Portal Role</span>
+                <select className="field-input field-select" {...register("role")}>
+                  {roleOptions.map((role) => (
+                    <option key={role.value} value={role.value}>
+                      {role.label}
+                    </option>
+                  ))}
+                </select>
+                {errors.role?.message && (
+                  <span className="field-error">{errors.role.message}</span>
+                )}
+              </label>
 
-            <InputField
-              id="nic"
-              label="NIC Number"
-              placeholder="200112345678 or 123456789V"
-              leadingIcon={<IdCard size={18} />}
-              error={errors.nic?.message}
-              {...register("nic")}
-            />
+              <div className="grid-two">
+                <InputField
+                  id="fullName"
+                  label="Legal Full Name"
+                  placeholder="As per identity document"
+                  error={errors.fullName?.message}
+                  {...register("fullName")}
+                />
 
-            <InputField
-              id="dob"
-              type="date"
-              label="Date of Birth"
-              error={errors.dob?.message}
-              {...register("dob")}
-            />
+                <InputField
+                  id="email"
+                  type="email"
+                  label="Primary Email"
+                  placeholder="name@domain.gov"
+                  error={errors.email?.message}
+                  {...register("email")}
+                />
 
-            {selectedRole === "PATIENT" && (
-              <p className="minor-note">
-                <AlertCircle size={14} />
-                If patient is under 18, parent/guardian NIC is required.
+                <InputField
+                  id="nic"
+                  label="National Identity Card (NIC)"
+                  placeholder="200112345678 or 901234567V"
+                  error={errors.nic?.message}
+                  {...register("nic")}
+                />
+
+                <InputField
+                  id="dob"
+                  type="date"
+                  label="Date of Birth"
+                  error={errors.dob?.message}
+                  {...register("dob")}
+                />
+
+                {showParentNic && (
+                  <InputField
+                    id="parentNic"
+                    label="Guardian NIC (For Minors)"
+                    placeholder="Guardian NIC required"
+                    error={errors.parentNic?.message}
+                    {...register("parentNic")}
+                  />
+                )}
+
+                <InputField
+                  id="password"
+                  type="password"
+                  label="Password"
+                  placeholder="Minimum 8 chars"
+                  error={errors.password?.message}
+                  {...register("password")}
+                />
+
+                <InputField
+                  id="confirmPassword"
+                  type="password"
+                  label="Confirm Password"
+                  placeholder="Repeat password"
+                  error={errors.confirmPassword?.message}
+                  {...register("confirmPassword")}
+                />
+              </div>
+
+              <section className="upload-box">
+                <div className="upload-head">
+                  <Upload size={18} />
+                  <h3>Professional Verification</h3>
+                </div>
+                <label className="upload-drop">
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" />
+                  <span>Upload License / Credential</span>
+                  <small>Max 5MB • PDF, JPG, PNG</small>
+                </label>
+              </section>
+
+              <div className="register-actions">
+                <p>
+                  By continuing, you agree to the National Health Data Sovereignty
+                  Protocol.
+                </p>
+                <Button type="submit" className="primary-button" isLoading={isSubmitting}>
+                  Create Digital Health ID
+                </Button>
+              </div>
+
+              <p className="switch-row">
+                Already have an account?
+                <Link to="/login">Back to login</Link>
               </p>
-            )}
+            </form>
+          </section>
+        </section>
+      </main>
 
-            {showParentNic && (
-              <InputField
-                id="parentNic"
-                label="Parent/Guardian NIC"
-                placeholder="Required for underage registration"
-                leadingIcon={<IdCard size={18} />}
-                error={errors.parentNic?.message}
-                {...register("parentNic")}
-              />
-            )}
-
-            <InputField
-              id="password"
-              type="password"
-              label="Password"
-              placeholder="Minimum 8 chars, letters + numbers"
-              leadingIcon={<Lock size={18} />}
-              error={errors.password?.message}
-              {...register("password")}
-            />
-
-            <InputField
-              id="confirmPassword"
-              type="password"
-              label="Confirm Password"
-              placeholder="Re-enter password"
-              leadingIcon={<Lock size={18} />}
-              error={errors.confirmPassword?.message}
-              {...register("confirmPassword")}
-            />
-
-            <Button type="submit" className="auth-submit" isLoading={isSubmitting}>
-              Complete Registration
-            </Button>
-          </form>
-
-          <p className="auth-footer-text">
-            Already have an account? <Link to="/login">Back to login</Link>
-          </p>
-        </>
-      )}
-    </section>
+      <PortalFooter />
+    </div>
   );
 }

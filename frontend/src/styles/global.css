@@ -176,6 +176,11 @@ a {
   gap: 0.35rem;
 }
 
+.field-wrapper {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .field-label {
   font-size: 0.69rem;
   font-family: "Manrope", sans-serif;
@@ -185,7 +190,8 @@ a {
   font-weight: 700;
 }
 
-.field-input-wrap {
+.field-input-wrap,
+.field-control {
   position: relative;
 }
 
@@ -212,11 +218,19 @@ a {
   padding-left: 2.4rem;
 }
 
+.field-input--with-icon {
+  padding-left: 2.4rem;
+}
+
 .field-input:focus {
   box-shadow: 0 0 0 2px rgba(0, 66, 117, 0.35);
 }
 
 .field-input.has-error {
+  box-shadow: 0 0 0 2px rgba(186, 26, 26, 0.35);
+}
+
+.field-input--error {
   box-shadow: 0 0 0 2px rgba(186, 26, 26, 0.35);
 }
 
@@ -315,7 +329,21 @@ a {
   border: 1px solid transparent;
 }
 
+.ui-alert {
+  margin: 0;
+  padding: 0.68rem 0.75rem;
+  border-radius: 0.55rem;
+  font-size: 0.8rem;
+  border: 1px solid transparent;
+}
+
 .alert-banner.error {
+  background: rgba(255, 218, 214, 0.5);
+  border-color: rgba(186, 26, 26, 0.25);
+  color: var(--danger);
+}
+
+.ui-alert--error {
   background: rgba(255, 218, 214, 0.5);
   border-color: rgba(186, 26, 26, 0.25);
   color: var(--danger);
@@ -325,6 +353,32 @@ a {
   background: rgba(33, 150, 83, 0.18);
   border-color: rgba(33, 150, 83, 0.35);
   color: #0e7a3f;
+}
+
+.ui-alert--success {
+  background: rgba(33, 150, 83, 0.18);
+  border-color: rgba(33, 150, 83, 0.35);
+  color: #0e7a3f;
+}
+
+.ui-button {
+  border: 1px solid transparent;
+  border-radius: 0.64rem;
+  padding: 0.55rem 0.8rem;
+  cursor: pointer;
+  font-family: "Manrope", sans-serif;
+  font-weight: 700;
+}
+
+.ui-button--primary {
+  background: linear-gradient(90deg, var(--primary), var(--primary-container));
+  color: #ffffff;
+}
+
+.ui-button--ghost {
+  border-color: rgba(193, 199, 210, 0.9);
+  background: #ffffff;
+  color: #334155;
 }
 
 .switch-row {
@@ -603,6 +657,56 @@ a {
   padding: 1.1rem;
 }
 
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.ui-card {
+  background: #ffffff;
+  border: 1px solid rgba(193, 199, 210, 0.45);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.ui-card__header h2 {
+  margin: 0;
+  font-family: "Manrope", sans-serif;
+  font-size: 1rem;
+}
+
+.ui-card__header p {
+  margin: 0.3rem 0 0.8rem;
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.role-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid rgba(193, 199, 210, 0.8);
+  font-size: 0.72rem;
+}
+
+.ui-check-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.ui-check-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #475569;
+  font-size: 0.8rem;
+}
+
 .dashboard-panel {
   background: #ffffff;
   border: 1px solid rgba(193, 199, 210, 0.45);
@@ -660,5 +764,9 @@ a {
 
   .register-actions .primary-button {
     width: 100%;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
   }
 }
