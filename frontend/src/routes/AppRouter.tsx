@@ -1,6 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { DashboardLayout } from "../layouts/DashboardLayout";
-import { AuthLayout } from "../layouts/AuthLayout";
 import { LoginPage } from "../features/auth/pages/LoginPage";
 import { RegisterPage } from "../features/auth/pages/RegisterPage";
 import { DashboardHomePage } from "../features/dashboard/pages/DashboardHomePage";
@@ -9,10 +8,8 @@ import { ProtectedRoute } from "./ProtectedRoute";
 export function AppRouter() {
   return (
     <Routes>
-      <Route element={<AuthLayout />}>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-      </Route>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
 
       <Route
         path="/dashboard"
