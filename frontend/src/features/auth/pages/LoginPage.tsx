@@ -2,12 +2,12 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
+import { AlertMessage, Button, InputField } from "../../../components/ui";
+import { PortalFooter, PortalTopNav } from "../components";
 import { loginSchema } from "../schemas";
 import type { LoginFormValues } from "../types";
 import { useAuth } from "../context/AuthContext";
-import { AlertMessage, Button, InputField } from "../../../components/ui";
-import { PortalFooter, PortalTopNav } from "../components";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -47,25 +47,28 @@ export function LoginPage() {
         <section className="login-hero">
           <p className="hero-kicker">Clinical Portal Access</p>
           <h1>
-            Securing National Health Data
-            <br />
-            with Clinical Precision.
+            Securing National Health Data with Clinical Precision.
           </h1>
           <p>
-            Access unified health records, manage appointments, and collaborate
-            across Sri Lanka's digital healthcare network.
+            Access your unified health record, manage clinical appointments,
+            and connect with healthcare providers across the nation.
           </p>
 
           <div className="hero-cards">
             <article>
-              <ShieldCheck size={18} />
+              <ShieldCheck size={18} color="#0f3970" />
               <h3>Encrypted Vault</h3>
-              <p>AES-grade protection for every patient record.</p>
+              <p>
+                AES-256 bit healthcare-grade security for records and identity
+                exchange.
+              </p>
             </article>
             <article>
-              <ShieldCheck size={18} />
+              <ShieldCheck size={18} color="#0f3970" />
               <h3>Verified ID</h3>
-              <p>National identity verification integrated in flow.</p>
+              <p>
+                Seamless integration with trusted national identity workflows.
+              </p>
             </article>
           </div>
         </section>
@@ -85,45 +88,62 @@ export function LoginPage() {
               label="Email Address"
               placeholder="name@healthcare.gov"
               leadingIcon={<Mail size={18} />}
-              error={errors.email?.message}
               {...register("email")}
+              error={errors.email?.message}
             />
 
-            <div className="password-row">
-              <span>Password</span>
-              <button type="button">Forgot Password?</button>
-            </div>
-
             <div className="password-wrap">
-              <InputField
-                id="password"
-                type={showPassword ? "text" : "password"}
-                label=""
-                aria-label="Password"
-                placeholder="••••••••"
-                leadingIcon={<Lock size={18} />}
-                error={errors.password?.message}
-                {...register("password")}
-              />
-              <button
-                type="button"
-                className="password-toggle"
-                onClick={() => setShowPassword((current) => !current)}
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
+              <div className="password-row">
+                <span>Password</span>
+                <button type="button">Forgot Password?</button>
+              </div>
+              <div className="field-block">
+                <div className="field-control">
+                  <span className="field-icon">
+                    <Lock size={18} />
+                  </span>
+                  <input
+                    id="password"
+                    className={`field-input field-input--with-icon field-input--with-toggle ${
+                      errors.password ? "field-input--error" : ""
+                    }`}
+                    placeholder="Enter your password"
+                    type={showPassword ? "text" : "password"}
+                    {...register("password")}
+                  />
+                  <button
+                    className="password-toggle"
+                    type="button"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    onClick={() => setShowPassword((current) => !current)}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                {errors.password?.message && (
+                  <span className="field-error">{errors.password.message}</span>
+                )}
+              </div>
             </div>
 
-            <Button type="submit" className="primary-button" isLoading={isSubmitting}>
-              <span>Login to Portal</span>
-              {!isSubmitting && <ArrowRight size={18} />}
-            </Button>
-          </form>
+            <label className="remember-row">
+              <input type="checkbox" />
+              <span>Remember this device</span>
+            </label>
 
-          <p className="switch-row">
-            New to the National Health Portal?
-            <Link to="/register">Create an Account</Link>
-          </p>
+            <Button
+              type="submit"
+              className="primary-button"
+              isLoading={isSubmitting}
+            >
+              Login to Portal
+            </Button>
+
+            <p className="switch-row">
+              New to the National Health Portal?
+              <Link to="/register">Create an Account</Link>
+            </p>
+          </form>
         </section>
       </main>
 

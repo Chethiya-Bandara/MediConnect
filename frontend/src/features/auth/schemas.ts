@@ -39,6 +39,9 @@ export const registrationSchema = z
         message: "Date of birth cannot be in the future.",
       }),
     parentNic: z.string().trim().optional(),
+    specialization: z.string().trim().optional(),
+    licenseNumber: z.string().trim().optional(),
+    pharmacyId: z.string().trim().optional(),
     password: z
       .string()
       .min(8, "Password must be at least 8 characters.")
@@ -61,7 +64,7 @@ export const registrationSchema = z
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["parentNic"],
-          message: "Parent NIC is required for underage patients.",
+          message: "Guardian NIC is required for underage patients.",
         });
         return;
       }
@@ -71,8 +74,34 @@ export const registrationSchema = z
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["parentNic"],
-          message: "Parent NIC format is invalid.",
+          message: "Guardian NIC format is invalid.",
         });
       }
+    }
+
+    if (values.role === "DOCTOR") {
+      if (!values.specialization?.trim()) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["specialization"],
+          message: "Specialization is required for doctors.",
+        });
+      }
+
+      if (!values.licenseNumber?.trim()) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["licenseNumber"],
+          message: "License number is required for doctors.",
+        });
+      }
+    }
+
+    if (values.role === "PHARMACIST" && !values.pharmacyId?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pharmacyId"],
+        message: "Pharmacy ID is required for pharmacists.",
+      });
     }
   });

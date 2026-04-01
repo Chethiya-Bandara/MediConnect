@@ -1,5 +1,9 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap");
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --primary: #004275;
   --primary-container: #005a9c;
@@ -222,6 +226,10 @@ a {
   padding-left: 2.4rem;
 }
 
+.field-input--with-toggle {
+  padding-right: 2.8rem;
+}
+
 .field-input:focus {
   box-shadow: 0 0 0 2px rgba(0, 66, 117, 0.35);
 }
@@ -278,8 +286,9 @@ a {
 
 .password-toggle {
   position: absolute;
-  top: 0.53rem;
+  top: 50%;
   right: 0.65rem;
+  transform: translateY(-50%);
   border: none;
   background: transparent;
   color: var(--outline-dark);

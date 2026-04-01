@@ -26,9 +26,12 @@ export interface RegisterFormValues {
   role: UserRole;
   nic: string;
   dob: string;
-  parentNic?: string;
+  parentNic?: string | undefined;
   password: string;
   confirmPassword: string;
+  specialization?: string | undefined;
+  licenseNumber?: string | undefined;
+  pharmacyId?: string | undefined;
 }
 
 export interface AuthActionResult {

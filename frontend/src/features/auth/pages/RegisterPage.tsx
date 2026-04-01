@@ -1,15 +1,15 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { BadgeCheck, Upload } from "lucide-react";
 import { AlertMessage, Button, InputField } from "../../../components/ui";
 import { useAuth } from "../context/AuthContext";
+import { PortalFooter, PortalTopNav } from "../components";
 import { roleOptions } from "../data/roles";
 import { registrationSchema } from "../schemas";
 import type { RegisterFormValues } from "../types";
 import { calculateAge } from "../utils";
-import { PortalFooter, PortalTopNav } from "../components";
 
 export function RegisterPage() {
   const navigate = useNavigate();
@@ -33,6 +33,9 @@ export function RegisterPage() {
       nic: "",
       dob: "",
       parentNic: "",
+      specialization: "",
+      licenseNumber: "",
+      pharmacyId: "",
       password: "",
       confirmPassword: "",
     },
@@ -40,10 +43,14 @@ export function RegisterPage() {
 
   const selectedRole = watch("role");
   const selectedDob = watch("dob");
-  const showParentNic = useMemo(() => {
-    const age = calculateAge(selectedDob);
-    return selectedRole === "PATIENT" && age !== null && age < 18;
-  }, [selectedRole, selectedDob]);
+  const age = calculateAge(selectedDob);
+  const showParentNic =
+    selectedRole === "PATIENT" && age !== null && age < 18;
+  const showCredentialUpload = selectedRole !== "PATIENT";
+  const credentialLabel =
+    selectedRole === "PHARMACIST" || selectedRole === "PHARMACY_ADMIN"
+      ? "Upload Pharmacy Credential"
+      : "Upload License / Credential";
 
   const onSubmit = async (values: RegisterFormValues) => {
     setSubmitMessage(null);
@@ -71,12 +78,14 @@ export function RegisterPage() {
       <main className="auth-main register-layout">
         <section className="register-card">
           <aside className="register-side">
-            <p className="side-kicker">Vitalis Nexus</p>
-            <h2>Secure Health Identity</h2>
-            <p>
-              Join the centralized national framework for seamless healthcare
-              delivery. One ID, a lifetime of care.
-            </p>
+            <div>
+              <p className="side-kicker">Vitalis Nexus</p>
+              <h2>Secure Health Identity</h2>
+              <p>
+                Join the centralized national framework for seamless healthcare
+                delivery. One ID, a lifetime of care.
+              </p>
+            </div>
 
             <div className="side-badge">
               <BadgeCheck size={18} />
@@ -94,9 +103,16 @@ export function RegisterPage() {
               <div>2 Verification</div>
             </div>
 
-            <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
+            <form
+              className="auth-form"
+              onSubmit={handleSubmit(onSubmit)}
+              noValidate
+            >
               {submitMessage && (
-                <AlertMessage type={submitMessage.type} message={submitMessage.text} />
+                <AlertMessage
+                  type={submitMessage.type}
+                  message={submitMessage.text}
+                />
               )}
 
               <label className="field-wrapper">
@@ -117,43 +133,66 @@ export function RegisterPage() {
                 <InputField
                   id="fullName"
                   label="Legal Full Name"
-                  placeholder="As per identity document"
-                  error={errors.fullName?.message}
                   {...register("fullName")}
+                  error={errors.fullName?.message}
                 />
 
                 <InputField
                   id="email"
                   type="email"
                   label="Primary Email"
-                  placeholder="name@domain.gov"
-                  error={errors.email?.message}
                   {...register("email")}
+                  error={errors.email?.message}
                 />
 
                 <InputField
                   id="nic"
-                  label="National Identity Card (NIC)"
-                  placeholder="200112345678 or 901234567V"
-                  error={errors.nic?.message}
+                  label="NIC"
                   {...register("nic")}
+                  error={errors.nic?.message}
                 />
 
                 <InputField
                   id="dob"
                   type="date"
                   label="Date of Birth"
-                  error={errors.dob?.message}
                   {...register("dob")}
+                  error={errors.dob?.message}
                 />
 
                 {showParentNic && (
                   <InputField
                     id="parentNic"
-                    label="Guardian NIC (For Minors)"
-                    placeholder="Guardian NIC required"
-                    error={errors.parentNic?.message}
+                    label="Guardian NIC"
                     {...register("parentNic")}
+                    error={errors.parentNic?.message}
+                  />
+                )}
+
+                {selectedRole === "DOCTOR" && (
+                  <>
+                    <InputField
+                      id="specialization"
+                      label="Specialization"
+                      {...register("specialization")}
+                      error={errors.specialization?.message}
+                    />
+
+                    <InputField
+                      id="licenseNumber"
+                      label="License Number"
+                      {...register("licenseNumber")}
+                      error={errors.licenseNumber?.message}
+                    />
+                  </>
+                )}
+
+                {selectedRole === "PHARMACIST" && (
+                  <InputField
+                    id="pharmacyId"
+                    label="Pharmacy ID"
+                    {...register("pharmacyId")}
+                    error={errors.pharmacyId?.message}
                   />
                 )}
 
@@ -161,39 +200,43 @@ export function RegisterPage() {
                   id="password"
                   type="password"
                   label="Password"
-                  placeholder="Minimum 8 chars"
-                  error={errors.password?.message}
                   {...register("password")}
+                  error={errors.password?.message}
                 />
 
                 <InputField
                   id="confirmPassword"
                   type="password"
                   label="Confirm Password"
-                  placeholder="Repeat password"
-                  error={errors.confirmPassword?.message}
                   {...register("confirmPassword")}
+                  error={errors.confirmPassword?.message}
                 />
               </div>
 
-              <section className="upload-box">
-                <div className="upload-head">
-                  <Upload size={18} />
-                  <h3>Professional Verification</h3>
-                </div>
-                <label className="upload-drop">
-                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" />
-                  <span>Upload License / Credential</span>
-                  <small>Max 5MB • PDF, JPG, PNG</small>
-                </label>
-              </section>
+              {showCredentialUpload && (
+                <section className="upload-box">
+                  <div className="upload-head">
+                    <Upload size={18} />
+                    <h3>Professional Verification</h3>
+                  </div>
+                  <label className="upload-drop">
+                    <input type="file" accept=".pdf,.jpg,.jpeg,.png" />
+                    <span>{credentialLabel}</span>
+                    <small>Max 5MB • PDF, JPG, PNG</small>
+                  </label>
+                </section>
+              )}
 
               <div className="register-actions">
                 <p>
-                  By continuing, you agree to the National Health Data Sovereignty
-                  Protocol.
+                  By continuing, you agree to the National Health Data
+                  Sovereignty Protocol.
                 </p>
-                <Button type="submit" className="primary-button" isLoading={isSubmitting}>
+                <Button
+                  type="submit"
+                  className="primary-button"
+                  isLoading={isSubmitting}
+                >
                   Create Digital Health ID
                 </Button>
               </div>
