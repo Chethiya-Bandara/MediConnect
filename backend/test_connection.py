@@ -11,5 +11,3 @@ key = os.getenv("SUPABASE_KEY")
 supabase = create_client(url, key)
 
 response = supabase.table("users").select("*").limit(1).execute()
-
-print(response)

@@ -1,11 +1,13 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import {
-  type AuthActionResult,
-  type AuthUser,
-  type LoginFormValues,
-  type RegisterFormValues,
+import type {
+  AuthActionResult,
+  AuthUser,
+  LoginFormValues,
+  RegisterFormValues,
 } from "../types";
+
+const API_URL = "http://localhost:8000";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -15,170 +17,102 @@ interface AuthContextValue {
   logout: () => void;
 }
 
-interface RegisteredAccount {
-  user: AuthUser;
-  password: string;
-}
-
-const STORAGE_KEY = "mediconnect.frontend.current-user";
-const REGISTERED_STORAGE_KEY = "mediconnect.frontend.registered-users";
-
-const mockUsers = [
-  {
-    email: "patient@mediconnect.lk",
-    password: "Patient123",
-    user: {
-      id: "U-001",
-      name: "Demo Patient",
-      email: "patient@mediconnect.lk",
-      role: "PATIENT",
-      nic: "200112345678",
-      dob: "2001-04-10",
-    } as AuthUser,
-  },
-  {
-    email: "doctor@mediconnect.lk",
-    password: "Doctor123",
-    user: {
-      id: "U-002",
-      name: "Demo Doctor",
-      email: "doctor@mediconnect.lk",
-      role: "DOCTOR",
-      nic: "199912345678",
-      dob: "1999-02-12",
-    } as AuthUser,
-  },
-  {
-    email: "admin@mediconnect.lk",
-    password: "Admin123",
-    user: {
-      id: "U-003",
-      name: "Demo Ministry Admin",
-      email: "admin@mediconnect.lk",
-      role: "HEALTH_MINISTRY_ADMIN",
-      nic: "198512345678",
-      dob: "1985-07-19",
-    } as AuthUser,
-  },
-];
-
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function readStoredUser(): AuthUser | null {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(raw) as AuthUser;
-  } catch {
-    localStorage.removeItem(STORAGE_KEY);
-    return null;
-  }
-}
-
-function readRegisteredAccounts(): RegisteredAccount[] {
-  const raw = localStorage.getItem(REGISTERED_STORAGE_KEY);
-  if (!raw) {
-    return [];
-  }
-
-  try {
-    return JSON.parse(raw) as RegisteredAccount[];
-  } catch {
-    localStorage.removeItem(REGISTERED_STORAGE_KEY);
-    return [];
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() => readStoredUser());
-  const [registeredAccounts, setRegisteredAccounts] = useState<RegisteredAccount[]>(
-    () => readRegisteredAccounts(),
-  );
+  const [user, setUser] = useState<AuthUser | null>(null);
 
-  const login = async (payload: LoginFormValues): Promise<AuthActionResult> => {
-    const matchedMockUser = mockUsers.find(
-      (mockUser) =>
-        mockUser.email.toLowerCase() === payload.email.toLowerCase() &&
-        mockUser.password === payload.password,
-    );
+  // LOGIN (calls FastAPI)
+  const login = async (
+    payload: LoginFormValues,
+  ): Promise<AuthActionResult> => {
+    try {
+      const res = await fetch(`${API_URL}/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
 
-    const matchedRegisteredAccount = registeredAccounts.find(
-      (registeredAccount) =>
-        registeredAccount.user.email.toLowerCase() ===
-          payload.email.toLowerCase() &&
-        registeredAccount.password === payload.password,
-    );
+      const json = await res.json();
 
-    const loggedInUser = matchedMockUser?.user ?? matchedRegisteredAccount?.user;
+      if (!res.ok) {
+        return {
+          success: false,
+          message: json.detail || "Login failed",
+        };
+      }
 
-    if (loggedInUser) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(loggedInUser));
-      setUser(loggedInUser);
+      // store token
+      const token = json.access_token;
+      localStorage.setItem("token", token);
+
+      console.log("TOKEN:", token);
+
+      // FETCH USER
+      const userRes = await fetch(`${API_URL}/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      console.log("ME RESPONSE STATUS:", userRes.status);
+
+      const userData = await userRes.json();
+      console.log("ME DATA:", userData);
+
+      const loggedUser: AuthUser = {
+        id: userData.id,
+        name: userData.email || "User",
+        email: userData.email,
+        role: userData.role, // REAL ROLE FROM DB
+      };
+
+      setUser(loggedUser);
+      localStorage.setItem("user", JSON.stringify(loggedUser));
+
       return { success: true };
+    } catch (error) {
+      return { success: false, message: "Server error" };
     }
-
-    return {
-      success: false,
-      message: "Invalid credentials. Check your email/password and try again.",
-    };
   };
 
+  // REGISTER (calls FastAPI)
   const register = async (
     payload: RegisterFormValues,
   ): Promise<AuthActionResult> => {
-    const alreadyExists =
-      mockUsers.some(
-        (mockUser) =>
-          mockUser.email.toLowerCase() === payload.email.toLowerCase(),
-      ) ||
-      registeredAccounts.some(
-        (registeredAccount) =>
-          registeredAccount.user.email.toLowerCase() ===
-          payload.email.toLowerCase(),
-      );
+    try {
+      const res = await fetch(`${API_URL}/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
 
-    if (alreadyExists) {
+      const json = await res.json();
+
+      if (!res.ok) {
+        return {
+          success: false,
+          message: json.detail || "Registration failed",
+        };
+      }
+
       return {
-        success: false,
-        message: "An account with this email already exists.",
+        success: true,
+        message: json.message || "Registration successful",
       };
+    } catch (error) {
+      return { success: false, message: "Server error" };
     }
-
-    const newUser: AuthUser = {
-      id: `U-${Date.now()}`,
-      name: payload.fullName,
-      email: payload.email,
-      role: payload.role,
-      nic: payload.nic,
-      dob: payload.dob,
-    };
-
-    const newAccount: RegisteredAccount = {
-      user: newUser,
-      password: payload.password,
-    };
-
-    setRegisteredAccounts((currentAccounts) => {
-      const updatedAccounts = [...currentAccounts, newAccount];
-      localStorage.setItem(
-        REGISTERED_STORAGE_KEY,
-        JSON.stringify(updatedAccounts),
-      );
-      return updatedAccounts;
-    });
-
-    return {
-      success: true,
-      message: "Registration successful. You can log in now.",
-    };
   };
 
+  // 🚪 LOGOUT
   const logout = () => {
     setUser(null);
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
   };
 
   const value = useMemo(
@@ -189,7 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       register,
       logout,
     }),
-    [user, registeredAccounts],
+    [user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

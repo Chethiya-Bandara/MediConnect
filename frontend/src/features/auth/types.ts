@@ -11,8 +11,8 @@ export interface AuthUser {
   name: string;
   email: string;
   role: UserRole;
-  nic: string;
-  dob: string;
+  nic?: string;
+  dob?: string;
 }
 
 export interface LoginFormValues {
@@ -32,6 +32,9 @@ export interface RegisterFormValues {
   specialization?: string | undefined;
   licenseNumber?: string | undefined;
   pharmacyId?: string | undefined;
+  organisationId?: string | undefined;
+  credentialFile?: FileList;
+  credentialUrl?: string | null;
 }
 
 export interface AuthActionResult {

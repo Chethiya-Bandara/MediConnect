@@ -196,6 +196,15 @@ export function RegisterPage() {
                   />
                 )}
 
+                {["HOSPITAL_ADMIN", "PHARMACY_ADMIN", "HEALTH_MINISTRY_ADMIN"].includes(selectedRole) && (
+                  <InputField
+                    id="organizationId"
+                    label="Organization ID"
+                    {...register("organisationId")}
+                    error={errors.organisationId?.message}
+                  />
+                )}
+
                 <InputField
                   id="password"
                   type="password"
@@ -220,7 +229,11 @@ export function RegisterPage() {
                     <h3>Professional Verification</h3>
                   </div>
                   <label className="upload-drop">
-                    <input type="file" accept=".pdf,.jpg,.jpeg,.png" />
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      {...register("credentialFile")}
+                    />
                     <span>{credentialLabel}</span>
                     <small>Max 5MB • PDF, JPG, PNG</small>
                   </label>

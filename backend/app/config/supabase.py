@@ -1,10 +1,12 @@
+from supabase import create_client
 import os
 from dotenv import load_dotenv
-from supabase import create_client
 
 load_dotenv()
 
 url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_KEY")
+anon_key = os.getenv("SUPABASE_KEY")
+service_key = os.getenv("SUPABASE_SERVICE_KEY")
 
-supabase = create_client(url, key)
+supabase = create_client(url, anon_key)  # for auth
+supabase_admin = create_client(url, service_key)  # for admin
