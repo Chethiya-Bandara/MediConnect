@@ -1,0 +1,120 @@
+export interface DoctorScheduleItem {
+  id: number;
+  status: string;
+  start_time: string | null;
+  end_time: string | null;
+  patient: {
+    id: number;
+    name: string;
+    dhid: string | null;
+    email: string | null;
+  };
+  organisation: {
+    id: number | null;
+    name: string;
+    type: string | null;
+    status: string | null;
+  };
+  consent: {
+    granted: boolean;
+    status: string;
+    last_updated: string | null;
+  };
+  encounter: {
+    id: number;
+    created_at: string | null;
+  } | null;
+}
+
+export interface DoctorHistoryItem {
+  id: number;
+  created_at: string | null;
+  notes: string | null;
+  doctor_name: string;
+  organisation_name: string | null;
+  appointment_status: string | null;
+}
+
+export interface DoctorArchiveItem {
+  id: string;
+  title: string;
+  type: "encounter" | "prescription";
+  created_at: string | null;
+  meta: string;
+}
+
+export interface DoctorPrescriptionItem {
+  id: number;
+  medicine_name: string | null;
+  dosage: string | null;
+  quantity: string | null;
+  instructions: string | null;
+}
+
+export interface DoctorActivePatient {
+  patient: {
+    id: number;
+    name: string;
+    dhid: string | null;
+    email: string | null;
+    created_at: string | null;
+  };
+  appointment: DoctorScheduleItem;
+  summary: {
+    medical_records: number;
+    active_prescriptions: number;
+    last_encounter_at: string | null;
+    doctor_has_previous_records: boolean;
+  };
+  latest_record: {
+    id: number;
+    created_at: string | null;
+    notes: string | null;
+  } | null;
+  latest_prescription: {
+    id: number;
+    status: string;
+    created_at: string | null;
+    items: DoctorPrescriptionItem[];
+  } | null;
+  allergies: string[];
+  history: DoctorHistoryItem[];
+  archives: DoctorArchiveItem[];
+}
+
+export interface DoctorDashboardData {
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+  };
+  doctor: {
+    id: number;
+    created_at: string | null;
+    specialization: string | null;
+    slmc_number: string | null;
+  };
+  stats: {
+    scheduled_today: number;
+    patients_seen_today: number;
+    pending_reports: number;
+    recorded_encounters: number;
+    active_affiliations: number;
+  };
+  active_patient: DoctorActivePatient | null;
+  schedule: DoctorScheduleItem[];
+  affiliations: Array<{
+    id: number;
+    status: string;
+    organisation: {
+      id: number | null;
+      name: string;
+      type: string | null;
+    };
+  }>;
+}
+
+export interface DoctorAssistantReply {
+  answer: string;
+  source: "gemini_edge" | "doctor_fallback";
+}
