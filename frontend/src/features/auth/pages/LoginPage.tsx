@@ -95,7 +95,7 @@ export function LoginPage() {
             <div className="password-wrap">
               <div className="password-row">
                 <span>Password</span>
-                <button type="button">Forgot Password?</button>
+                <Link to="/forgot-password">Forgot Password?</Link>
               </div>
               <div className="field-block">
                 <div className="field-control">
