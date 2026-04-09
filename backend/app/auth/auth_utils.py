@@ -5,7 +5,7 @@ from typing import Optional
 import jwt
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
-from config.security_config import (
+from app.config.security_config import (
     JWT_ACCESS_SECRET,
     JWT_REFRESH_SECRET,
     JWT_ALGORITHM,
