@@ -86,3 +86,16 @@ to track which refresh tokens have been used and detect replay attacks.
 
 #### Refresh Token
 - Delivered via `Set-Cookie` HTTP header with the following flags:
+
+| Cookie Flag | Purpose |
+|-------------|---------|
+| `HttpOnly` | JavaScript cannot read it — prevents XSS theft |
+| `Secure` | Only sent over HTTPS — prevents interception |
+| `SameSite=Strict` | Only sent on same-site requests — prevents CSRF |
+| `Path=/auth/refresh` | Only sent to the refresh endpoint — limits exposure |
+
+- Cleared on logout via `Set-Cookie` with `Max-Age=0`
+Set-Cookie: refresh_token=<token>; HttpOnly; Secure; SameSite=Strict; Path=/auth/refresh
+
+---
+
