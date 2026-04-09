@@ -43,10 +43,14 @@ export const registrationSchema = z
     licenseNumber: z.string().trim().optional(),
     pharmacyId: z.string().trim().optional(),
     password: z
-      .string()
-      .min(8, "Password must be at least 8 characters.")
-      .regex(/[A-Za-z]/, "Password must include letters.")
-      .regex(/\d/, "Password must include numbers."),
+    .string()
+    .min(10, "Password must be at least 10 characters.")
+    .max(128, "Password must not exceed 128 characters.")
+    .regex(/[A-Z]/, "Must include at least one uppercase letter.")
+    .regex(/[a-z]/, "Must include at least one lowercase letter.")
+    .regex(/\d/, "Must include at least one number.")
+    .regex(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/, "Must include a special character.")
+    .refine((val) => !/\s/.test(val), "Must not contain spaces"),
     confirmPassword: z.string().min(1, "Please confirm password."),
   })
   .superRefine((values, context) => {

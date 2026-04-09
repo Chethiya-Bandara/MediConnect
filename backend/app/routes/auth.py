@@ -1,86 +1,151 @@
+from typing import Optional
+
 from fastapi import APIRouter, Header, HTTPException
 from app.config.supabase import supabase, supabase_admin
-from app.schemas.auth_schema import RegisterRequest, LoginRequest
+from app.schemas.auth_schema import (
+    LoginRequest,
+    PasswordResetRequest,
+    RegisterRequest,
+)
 from app.utils.helpers import hash_nic, generate_dhid
 from supabase_auth.errors import AuthApiError
-from typing import Optional
+from app.utils.helpers import is_valid_password, get_password_errors
 
 router = APIRouter()
 
 @router.post("/register")
 def register(user: RegisterRequest):
+    if not is_valid_password(user.password):
+        errors = get_password_errors(user.password)
 
-    role = user.role.lower()
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Password validation failed",
+                "errors": errors
+            }
+        )
+    
+    role = user.role
     auth_res = supabase.auth.sign_up({
         "email": user.email,
         "password": user.password
     })
 
     if not auth_res.user:
-        raise HTTPException(400, "Auth failed")
+        raise HTTPException(status_code=400, detail="Registration failed")
 
     user_id = auth_res.user.id
 
     try:
+        user_metadata = {
+            "full_name": user.fullName,
+            "dob": user.dob,
+            "role": role,
+        }
+        if role == "patient" and user.parentNic:
+            user_metadata["guardian_nic_hash"] = hash_nic(user.parentNic)
+
+        supabase_admin.auth.admin.update_user_by_id(
+            user_id,
+            {"user_metadata": user_metadata},
+        )
+
         # users table
-        supabase.table("users").insert({
+        supabase_admin.table("users").insert({
             "id": user_id,
             "email": user.email,
-            "role": role
+            "role": role,
+            "name": user.fullName,
         }).execute()
 
         # ROLE LOGIC
         if role == "patient":
-            supabase.table("patients").insert({
+            supabase_admin.table("patients").insert({
                 "user_id": user_id,
                 "nic": hash_nic(user.nic),
                 "dhid": generate_dhid()
             }).execute()
 
         elif role == "doctor":
-            supabase.table("doctors").insert({
+            supabase_admin.table("doctors").insert({
                 "user_id": user_id,
                 "slmc_number": user.licenseNumber,
                 "specialization": user.specialization
             }).execute()
 
         elif role == "pharmacist":
-            supabase.table("pharmacists").insert({
+            supabase_admin.table("pharmacists").insert({
                 "user_id": user_id,
-                "pharmacy_id": user.pharmacyId
+                "organisation_id": int(user.pharmacyId),
+                "license_no": user.licenseNumber or f"PENDING-{user_id[:8].upper()}",
             }).execute()
 
         elif role in ["hospital_admin", "pharmacy_admin", "health_ministry_admin"]:
-            supabase.table("admin_profiles").insert({
+            organisation_id = (
+                int(user.organisationId)
+                if user.organisationId and user.organisationId.isdigit()
+                else None
+            )
+            supabase_admin.table("admin_profiles").insert({
                 "user_id": user_id,
-                "admin_role": role
+                "admin_role": role,
+                "organisation_id": organisation_id,
             }).execute()
 
         else:
-            raise HTTPException(400, "Invalid role")
+            raise HTTPException(status_code=400, detail="Invalid role")
 
-    except Exception as e:
+    except HTTPException:
         supabase_admin.auth.admin.delete_user(user_id)
-        raise HTTPException(500, str(e))
+        raise
+    except Exception:
+        supabase_admin.auth.admin.delete_user(user_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Registration could not be completed right now",
+        )
 
     return {"success": True, "message": "Registration successful"}
 
 
 @router.post("/login")
 def login(data: LoginRequest):
-
-    res = supabase.auth.sign_in_with_password({
-        "email": data.email,
-        "password": data.password
-    })
+    try:
+        res = supabase.auth.sign_in_with_password({
+            "email": data.email,
+            "password": data.password
+        })
+    except AuthApiError as exc:
+        raise HTTPException(status_code=401, detail="Invalid login credentials") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Login failed right now") from exc
 
     if not res.session:
-        raise HTTPException(401, "Invalid credentials")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     return {
         "success": True,
         "access_token": res.session.access_token,
         "user": res.user
+    }
+
+
+@router.post("/forgot-password")
+def forgot_password(payload: PasswordResetRequest):
+    try:
+        supabase.auth.reset_password_for_email(payload.email)
+    except AuthApiError:
+        pass
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Password reset could not be started right now",
+        )
+
+    return {
+        "success": True,
+        "message": "If an account exists for that email, a reset link has been sent.",
     }
 
 
@@ -100,7 +165,7 @@ def get_current_user(authorization: Optional[str] = Header(None)):
 
         user_id = user_res.user.id
 
-        db_user = supabase.table("users") \
+        db_user = supabase_admin.table("users") \
             .select("*") \
             .eq("id", user_id) \
             .single() \
@@ -108,5 +173,7 @@ def get_current_user(authorization: Optional[str] = Header(None)):
 
         return db_user.data
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Unable to load current user")

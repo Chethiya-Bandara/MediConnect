@@ -199,7 +199,7 @@ export function DashboardHomePage() {
       setPharmacyItems(pharmacyData);
       setDispensingSummary(dispensingData);
     } catch (error) {
-      setDashboardError(error instanceof Error ? error.message : "Failed to load dashboard");
+      setDashboardError(error instanceof Error ? error.message : "Failed to load dashboard. Try reloading dashboard.");
     } finally {
       setIsLoading(false);
     }
@@ -756,7 +756,7 @@ export function DashboardHomePage() {
               </div>
               <div className="grid gap-4">
                 {records.length === 0 ? (
-                  <div className="rounded-[1.7rem] border border-dashed border-slate-300 p-8 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">No medical records exist yet. The `encounters` table is empty for this patient.</div>
+                  <div className="rounded-[1.7rem] border border-dashed border-slate-300 p-8 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">No medical records exist yet.</div>
                 ) : (
                   records.map((record) => (
                     <article key={record.id} className="rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -813,7 +813,7 @@ export function DashboardHomePage() {
               </div>
 
               {bookingOptions.length === 0 ? (
-                <div className="rounded-[1.7rem] border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">No bookable doctor affiliations exist yet. Your DB currently has zero rows in `doctor_affiliations` / `organisations`, so the booking form has nothing available to target.</div>
+                <div className="rounded-[1.7rem] border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">No bookable doctor affiliations exist yet.</div>
               ) : null}
 
               <div className="grid gap-4">

@@ -527,7 +527,7 @@ export function DoctorDashboardPage() {
               <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                 <div>
                   <h2 className="text-3xl font-extrabold text-blue-900 dark:text-blue-400">Doctor Dashboard</h2>
-                  <p className="mt-1 text-sm text-slate-500">Live clinical summary from the actual database, no cosplay stats.</p>
+                  <p className="mt-1 text-sm text-slate-500">Live clinical summary.</p>
                 </div>
                 <div className="text-right">
                   <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Today&apos;s Date</p>
@@ -570,7 +570,7 @@ export function DoctorDashboardPage() {
                         ? activePatient.latest_record?.notes
                           ? "Latest patient record is loaded below. Double-check consent and update the encounter instead of winging it."
                           : "There is an active patient, but no previous encounter note is saved yet. Your next submit becomes the first real record."
-                        : "No active patient is loaded. Get affiliations and bookings into the database first, otherwise this page is just an expensive wallpaper."}
+                        : "No active patient is loaded. Get affiliations and bookings first."}
                     </p>
                   </div>
                 </div>
@@ -619,7 +619,7 @@ export function DoctorDashboardPage() {
                     </>
                   ) : (
                     <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
-                      No active patient yet. This form unlocks once a real appointment exists for the logged-in doctor.
+                      No active patient yet.
                     </div>
                   )}
                 </div>
@@ -742,7 +742,7 @@ export function DoctorDashboardPage() {
                     {submittingEncounter ? <LoaderCircle className="animate-spin" size={18} /> : <Lock size={18} />}
                     Finish & Submit
                   </button>
-                  <p className="mt-3 text-center text-[9px] italic text-slate-400">On submit, the real encounter is saved and the appointment is marked completed.</p>
+                  <p className="mt-3 text-center text-[9px] italic text-slate-400">On submit, the  encounter is saved and the appointment is marked completed.</p>
                 </div>
               </div>
             </section>
@@ -751,7 +751,7 @@ export function DoctorDashboardPage() {
           {page === "appointments" ? (
             <section className="mx-auto max-w-4xl animate-fadeIn">
               <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div><h2 className="text-3xl font-extrabold text-blue-900 dark:text-blue-400">Clinical Schedule</h2><p className="mt-1 text-sm text-slate-500">Real appointments for the logged-in doctor.</p></div>
+                <div><h2 className="text-3xl font-extrabold text-blue-900 dark:text-blue-400">Clinical Schedule</h2><p className="mt-1 text-sm text-slate-500">Appointments for the doctor.</p></div>
                 <div className="flex items-center gap-4"><button type="button" onClick={() => showToast("Availability management is not wired yet.")} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md">Manage Availability Slots</button><div className="flex items-center gap-2 rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"><CalendarDays className="text-slate-400" size={18} /><span className="text-sm font-bold dark:text-slate-200">{formatDate(new Date().toISOString())}</span></div></div>
               </div>
               <div className="relative rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -776,7 +776,7 @@ export function DoctorDashboardPage() {
                     </div>
                   )) : (
                     <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
-                      No appointments found for this doctor. That is real data, not a bug in the UI.
+                      No appointments yet.
                     </div>
                   )}
                 </div>
