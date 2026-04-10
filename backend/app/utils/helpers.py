@@ -2,12 +2,24 @@ import bcrypt
 import random
 import re
 
+# ─── Chethiya's functions ─────────────────────────────────────────────────────
+
 def hash_nic(nic: str):
     return bcrypt.hashpw(nic.encode(), bcrypt.gensalt()).decode()
 
 def generate_dhid():
     return f"DHID-{random.randint(1000,9999)}-{random.randint(1000,9999)}"
 
+
+# ─── Bihanga's functions ──────────────────────────────────────────────────────
+
+# Password complexity rules for MediConnect (healthcare system):
+#   - Minimum 10 characters, maximum 128
+#   - At least 1 uppercase letter (A-Z)
+#   - At least 1 lowercase letter (a-z)
+#   - At least 1 number (0-9)
+#   - At least 1 special character (!@#$%^&*...)
+#   - No spaces allowed
 PASSWORD_REGEX = re.compile(
     r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};\':"\\|,.<>\/?]).{10,128}$'
 )

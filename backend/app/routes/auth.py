@@ -7,17 +7,17 @@ from app.schemas.auth_schema import (
     PasswordResetRequest,
     RegisterRequest,
 )
-from app.utils.helpers import hash_nic, generate_dhid
+from app.utils.helpers import hash_nic, generate_dhid, is_valid_password, get_password_errors
 from supabase_auth.errors import AuthApiError
-from app.utils.helpers import is_valid_password, get_password_errors
 
 router = APIRouter()
 
 @router.post("/register")
 def register(user: RegisterRequest):
+
+    # ── Password Complexity Validation (Bihanga B-1.1.3) ──────────
     if not is_valid_password(user.password):
         errors = get_password_errors(user.password)
-
         raise HTTPException(
             status_code=400,
             detail={
@@ -25,7 +25,7 @@ def register(user: RegisterRequest):
                 "errors": errors
             }
         )
-    
+
     role = user.role
     auth_res = supabase.auth.sign_up({
         "email": user.email,
@@ -157,7 +157,6 @@ def get_current_user(authorization: Optional[str] = Header(None)):
 
     try:
         token = authorization.split(" ")[1]
-
         user_res = supabase.auth.get_user(token)
 
         if not user_res or not user_res.user:
