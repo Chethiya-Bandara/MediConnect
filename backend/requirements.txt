@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+
+pydantic[email]
+email-validator
+
+httpx
+python-dotenv
+
+python-jose
+passlib[bcrypt]
+
+supabase
