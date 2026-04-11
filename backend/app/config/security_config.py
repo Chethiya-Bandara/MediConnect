@@ -49,6 +49,3 @@ for _name, _value in _REQUIRED_SECRETS.items():
             f"\n→ Generate secrets with: "
             f"python -c \"import secrets; print(secrets.token_hex(64))\""
         )
-# TEST LINE - will be removed
-PASSWORD = "SuperSecret123!"
-API_KEY = "AKIAIOSFODNN7EXAMPLE"
