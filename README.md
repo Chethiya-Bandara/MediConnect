@@ -107,7 +107,7 @@ cd MediConnect
 cd backend
 
 # Install dependencies
-pip install fastapi uvicorn python-dotenv passlib[bcrypt] PyJWT supabase "pydantic[email]"
+pip install -r requirements.txt
 
 # Set up environment variables
 cp .env.example .env
