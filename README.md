@@ -1,7 +1,7 @@
 # MediConnect
 
 ## Overview
-MediConnect is a secure, web-based digital healthcare platform designed for Sri Lanka.  
+MediConnect is a secure, web-based digital healthcare platform designed for Sri Lanka.
 It connects Patients, Doctors, Hospitals, Pharmacies, and Health Ministry Administrators in one centralized system.
 
 ## Project Goal
@@ -15,7 +15,7 @@ Build an interoperable, role-driven healthcare platform that supports:
 - AI-assisted support (with clear medical disclaimers)
 
 ## Why This Project
-Sri Lanka’s healthcare system still faces fragmentation due to paper-based records and limited interoperability.  
+Sri Lanka's healthcare system still faces fragmentation due to paper-based records and limited interoperability.
 MediConnect aims to reduce delays, duplicate tests, and incomplete patient history risks by offering one unified workflow.
 
 ## User Roles
@@ -26,12 +26,12 @@ MediConnect aims to reduce delays, duplicate tests, and incomplete patient histo
 - Health Ministry Admin
 
 ## Core Modules (Planned in 6 Phases)
-1. Identity, Authentication, and Organization Setup  
-2. DHID and Doctor-Hospital Affiliation  
-3. Scheduling, Appointments, and Consent  
-4. Encounters, Medical Records, and ePrescriptions  
-5. Pharmacy, Inventory, Dispensing, and Billing  
-6. AI Assistants, Analytics, and Audit System  
+1. Identity, Authentication, and Organization Setup
+2. DHID and Doctor-Hospital Affiliation
+3. Scheduling, Appointments, and Consent
+4. Encounters, Medical Records, and ePrescriptions
+5. Pharmacy, Inventory, Dispensing, and Billing
+6. AI Assistants, Analytics, and Audit System
 
 ## Functional Highlights
 - Multi-role registration and authentication
@@ -85,3 +85,72 @@ Excluded (for now):
 - Final Presentation: 04 May 2026
 - Final Report: 11 May 2026
 - Professional Portfolio: 18 May 2026
+
+---
+
+## How to Run Locally
+
+### Prerequisites
+Make sure you have the following installed:
+- Python 3.12 or higher
+- Node.js 20 or higher
+- Git
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/Mohamed-Ruzaik/MediConnect.git
+cd MediConnect
+```
+
+### 2. Backend Setup
+```bash
+cd backend
+
+# Install dependencies
+pip install fastapi uvicorn python-dotenv passlib[bcrypt] PyJWT supabase "pydantic[email]"
+
+# Set up environment variables
+cp .env.example .env
+# Open .env and fill in your Supabase and JWT secret values
+
+# Run the backend server
+python -m uvicorn main:app --reload
+```
+Backend runs at: `http://127.0.0.1:8000`
+API docs available at: `http://127.0.0.1:8000/docs`
+
+### 3. Frontend Setup
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Run the frontend
+npm run dev
+```
+Frontend runs at: `http://localhost:5173`
+
+### 4. Pre-commit Security Hooks (for contributors)
+```bash
+# Run from the MediConnect root folder
+pip install pre-commit
+python -m pre_commit install
+```
+This automatically checks every commit for hardcoded secrets.
+
+---
+
+## Team
+| Name | Role |
+|------|------|
+| Chethiya Bandara | Backend Lead / DB Engineer / AI-ML |
+| Bihanga Rathnayaka | Project Lead / Security Engineer |
+| Mohamed Ruzaik | Frontend Developer / Full-Stack Engineer |
+| Ranuda Premadasa | Full-Stack Engineer / API Integration Lead |
+| Pasindu Nawagamuwage | Security Tester / QA Engineer |
+
+---
+
+## Academic Supervision
+This project was guided and supervised by Ann Roshanie Appuhamy as part of undergraduate coursework.
