@@ -5,10 +5,11 @@ from typing import Literal, Optional
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.supabase import supabase, supabase_admin
+from app.middleware.role_checker import RoleChecker
 
 router = APIRouter(prefix="/patient/dashboard", tags=["patient-dashboard"])
 
@@ -618,7 +619,7 @@ def _fallback_assistant_answer(message: str, snapshot: dict) -> str:
     )
 
 
-@router.get("/overview")
+@router.get("/overview", dependencies=[Depends(RoleChecker(["patient"]))])
 def get_overview(authorization: Optional[str] = Header(None)):
     context = _require_patient_context(authorization)
     patient = context["patient"]
