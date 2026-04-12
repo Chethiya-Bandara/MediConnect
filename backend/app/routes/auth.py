@@ -10,6 +10,7 @@ from app.schemas.auth_schema import (
 from app.utils.helpers import hash_nic, generate_dhid, is_valid_password, get_password_errors
 from supabase_auth.errors import AuthApiError
 
+
 router = APIRouter()
 
 @router.post("/register")
@@ -109,8 +110,8 @@ def register(user: RegisterRequest):
     return {"success": True, "message": "Registration successful"}
 
 
-@router.post("/login")
-def login(data: LoginRequest):
+@router.post("/register")
+def register(user: RegisterRequest):
     try:
         res = supabase.auth.sign_in_with_password({
             "email": data.email,
