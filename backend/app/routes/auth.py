@@ -110,8 +110,8 @@ def register(user: RegisterRequest):
     return {"success": True, "message": "Registration successful"}
 
 
-@router.post("/register")
-def register(user: RegisterRequest):
+@router.post("/login")
+def login(data: LoginRequest):
     try:
         res = supabase.auth.sign_in_with_password({
             "email": data.email,
