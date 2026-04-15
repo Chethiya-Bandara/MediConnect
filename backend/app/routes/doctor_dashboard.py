@@ -1095,3 +1095,30 @@ def delete_slot(slot_id: int, authorization: Optional[str] = Header(None)):
     supabase_admin.table("availability_slots").delete().eq("id", slot_id).execute()
 
     return {"success": True}
+
+@router.put("/invite/accept/{invitation_id}")
+def accept_invitation(invitation_id: str, doctor_id: str):
+
+    invitation = supabase_admin.table("doctor_invitations") \
+        .select("*") \
+        .eq("id", invitation_id) \
+        .single() \
+        .execute()
+
+    if not invitation.data:
+        raise HTTPException(404, "Invitation not found")
+
+    # create affiliation
+    supabase_admin.table("doctor_affiliations").insert({
+        "doctor_id": doctor_id,
+        "hospital_id": invitation.data["hospital_id"],
+        "status": "APPROVED",
+        "approved_at": datetime.utcnow().isoformat()
+    }).execute()
+
+    # mark invitation accepted
+    supabase_admin.table("doctor_invitations").update({
+        "status": "ACCEPTED"
+    }).eq("id", invitation_id).execute()
+
+    return {"message": "Joined hospital"}
