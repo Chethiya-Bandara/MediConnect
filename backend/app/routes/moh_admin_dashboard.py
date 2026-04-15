@@ -11,7 +11,7 @@ def approve_organization(data: OrganizationApprovalRequest):
 
     supabase_admin.table("organizations").update({
         "status": data.status
-    }).eq("id", data.organization_id).execute()
+    }).eq("id", data.id).execute()
 
     return {"message": f"Organization {data.status}"}
 
@@ -22,7 +22,7 @@ def approve_doctor(data: DoctorApprovalRequest):
     supabase_admin.table("doctor_verifications").update({
         "status": data.status,
         "reviewed_at": datetime.utcnow().isoformat()
-    }).eq("doctor_id", data.doctor_id).execute()
+    }).eq("doctor_id", data.id).execute()
 
     return {"message": f"Doctor {data.status}"}
 

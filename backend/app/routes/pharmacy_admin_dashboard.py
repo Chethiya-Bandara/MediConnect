@@ -11,7 +11,7 @@ def add_medicine(data: CreateMedicineRequest):
 
     supabase_admin.table("inventory").insert({
         "pharmacy_id": data.pharmacy_id,
-        "drug_name": data.drug_name,
+        "drug_name": data.medicine_name,
         "stock_quantity": data.stock_quantity,
         "unit_price": data.unit_price,
         "created_at": datetime.utcnow().isoformat()
@@ -27,7 +27,7 @@ def update_inventory(data: UpdateInventoryRequest):
         "stock_quantity": data.stock_quantity,
         "unit_price": data.unit_price,
         "updated_at": datetime.utcnow().isoformat()
-    }).eq("id", data.item_id).execute()
+    }).eq("id", data.id).execute()
 
     return {"message": "Inventory updated"}
 
