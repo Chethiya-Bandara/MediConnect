@@ -5,7 +5,8 @@ from typing import Literal, Optional
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from app.middleware.file_validator import validate_upload_file, sanitize_filename
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.supabase import supabase, supabase_admin
@@ -83,7 +84,7 @@ class AssistantHistoryMessage(BaseModel):
         if len(cleaned) > 4000:
             raise ValueError("Message text is too long")
         return cleaned
-    
+
 class AvailabilitySlotCreateRequest(BaseModel):
     start_time: str
     end_time: str
@@ -1123,3 +1124,52 @@ def accept_invitation(invitation_id: str, doctor_id: str):
     }).eq("id", invitation_id).execute()
 
     return {"message": "Joined hospital"}
+
+@router.post("/upload-license")
+async def upload_license(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Uploads a doctor's SLMC license document.
+    Accepts PDF and JPG files only, max 5MB.
+    Validates file type using magic bytes (not just extension).
+    """
+    context = _require_doctor_context(authorization)
+    user_id = context["user_id"]
+
+    # ── Validate file (Bihanga B-2.1.1) ──────────────────────────
+    contents = await validate_upload_file(file)
+
+    # ── Create safe filename ──────────────────────────────────────
+    safe_filename = sanitize_filename(file.filename, user_id)
+
+    # ── Upload to Supabase Storage ────────────────────────────────
+    try:
+        storage_path = f"licenses/{safe_filename}"
+
+        supabase_admin.storage.from_("doctor-documents").upload(
+            path=storage_path,
+            file=contents,
+            file_options={"content-type": file.content_type or "application/octet-stream"}
+        )
+
+        # Get public URL
+        file_url = supabase_admin.storage.from_("doctor-documents").get_public_url(storage_path)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail="File could not be uploaded. Please try again."
+        )
+
+    # ── Log the upload ────────────────────────────────────────────
+    _log_audit_action(user_id, "LICENSE_UPLOADED", "doctors", context["doctor"]["id"])
+
+    return {
+        "success":   True,
+        "filename":  safe_filename,
+        "file_url":  file_url,
+        "message":   "SLMC license uploaded successfully",
+        "file_size": f"{len(contents) / 1024:.1f}KB",
+    }
