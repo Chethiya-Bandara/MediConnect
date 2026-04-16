@@ -9,6 +9,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.supabase import supabase, supabase_admin
+from app.middleware.role_checker import RoleChecker
 
 router = APIRouter(prefix="/doctor/dashboard", tags=["doctor-dashboard"])
 

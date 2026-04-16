@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.config.supabase import supabase
 from datetime import datetime
+from app.middleware.role_checker import RoleChecker
+from app.schemas.pharmacist_schema import DispenseItem, DispenseRequest
 
 router = APIRouter(prefix="/pharmacist/dashboard", tags=["Pharmacist-dashboard"])
 
@@ -32,10 +34,19 @@ def get_prescription_details(prescription_id: str):
         "items": items.data
     }
 
-@router.post("/dispense/{prescription_id}")
-def dispense_prescription(prescription_id: str, pharmacist_id: str):
 
-    # 1. Check prescription exists
+@router.post("/dispense/{prescription_id}")
+def dispense_prescription(
+    prescription_id: str,
+    payload: DispenseRequest,
+    user = Depends(RoleChecker(["PHARMACIST"]))
+):
+
+    pharmacist_id = user["id"]
+    pharmacy_id = payload.pharmacy_id
+    items_to_dispense = payload.items
+
+    # 1. Get prescription
     pres = supabase.table("prescriptions") \
         .select("*") \
         .eq("id", prescription_id) \
@@ -44,24 +55,72 @@ def dispense_prescription(prescription_id: str, pharmacist_id: str):
 
     if not pres.data:
         raise HTTPException(404, "Prescription not found")
-
+    
     if pres.data["status"] == "DISPENSED":
-        raise HTTPException(400, "Already dispensed")
+        raise HTTPException(400, "Prescription already fully dispensed.")
 
-    # 2. Insert dispensation record
+    # 2. Loop through items
+    for item in items_to_dispense:
+
+        item_id = item.id
+        qty = item.quantity
+
+        db_item = supabase.table("prescription_items") \
+            .select("*") \
+            .eq("id", item_id) \
+            .single() \
+            .execute()
+
+        if not db_item.data:
+            raise HTTPException(404, f"Item {item_id} not found")
+
+        remaining = db_item.data["quantity"] - db_item.data.get("dispensed_quantity", 0)
+
+        if qty > remaining:
+            raise HTTPException(400, f"Cannot dispense more than remaining ({remaining})")
+
+        # 3. Reduce stock
+        reduce_stock(db_item.data["drug_name"], pharmacy_id, qty)
+
+        # 4. Update dispensed quantity
+        new_dispensed = db_item.data.get("dispensed_quantity", 0) + qty
+
+        supabase.table("prescription_items").update({
+            "dispensed_quantity": new_dispensed
+        }).eq("id", item_id).execute()
+
+    # 5. Determine overall status
+    all_items = supabase.table("prescription_items") \
+        .select("*") \
+        .eq("prescription_id", prescription_id) \
+        .execute()
+
+    fully_done = True
+
+    for item in all_items.data:
+        if item.get("dispensed_quantity", 0) < item["quantity"]:
+            fully_done = False
+            break
+
+    new_status = "DISPENSED" if fully_done else "PARTIALLY_DISPENSED"
+
+    # 6. Update prescription status
+    supabase.table("prescriptions").update({
+        "status": new_status
+    }).eq("id", prescription_id).execute()
+
+    # 7. Log dispensation
     supabase.table("dispensations").insert({
         "prescription_id": prescription_id,
         "pharmacist_id": pharmacist_id,
         "dispensed_at": datetime.utcnow().isoformat(),
-        "status": "DISPENSED"
+        "status": new_status
     }).execute()
 
-    # 3. Update prescription status
-    supabase.table("prescriptions").update({
-        "status": "DISPENSED"
-    }).eq("id", prescription_id).execute()
-
-    return {"message": "Prescription dispensed"}
+    return {
+        "message": "Dispensing successful",
+        "status": new_status
+    }
 
 def reduce_stock(drug_name, pharmacy_id, quantity):
     item = supabase.table("inventory") \
@@ -77,8 +136,3 @@ def reduce_stock(drug_name, pharmacy_id, quantity):
     supabase.table("inventory").update({
         "stock": item.data["stock"] - quantity
     }).eq("id", item.data["id"]).execute()
-
-#optional security feature to ensure only pharmacist can otain prescription data
-def require_pharmacist(user):
-    if user["role"] != "PHARMACIST":
-        raise HTTPException(403, "Access denied")
