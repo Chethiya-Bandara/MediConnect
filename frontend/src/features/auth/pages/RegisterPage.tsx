@@ -7,7 +7,7 @@ import { AlertMessage, Button, InputField } from "../../../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { PortalFooter, PortalTopNav } from "../components";
 import { roleOptions } from "../data/roles";
-import { registrationSchema } from "../schemas";
+import { registrationSchema } from "../schemas/registerSchema";
 import type { RegisterFormValues } from "../types";
 import { calculateAge } from "../utils";
 

@@ -1,4 +1,4 @@
-import type { UserRole } from "../types";
+import type { UserRole } from "../../../types/auth";
 
 interface RoleOption {
   value: UserRole;

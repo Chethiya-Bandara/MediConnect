@@ -4,8 +4,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
 import { AlertMessage, Button, InputField } from "../../../components/ui";
+import { getRoleLandingPath } from "../../../lib/auth/roleRedirect";
 import { PortalFooter, PortalTopNav } from "../components";
-import { loginSchema } from "../schemas";
+import { loginSchema } from "../schemas/loginSchema";
 import type { LoginFormValues } from "../types";
 import { useAuth } from "../context/AuthContext";
 
@@ -36,7 +37,7 @@ export function LoginPage() {
       return;
     }
 
-    navigate("/dashboard");
+    navigate(getRoleLandingPath());
   };
 
   return (

@@ -37,7 +37,7 @@ import {
   getDoctorDashboard,
   submitDoctorEncounter,
   updateDoctorProfile,
-} from "../api/doctorDashboard";
+} from "../api/doctorApi";
 import type {
   DoctorActivePatient,
   DoctorDashboardData,
