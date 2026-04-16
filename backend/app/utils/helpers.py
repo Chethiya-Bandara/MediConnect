@@ -136,3 +136,66 @@ def get_password_errors(password: str) -> list[str]:
         errors.append("Password must not contain spaces")
 
     return errors
+
+# ── NIC Masking (B-1.4.2) ────────────────────────────────────────────────────
+# Masks a NIC for safe display in the UI.
+# Never shows the full NIC — only the last 5 characters are visible.
+#
+# Sri Lankan NIC formats:
+#   Old format: 9 digits + V or X  e.g. 123456789V  → XXXXX6789V
+#   New format: 12 digits           e.g. 200012345678 → XXXXXXX45678
+#
+# Rule: show last 5 characters, mask everything else with X
+
+def mask_nic(nic: str) -> str:
+    """
+    Masks a NIC number for safe display in the UI.
+    Shows only the last 5 characters — masks the rest with X.
+
+    Args:
+        nic: Raw NIC string e.g. "123456789V" or "200012345678"
+
+    Returns:
+        Masked NIC e.g. "XXXXX6789V" or "XXXXXXX45678"
+        Returns "INVALID NIC" if input is invalid
+    """
+    if not nic or not isinstance(nic, str):
+        return "INVALID NIC"
+
+    # Normalize — uppercase, strip whitespace
+    normalized = nic.strip().upper()
+
+    # Validate NIC format
+    if not is_valid_nic(normalized):
+        return "INVALID NIC"
+
+    # Show last 5 characters, mask the rest
+    visible_chars = 5
+    masked_chars  = len(normalized) - visible_chars
+
+    return "X" * masked_chars + normalized[-visible_chars:]
+
+
+def is_valid_nic(nic: str) -> bool:
+    """
+    Validates a Sri Lankan NIC format.
+
+    Valid formats:
+        Old: 9 digits followed by V or X  e.g. 123456789V
+        New: exactly 12 digits             e.g. 200012345678
+
+    Args:
+        nic: NIC string to validate (should be uppercase)
+
+    Returns:
+        True if valid format, False otherwise
+    """
+    import re as _re
+
+    # Old format: 9 digits + V or X
+    old_format = _re.match(r'^\d{9}[VX]$', nic)
+
+    # New format: 12 digits
+    new_format = _re.match(r'^\d{12}$', nic)
+
+    return bool(old_format or new_format)
