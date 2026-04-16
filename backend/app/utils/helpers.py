@@ -19,7 +19,74 @@ def hash_nic(nic: str) -> str:
 
 
 def generate_dhid() -> str:
-    return f"DHID-{random.randint(1000,9999)}-{random.randint(1000,9999)}"
+    """
+    Generates a unique Digital Health ID with checksum validation.
+    Format: DHID-XXXX-YYYYC
+      XXXX = 4 random digits (first segment)
+      YYYY = 4 random digits (second segment)
+      C    = 1 checksum digit (sum of all 8 digits % 10)
+
+    Example: DHID-1234-56786
+      Sum = 1+2+3+4+5+6+7+8 = 36, checksum = 36 % 10 = 6
+    """
+    part1 = random.randint(1000, 9999)
+    part2 = random.randint(1000, 9999)
+
+    # Calculate checksum from all 8 digits
+    all_digits = str(part1) + str(part2)
+    checksum   = sum(int(d) for d in all_digits) % 10
+
+    return f"DHID-{part1}-{part2}{checksum}"
+
+
+def validate_dhid(dhid: str) -> bool:
+    """
+    Validates a DHID by checking its format and checksum.
+    Used to verify a DHID is genuine and not forged or guessed.
+
+    Format: DHID-XXXX-YYYYC
+      XXXX = 4 digits
+      YYYY = 4 digits
+      C    = checksum digit (sum of XXXX + YYYY digits % 10)
+
+    Args:
+        dhid: DHID string to validate e.g. "DHID-1234-56786"
+
+    Returns:
+        True if valid format and checksum, False otherwise
+    """
+    if not dhid or not isinstance(dhid, str):
+        return False
+
+    # Check format: DHID-XXXX-YYYYC
+    parts = dhid.strip().upper().split("-")
+
+    if len(parts) != 3:
+        return False
+
+    prefix, segment1, segment2_with_check = parts
+
+    # Check prefix
+    if prefix != "DHID":
+        return False
+
+    # Check segment 1: exactly 4 digits
+    if not segment1.isdigit() or len(segment1) != 4:
+        return False
+
+    # Check segment 2: exactly 5 characters (4 digits + 1 checksum)
+    if not segment2_with_check.isdigit() or len(segment2_with_check) != 5:
+        return False
+
+    # Extract the 4 data digits and checksum digit
+    segment2  = segment2_with_check[:4]
+    checksum  = int(segment2_with_check[4])
+
+    # Recalculate checksum
+    all_digits        = segment1 + segment2
+    expected_checksum = sum(int(d) for d in all_digits) % 10
+
+    return checksum == expected_checksum
 
 
 # ─── Bihanga's functions ──────────────────────────────────────────────────────
