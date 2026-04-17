@@ -4,13 +4,14 @@ from datetime import datetime
 from typing import Literal, Optional
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+import uuid
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile, Depends
 from app.middleware.file_validator import validate_upload_file, sanitize_filename
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.supabase import supabase, supabase_admin
-from app.middleware.role_checker import RoleChecker
+from app.middleware.role_checker import RoleChecker, get_current_user
 from app.middleware.consent_guard import check_consent, auto_revoke_consent
 
 router = APIRouter(prefix="/doctor/dashboard", tags=["doctor-dashboard"])
@@ -118,6 +119,9 @@ class AssistantRequest(BaseModel):
         if len(cleaned) > 4000:
             raise ValueError("Message is too long")
         return cleaned
+    
+class AffiliationRequest(BaseModel):
+    hospital_id: int
 
 
 def _bearer_token(authorization: Optional[str]) -> str:
@@ -1269,3 +1273,32 @@ def get_patient_history(
             for e in encounters
         ]
     }
+
+@router.post("/affiliation/request")
+def request_affiliation(data: AffiliationRequest, user=Depends(get_current_user)):
+    supabase_admin.table("doctor_affiliations").insert({
+        "doctor_id": user.id,
+        "hospital_id": data.hospital_id,
+        "status": "pending"
+    }).execute()
+    return {"message": "Request sent"}
+
+@router.put("/affiliation/revoke")
+def revoke_affiliation(user=Depends(get_current_user)):
+    supabase_admin.table("doctor_affiliations") \
+        .update({"status": "revoked"}) \
+        .eq("doctor_id", user.id) \
+        .execute()
+
+    return {"message": "Affiliation revoked"}
+
+@router.post("/upload-attachment")
+async def upload(file: UploadFile = File(...)):
+    file_id = str(uuid.uuid4())
+    path = f"attachments/{file_id}_{file.filename}"
+
+    supabase_admin.storage.from_("records").upload(path, await file.read())
+
+    url = supabase_admin.storage.from_("records").get_public_url(path)
+
+    return {"file_url": url}

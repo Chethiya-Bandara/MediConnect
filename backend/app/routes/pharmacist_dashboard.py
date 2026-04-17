@@ -4,6 +4,9 @@ from datetime import datetime
 from app.middleware.role_checker import RoleChecker
 from app.schemas.pharmacist_schema import DispenseItem, DispenseRequest
 
+from app.config.supabase import supabase, supabase_admin
+from app.utils.helpers import validate_dhid
+
 router = APIRouter(prefix="/pharmacist/dashboard", tags=["Pharmacist-dashboard"])
 
 @router.get("/prescriptions")
@@ -136,3 +139,13 @@ def reduce_stock(drug_name, pharmacy_id, quantity):
     supabase.table("inventory").update({
         "stock": item.data["stock"] - quantity
     }).eq("id", item.data["id"]).execute()
+
+@router.get("/dhid/{dhid}")
+def get_prescriptions(dhid: str):
+    if not validate_dhid(dhid):
+        raise HTTPException(400)
+
+    return supabase_admin.table("prescriptions") \
+        .select("*") \
+        .eq("patient_dhid", dhid) \
+        .execute()

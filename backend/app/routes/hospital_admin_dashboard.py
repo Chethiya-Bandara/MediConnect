@@ -1,20 +1,47 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime
 from app.config.supabase import supabase_admin
 from app.schemas.hospital_admin_schema import *
+from app.middleware.role_checker import RoleChecker
 
 router = APIRouter(prefix="/hospital-admin", tags=["hospital-admin-dashboard"])
 
 # Approve / reject affiliation
 @router.put("/affiliations/decision")
-def decide_affiliation(data: AffiliationDecisionRequest):
+def decide_affiliation(
+    data: AffiliationDecisionRequest,
+    user=Depends(RoleChecker(["HOSPITAL_ADMIN"]))
+):
+    # Validate status
+    if data.status not in ["approved", "rejected", "revoked"]:
+        raise HTTPException(status_code=400, detail="Invalid status value")
 
-    supabase_admin.table("doctor_affiliations").update({
+    # Check if affiliation exists
+    existing = supabase_admin.table("doctor_affiliations") \
+        .select("*") \
+        .eq("id", data.affiliation_id) \
+        .execute()
+
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Affiliation not found")
+
+    # Prepare update payload
+    update_data = {
         "status": data.status,
-        "approved_at": datetime.utcnow().isoformat()
-    }).eq("id", data.affiliation_id).execute()
+        "updated_at": datetime.utcnow().isoformat(),
+        "updated_by": user["id"]  # optional but very useful
+    }
 
-    return {"message": f"Affiliation {data.status}"}
+    # Update record
+    supabase_admin.table("doctor_affiliations") \
+        .update(update_data) \
+        .eq("id", data.affiliation_id) \
+        .execute()
+
+    return {
+        "affiliation_id": data.affiliation_id,
+        "status": data.status
+    }
 
 # Revoke doctor affiliation
 @router.put("/affiliations/revoke")

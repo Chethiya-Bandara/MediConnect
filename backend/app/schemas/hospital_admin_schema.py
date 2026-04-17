@@ -3,7 +3,7 @@ from pydantic import BaseModel
 # Affiliations
 class AffiliationDecisionRequest(BaseModel):
     affiliation_id: str
-    status: str  # APPROVED / REJECTED
+    status: str  # APPROVED / REJECTED / REVOKED
 
 # Revoke affiliations
 class RevokeAffiliationRequest(BaseModel):

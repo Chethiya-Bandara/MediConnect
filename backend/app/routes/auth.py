@@ -7,8 +7,9 @@ from app.schemas.auth_schema import (
     PasswordResetRequest,
     RegisterRequest,
 )
-from app.utils.helpers import hash_nic, generate_dhid, is_valid_password, get_password_errors
+from app.utils.helpers import hash_nic, generate_dhid, is_valid_password, get_password_errors, validate_dhid
 from supabase_auth.errors import AuthApiError
+from app.utils.helpers import validate_dhid, is_valid_nic
 
 
 router = APIRouter()
@@ -26,6 +27,14 @@ def register(user: RegisterRequest):
                 "errors": errors
             }
         )
+    
+    # NIC Validity check
+    if not is_valid_nic(user.nic):
+        raise HTTPException(400, "Invalid NIC")
+
+    # DHID Validity check
+    if not validate_dhid(user.dhid):
+        raise HTTPException(400, "Invalid DHID")
 
     role = user.role
     auth_res = supabase.auth.sign_up({
@@ -62,10 +71,16 @@ def register(user: RegisterRequest):
 
         # ROLE LOGIC
         if role == "patient":
+            #generate dhid
+            dhid = generate_dhid()
+            # validate dhid (just a precaution)
+            if not validate_dhid(dhid):
+                raise HTTPException(status_code=400, detail="Invalid DHID generated")
+            
             supabase_admin.table("patients").insert({
                 "user_id": user_id,
                 "nic": hash_nic(user.nic),
-                "dhid": generate_dhid()
+                "dhid": dhid
             }).execute()
 
         elif role == "doctor":

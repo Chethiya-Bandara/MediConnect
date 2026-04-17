@@ -10,18 +10,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.supabase import supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker
+from app.utils.helpers import validate_dhid
 
 router = APIRouter(prefix="/patient/dashboard", tags=["patient-dashboard"])
 
 
 class AppointmentCreateRequest(BaseModel):
     slot_id: int
-
-    @model_validator(mode="after")
-    def validate_window(self):
-        if self.end_time <= self.start_time:
-            raise ValueError("End time must be later than start time")
-        return self
 
 
 class AppointmentUpdateRequest(BaseModel):
@@ -866,22 +861,18 @@ def create_appointment(
 
     if not slot:
         raise HTTPException(status_code=400, detail="Slot not available")
+    
+    # Validate doctor affiliation is approved
+    affiliation = supabase_admin.table("doctor_affiliations") \
+        .select("*") \
+        .eq("doctor_id", slot["doctor_id"]) \
+        .eq("organisation_id", slot.get("organisation_id")) \
+        .execute().data or []
 
-    # Validate doctor affiliation
-    affiliation = (
-        supabase_admin.table("doctor_affiliations")
-        .select("*")
-        .eq("doctor_id", slot["doctor_id"])
-        .eq("organisation_id", slot.get("organisation_id"))
-        .execute()
-        .data
-        or []
-    )
+    if not any(a.get("status") == "approved" for a in affiliation):
+        raise HTTPException(400, "Doctor not approved for this organisation")
 
-    if not affiliation:
-        raise HTTPException(status_code=400, detail="Invalid doctor affiliation")
-
-    # Create appointment FROM slot
+    # Create appointment
     created = (
         supabase_admin.table("appointments")
         .insert({
@@ -893,24 +884,29 @@ def create_appointment(
             "status": "pending",
         })
         .execute()
-        .data
-        or []
     )
 
-    if not created:
+    if not created.data:
         raise HTTPException(status_code=500, detail="Failed to create appointment")
 
-    # 🔒 Lock the slot
+    appointment = created.data[0]
+
+    # Lock slot
     supabase_admin.table("availability_slots").update({
         "is_booked": True
     }).eq("id", payload.slot_id).execute()
 
-    _log_audit_action(context["user_id"], "APPOINTMENT_CREATED", "appointments", created[0]["id"])
+    _log_audit_action(
+        context["user_id"],
+        "APPOINTMENT_CREATED",
+        "appointments",
+        appointment["id"]
+    )
 
-    doctor_lookup = _doctor_map({created[0]["doctor_id"]})
-    organisation_lookup = _organisation_map({created[0]["organisation_id"]})
+    doctor_lookup = _doctor_map({appointment["doctor_id"]})
+    organisation_lookup = _organisation_map({appointment["organisation_id"]})
 
-    return _format_appointment(created[0], doctor_lookup, organisation_lookup)
+    return _format_appointment(appointment, doctor_lookup, organisation_lookup)
 
 
 @router.patch("/appointments/{appointment_id}")
@@ -1282,3 +1278,15 @@ def assistant_respond(
         "answer": _fallback_assistant_answer(payload.message, snapshot),
         "source": "patient_fallback",
     }
+
+@router.get("/lookup/{dhid}")
+def lookup(dhid: str):
+    if not validate_dhid(dhid):
+        raise HTTPException(status_code=400, detail="Invalid DHID")
+
+    patient = supabase_admin.table("patients") \
+        .select("*") \
+        .eq("dhid", dhid) \
+        .execute()
+
+    return patient.data
