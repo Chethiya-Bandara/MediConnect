@@ -12,7 +12,6 @@ import {
   ShieldCheck,
   Stethoscope,
   Sun,
-  UserPlus,
   Users,
   XCircle,
 } from "lucide-react";
@@ -324,14 +323,6 @@ export function HospitalAdminDashboardPage() {
           </nav>
 
           <div className="mt-auto space-y-2 px-2">
-            <button
-              type="button"
-              onClick={() => setView("staffing")}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-700 to-blue-900 px-4 py-3 text-sm font-bold text-white shadow-sm hover:opacity-90"
-            >
-              <UserPlus size={16} />
-              Invite Doctor
-            </button>
             <div className="flex justify-center border-t border-slate-200 pt-4 dark:border-slate-800">
               <button
                 type="button"

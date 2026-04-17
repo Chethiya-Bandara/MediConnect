@@ -1,12 +1,14 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   addInventoryItem,
   deleteInventoryItem,
+  getDashboardSummary,
   getInventory,
   updateInventoryItem,
 } from "../api/pharmacyAdminApi";
 import { lowStockThreshold } from "../constants";
 import type {
+  PharmacyAdminDashboardSummary,
   PharmacyInventoryItem,
   PharmacyInventoryMutationPayload,
   PharmacyInventoryStats,
@@ -45,22 +47,78 @@ function buildInventoryStats(items: PharmacyInventoryItem[]): PharmacyInventoryS
   };
 }
 
-export function usePharmacyAdminDashboard() {
-  const [pharmacyIdInput, setPharmacyIdInput] = useState("");
-  const [activePharmacyId, setActivePharmacyId] = useState<string | null>(null);
+function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
+  const csv = rows
+    .map((row) =>
+      row
+        .map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`)
+        .join(","),
+    )
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+export function usePharmacyAdminDashboard(organisationId?: number | null) {
+  const [pharmacyIdInput, setPharmacyIdInput] = useState(
+    organisationId ? String(organisationId) : "",
+  );
+  const [activePharmacyId, setActivePharmacyId] = useState<string | null>(
+    organisationId ? String(organisationId) : null,
+  );
   const [inventory, setInventory] = useState<PharmacyInventoryItem[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isLoadingInventory, setIsLoadingInventory] = useState(false);
+  const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
   const [isMutatingInventory, setIsMutatingInventory] = useState(false);
+  const [summary, setSummary] = useState<PharmacyAdminDashboardSummary | null>(null);
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
-  const loadInventory = async (pharmacyId = pharmacyIdInput.trim()) => {
+  useEffect(() => {
+    if (!organisationId) {
+      return;
+    }
+
+    const nextId = String(organisationId);
+    setPharmacyIdInput(nextId);
+    setActivePharmacyId(nextId);
+  }, [organisationId]);
+
+  const loadDashboardSummary = async (pharmacyId = activePharmacyId ?? pharmacyIdInput.trim()) => {
     if (!pharmacyId) {
-      setError("Enter a pharmacy ID before loading inventory.");
+      setSummary(null);
+      return false;
+    }
+
+    setIsLoadingDashboard(true);
+    try {
+      const response = await getDashboardSummary(pharmacyId);
+      setSummary(response);
+      return true;
+    } catch (loadError) {
+      setSummary(null);
+      setError(
+        loadError instanceof Error ? loadError.message : "Dashboard summary could not be loaded.",
+      );
+      return false;
+    } finally {
+      setIsLoadingDashboard(false);
+    }
+  };
+
+  const loadInventory = async (pharmacyId = activePharmacyId ?? pharmacyIdInput.trim()) => {
+    if (!pharmacyId) {
+      setError("Pharmacy organisation is not assigned to this admin yet.");
       setInventory([]);
       setSelectedItemId(null);
       setActivePharmacyId(null);
@@ -69,28 +127,34 @@ export function usePharmacyAdminDashboard() {
 
     setIsLoadingInventory(true);
     setError(null);
-    setActionMessage(null);
 
     try {
       const items = await getInventory(pharmacyId);
       setInventory(items);
       setActivePharmacyId(pharmacyId);
       setSelectedItemId(items[0]?.id ?? null);
+      await loadDashboardSummary(pharmacyId);
       return true;
     } catch (loadError) {
       setInventory([]);
       setSelectedItemId(null);
       setActivePharmacyId(pharmacyId);
       setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Inventory could not be loaded.",
+        loadError instanceof Error ? loadError.message : "Inventory could not be loaded.",
       );
       return false;
     } finally {
       setIsLoadingInventory(false);
     }
   };
+
+  useEffect(() => {
+    if (!organisationId) {
+      return;
+    }
+
+    void loadInventory(String(organisationId));
+  }, [organisationId]);
 
   const createMedicine = async (payload: PharmacyInventoryMutationPayload) => {
     setIsMutatingInventory(true);
@@ -101,9 +165,11 @@ export function usePharmacyAdminDashboard() {
       setActionMessage(response.message ?? "Medicine added.");
       await loadInventory(payload.pharmacyId);
       return true;
-    } catch (error) {
+    } catch (mutationError) {
       setActionMessage(
-        error instanceof Error ? error.message : "Medicine creation failed.",
+        mutationError instanceof Error
+          ? mutationError.message
+          : "Medicine creation failed.",
       );
       return false;
     } finally {
@@ -122,9 +188,11 @@ export function usePharmacyAdminDashboard() {
         await loadInventory(activePharmacyId);
       }
       return true;
-    } catch (error) {
+    } catch (mutationError) {
       setActionMessage(
-        error instanceof Error ? error.message : "Inventory update failed.",
+        mutationError instanceof Error
+          ? mutationError.message
+          : "Inventory update failed.",
       );
       return false;
     } finally {
@@ -143,9 +211,11 @@ export function usePharmacyAdminDashboard() {
         await loadInventory(activePharmacyId);
       }
       return true;
-    } catch (error) {
+    } catch (mutationError) {
       setActionMessage(
-        error instanceof Error ? error.message : "Inventory delete failed.",
+        mutationError instanceof Error
+          ? mutationError.message
+          : "Inventory delete failed.",
       );
       return false;
     } finally {
@@ -155,7 +225,6 @@ export function usePharmacyAdminDashboard() {
 
   const filteredInventory = useMemo(() => {
     const query = deferredSearchQuery.trim().toLowerCase();
-
     if (!query) {
       return inventory;
     }
@@ -165,12 +234,52 @@ export function usePharmacyAdminDashboard() {
         value.toLowerCase().includes(query),
       ),
     );
-  }, [inventory, deferredSearchQuery]);
+  }, [deferredSearchQuery, inventory]);
 
   const stats = useMemo(() => buildInventoryStats(inventory), [inventory]);
+  const selectedItem = inventory.find((item) => item.id === selectedItemId) ?? null;
 
-  const selectedItem =
-    inventory.find((item) => item.id === selectedItemId) ?? null;
+  const exportInventoryCsv = () => {
+    const rows = [
+      ["Item ID", "Medicine", "Pharmacy ID", "Stock", "Unit Price"],
+      ...filteredInventory.map((item) => [
+        item.id,
+        item.medicineName,
+        item.pharmacyId ?? "",
+        item.stockQuantity ?? "",
+        item.unitPrice ?? "",
+      ]),
+    ];
+    downloadCsv("pharmacy-inventory.csv", rows);
+  };
+
+  const exportRevenueCsv = () => {
+    if (!summary) {
+      setActionMessage("Load dashboard data first before exporting a revenue report.");
+      return;
+    }
+
+    const rows = [
+      ["Metric", "Value"],
+      ["Today Revenue", summary.reportSummary.todayRevenue ?? ""],
+      ["Current Month Revenue", summary.reportSummary.currentMonthRevenue ?? ""],
+      ["Total Tracked Revenue", summary.reportSummary.totalTrackedRevenue ?? ""],
+      ["Dispense Events", summary.reportSummary.dispenseEvents],
+      [],
+      ["Fast Moving Item", "Units Dispensed"],
+      ...summary.reportSummary.fastMovingItems.map((item) => [
+        item.medicineName,
+        item.unitsDispensed,
+      ]),
+    ];
+    downloadCsv("pharmacy-revenue-report.csv", rows);
+  };
+
+  const notifyMissingStaffAction = () => {
+    setActionMessage(
+      "Staff permission changes are not exposed by the current backend yet, so this action is intentionally blocked instead of faking success.",
+    );
+  };
 
   return {
     pharmacyIdInput,
@@ -180,17 +289,24 @@ export function usePharmacyAdminDashboard() {
     selectedItem,
     selectedItemId,
     stats,
+    summary,
     searchQuery,
     error,
     actionMessage,
     isLoadingInventory,
+    isLoadingDashboard,
     isMutatingInventory,
     setPharmacyIdInput,
     setSearchQuery,
     setSelectedItemId,
+    setActionMessage,
     loadInventory,
+    loadDashboardSummary,
     createMedicine,
     updateMedicine,
     removeMedicine,
+    exportInventoryCsv,
+    exportRevenueCsv,
+    notifyMissingStaffAction,
   };
 }

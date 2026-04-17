@@ -13,6 +13,53 @@ function buildHeaders(initHeaders?: HeadersInit) {
   return headers;
 }
 
+function getStringList(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+}
+
+function formatValidationIssue(issue: unknown) {
+  if (!issue || typeof issue !== "object") {
+    return null;
+  }
+
+  const record = issue as Record<string, unknown>;
+  const message =
+    typeof record.msg === "string"
+      ? record.msg.trim()
+      : typeof record.message === "string"
+        ? record.message.trim()
+        : "";
+
+  if (!message) {
+    return null;
+  }
+
+  const location = Array.isArray(record.loc)
+    ? record.loc
+        .filter(
+          (part): part is string | number =>
+            typeof part === "string" || typeof part === "number",
+        )
+        .join(" -> ")
+    : "";
+
+  return location ? `${location}: ${message}` : message;
+}
+
+function tryParseJson(text: string) {
+  try {
+    return JSON.parse(text) as ApiErrorPayload;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeErrorMessage(payload: ApiErrorPayload | null) {
   if (!payload) {
     return "Request failed";
@@ -24,13 +71,21 @@ function normalizeErrorMessage(payload: ApiErrorPayload | null) {
     return candidate;
   }
 
+  if (Array.isArray(candidate)) {
+    const formattedIssues = candidate
+      .map((issue) => formatValidationIssue(issue))
+      .filter((issue): issue is string => Boolean(issue));
+
+    if (formattedIssues.length > 0) {
+      return formattedIssues.join(", ");
+    }
+  }
+
   if (candidate && typeof candidate === "object") {
     const record = candidate as Record<string, unknown>;
     const nestedMessage =
       typeof record.message === "string" ? record.message.trim() : "";
-    const nestedErrors = Array.isArray(record.errors)
-      ? record.errors.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      : [];
+    const nestedErrors = getStringList(record.errors);
 
     if (nestedMessage && nestedErrors.length > 0) {
       return `${nestedMessage}: ${nestedErrors.join(", ")}`;
@@ -45,13 +100,20 @@ function normalizeErrorMessage(payload: ApiErrorPayload | null) {
     }
   }
 
-  if (Array.isArray(payload.errors)) {
-    const flatErrors = payload.errors.filter(
-      (item): item is string => typeof item === "string" && item.trim().length > 0,
-    );
-    if (flatErrors.length > 0) {
-      return flatErrors.join(", ");
-    }
+  const topLevelMessage =
+    typeof payload.message === "string" ? payload.message.trim() : "";
+  const topLevelErrors = getStringList(payload.errors);
+
+  if (topLevelMessage && topLevelErrors.length > 0) {
+    return `${topLevelMessage}: ${topLevelErrors.join(", ")}`;
+  }
+
+  if (topLevelMessage) {
+    return topLevelMessage;
+  }
+
+  if (topLevelErrors.length > 0) {
+    return topLevelErrors.join(", ");
   }
 
   return "Request failed";
@@ -75,13 +137,20 @@ export async function apiRequest<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${appConfig.apiBaseUrl}${path}`, {
-    ...init,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${appConfig.apiBaseUrl}${path}`, {
+      ...init,
+      headers,
+    });
+  } catch {
+    throw new Error(
+      `Cannot reach the backend at ${appConfig.apiBaseUrl}. Check that the API server is running and the port is correct.`,
+    );
+  }
 
   const text = await response.text();
-  const payload = text ? (JSON.parse(text) as ApiErrorPayload | T) : null;
+  const payload = text ? tryParseJson(text) : null;
 
   if (!response.ok) {
     const message = normalizeErrorMessage(payload as ApiErrorPayload | null);

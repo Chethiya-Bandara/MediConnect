@@ -1,7 +1,6 @@
 import {
-  ClipboardList,
-  ReceiptText,
-  Settings,
+  Badge,
+  BarChart3,
   Boxes,
 } from "lucide-react";
 import type { ComponentType } from "react";
@@ -14,10 +13,10 @@ export const pharmacyAdminSectionTabs: Array<{
   label: string;
   icon: ComponentType<{ size?: number; className?: string }>;
 }> = [
+  { id: "dashboard", label: "Dashboard", icon: BarChart3 },
   { id: "inventory", label: "Inventory", icon: Boxes },
-  { id: "prescriptions", label: "Prescriptions", icon: ClipboardList },
-  { id: "billing", label: "Billing", icon: ReceiptText },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "reports", label: "Revenue Reports", icon: BarChart3 },
+  { id: "staff", label: "Staff Management", icon: Badge },
 ];
 
 export const pharmacyAdminComplianceNotes = [
