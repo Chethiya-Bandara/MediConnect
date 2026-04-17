@@ -118,3 +118,11 @@ export interface DoctorAssistantReply {
   answer: string;
   source: "gemini_edge" | "doctor_fallback";
 }
+
+export interface DoctorAvailabilitySlot {
+  id: number;
+  doctor_id: number;
+  start_time: string;
+  end_time: string;
+  is_booked?: boolean;
+}

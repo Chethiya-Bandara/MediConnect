@@ -63,6 +63,15 @@ export interface BookingOption {
   status: string;
 }
 
+export interface AvailableSlot {
+  id: number;
+  doctor_id: number;
+  organisation_id: number | null;
+  start_time: string;
+  end_time: string;
+  is_booked: boolean;
+}
+
 export interface PrescriptionItem {
   id: number;
   medicine_name: string;

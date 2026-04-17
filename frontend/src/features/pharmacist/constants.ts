@@ -27,5 +27,5 @@ export const pharmacistPrivacyRules = [
 export const pharmacistOperationalNotes = [
   "DHID and QR-based verification are in-scope for the project vision.",
   "Partial dispensing is part of the proposal, but the current backend endpoint only supports full dispense.",
-  "If the pharmacist routes are not mounted in the backend yet, this dashboard will show honest error states instead of fake success.",
+  "If the pharmacist routes are not mounted in the backend yet, this dashboard will show honest error states instead of misleading success states.",
 ];

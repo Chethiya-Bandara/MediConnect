@@ -6,6 +6,7 @@ import type {
 } from "../../../types/auth";
 import { apiRequest } from "../../../lib/api/client";
 import { endpoints } from "../../../lib/api/endpoints";
+import { buildRegisterPayload } from "../utils/registerPayload";
 
 export async function loginRequest(payload: LoginFormValues) {
   return apiRequest<{ access_token: string }>(endpoints.auth.login, {
@@ -38,23 +39,7 @@ export async function getCurrentUser(token: string) {
 export async function registerRequest(
   payload: RegisterFormValues,
 ): Promise<AuthActionResult> {
-  const credentialFile = payload.credentialFile?.item(0);
-  const registerPayload = {
-    email: payload.email,
-    password: payload.password,
-    role: payload.role,
-    fullName: payload.fullName,
-    nic: payload.nic,
-    dob: payload.dob,
-    parentNic: payload.parentNic,
-    specialization: payload.specialization,
-    licenseNumber: payload.licenseNumber,
-    pharmacyId: payload.pharmacyId,
-    organisationId: payload.organisationId,
-    credentialFileName: credentialFile?.name,
-    credentialFileSize: credentialFile?.size,
-    credentialFileType: credentialFile?.type,
-  };
+  const registerPayload = buildRegisterPayload(payload);
 
   const response = await apiRequest<{ message?: string }>(endpoints.auth.register, {
     method: "POST",

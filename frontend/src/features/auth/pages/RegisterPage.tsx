@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -11,6 +11,87 @@ import { registrationSchema } from "../schemas/registerSchema";
 import type { RegisterFormValues } from "../types";
 import { calculateAge } from "../utils";
 
+const ROLE_FIELD_ORDER: Record<string, string[]> = {
+  PATIENT: ["role", "fullName", "email", "nic", "dob", "parentNic", "password", "confirmPassword"],
+  DOCTOR: [
+    "role",
+    "fullName",
+    "email",
+    "nic",
+    "dob",
+    "specialization",
+    "licenseNumber",
+    "password",
+    "confirmPassword",
+    "credentialFile",
+  ],
+  PHARMACIST: [
+    "role",
+    "fullName",
+    "email",
+    "nic",
+    "dob",
+    "pharmacyId",
+    "password",
+    "confirmPassword",
+    "credentialFile",
+  ],
+  HOSPITAL_ADMIN: [
+    "role",
+    "fullName",
+    "email",
+    "nic",
+    "dob",
+    "organisationId",
+    "password",
+    "confirmPassword",
+    "credentialFile",
+  ],
+  PHARMACY_ADMIN: [
+    "role",
+    "fullName",
+    "email",
+    "nic",
+    "dob",
+    "organisationId",
+    "password",
+    "confirmPassword",
+    "credentialFile",
+  ],
+  HEALTH_MINISTRY_ADMIN: [
+    "role",
+    "fullName",
+    "email",
+    "nic",
+    "dob",
+    "password",
+    "confirmPassword",
+    "credentialFile",
+  ],
+};
+
+const ROLE_HELPERS = {
+  PATIENT: {
+    nic: "Use the patient NIC. Underage patients must also provide a guardian NIC.",
+  },
+  DOCTOR: {
+    specialization: "Use the specialty label you want displayed in the portal.",
+    licenseNumber: "Enter the SLMC or professional registration number exactly as issued.",
+  },
+  PHARMACIST: {
+    pharmacyId: "Enter the pharmacy organisation ID assigned to your branch.",
+  },
+  HOSPITAL_ADMIN: {
+    organisationId: "Enter the hospital organisation ID already created in the system.",
+  },
+  PHARMACY_ADMIN: {
+    organisationId: "Enter the pharmacy organisation ID already registered in the system.",
+  },
+  HEALTH_MINISTRY_ADMIN: {
+    credential: "Ministry admin accounts are centrally governed, so no organisation ID is needed here.",
+  },
+} as const;
+
 export function RegisterPage() {
   const navigate = useNavigate();
   const { register: registerUser } = useAuth();
@@ -18,11 +99,15 @@ export function RegisterPage() {
     type: "error" | "success";
     text: string;
   } | null>(null);
+  const redirectTimeoutRef = useRef<number | null>(null);
 
   const {
     register,
     watch,
     handleSubmit,
+    clearErrors,
+    resetField,
+    setFocus,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registrationSchema),
@@ -43,14 +128,54 @@ export function RegisterPage() {
 
   const selectedRole = watch("role");
   const selectedDob = watch("dob");
+  const credentialFiles = watch("credentialFile");
   const age = calculateAge(selectedDob);
   const showParentNic =
     selectedRole === "PATIENT" && age !== null && age < 18;
   const showCredentialUpload = selectedRole !== "PATIENT";
+  const showOrganisationId =
+    selectedRole === "HOSPITAL_ADMIN" || selectedRole === "PHARMACY_ADMIN";
   const credentialLabel =
     selectedRole === "PHARMACIST" || selectedRole === "PHARMACY_ADMIN"
       ? "Upload Pharmacy Credential"
       : "Upload License / Credential";
+  const selectedRoleOption = useMemo(
+    () => roleOptions.find((role) => role.value === selectedRole),
+    [selectedRole],
+  );
+  const selectedCredentialName = credentialFiles?.item(0)?.name;
+
+  useEffect(() => {
+    setSubmitMessage(null);
+    clearErrors();
+
+    if (selectedRole !== "PATIENT") {
+      resetField("parentNic", { defaultValue: "" });
+    }
+
+    if (selectedRole !== "DOCTOR") {
+      resetField("specialization", { defaultValue: "" });
+      resetField("licenseNumber", { defaultValue: "" });
+    }
+
+    if (selectedRole !== "PHARMACIST") {
+      resetField("pharmacyId", { defaultValue: "" });
+    }
+
+    if (selectedRole !== "HOSPITAL_ADMIN" && selectedRole !== "PHARMACY_ADMIN") {
+      resetField("organisationId", { defaultValue: "" });
+    }
+
+    if (selectedRole === "PATIENT") {
+      resetField("credentialFile");
+    }
+  }, [clearErrors, resetField, selectedRole]);
+
+  useEffect(() => () => {
+    if (redirectTimeoutRef.current) {
+      window.clearTimeout(redirectTimeoutRef.current);
+    }
+  }, []);
 
   const onSubmit = async (values: RegisterFormValues) => {
     setSubmitMessage(null);
@@ -66,9 +191,28 @@ export function RegisterPage() {
 
     setSubmitMessage({
       type: "success",
-      text: result.message ?? "Account created successfully.",
+      text: result.message ?? "Account created successfully. Redirecting to login...",
     });
-    window.setTimeout(() => navigate("/login"), 1200);
+    redirectTimeoutRef.current = window.setTimeout(() => navigate("/login"), 1500);
+  };
+
+  const onInvalid = () => {
+    const fieldOrder = ROLE_FIELD_ORDER[selectedRole] ?? ROLE_FIELD_ORDER.PATIENT;
+    const firstInvalidField = fieldOrder.find((fieldName) => fieldName in errors);
+
+    if (!firstInvalidField) {
+      return;
+    }
+
+    if (firstInvalidField !== "credentialFile") {
+      setFocus(firstInvalidField as keyof RegisterFormValues);
+    }
+
+    window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>(`[name="${firstInvalidField}"]`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      target?.focus();
+    });
   };
 
   return (
@@ -105,7 +249,7 @@ export function RegisterPage() {
 
             <form
               className="auth-form"
-              onSubmit={handleSubmit(onSubmit)}
+              onSubmit={handleSubmit(onSubmit, onInvalid)}
               noValidate
             >
               {submitMessage && (
@@ -126,6 +270,9 @@ export function RegisterPage() {
                 </select>
                 {errors.role?.message && (
                   <span className="field-error">{errors.role.message}</span>
+                )}
+                {!errors.role?.message && selectedRoleOption?.description && (
+                  <span className="field-helper">{selectedRoleOption.description}</span>
                 )}
               </label>
 
@@ -149,6 +296,7 @@ export function RegisterPage() {
                   id="nic"
                   label="NIC"
                   {...register("nic")}
+                  helperText={ROLE_HELPERS.PATIENT.nic}
                   error={errors.nic?.message}
                 />
 
@@ -165,6 +313,7 @@ export function RegisterPage() {
                     id="parentNic"
                     label="Guardian NIC"
                     {...register("parentNic")}
+                    helperText="Required only when the patient is under 18 years old."
                     error={errors.parentNic?.message}
                   />
                 )}
@@ -175,6 +324,7 @@ export function RegisterPage() {
                       id="specialization"
                       label="Specialization"
                       {...register("specialization")}
+                      helperText={ROLE_HELPERS.DOCTOR.specialization}
                       error={errors.specialization?.message}
                     />
 
@@ -182,6 +332,7 @@ export function RegisterPage() {
                       id="licenseNumber"
                       label="License Number"
                       {...register("licenseNumber")}
+                      helperText={ROLE_HELPERS.DOCTOR.licenseNumber}
                       error={errors.licenseNumber?.message}
                     />
                   </>
@@ -192,15 +343,21 @@ export function RegisterPage() {
                     id="pharmacyId"
                     label="Pharmacy ID"
                     {...register("pharmacyId")}
+                    helperText={ROLE_HELPERS.PHARMACIST.pharmacyId}
                     error={errors.pharmacyId?.message}
                   />
                 )}
 
-                {["HOSPITAL_ADMIN", "PHARMACY_ADMIN", "HEALTH_MINISTRY_ADMIN"].includes(selectedRole) && (
+                {showOrganisationId && (
                   <InputField
                     id="organizationId"
                     label="Organization ID"
                     {...register("organisationId")}
+                    helperText={
+                      selectedRole === "HOSPITAL_ADMIN"
+                        ? ROLE_HELPERS.HOSPITAL_ADMIN.organisationId
+                        : ROLE_HELPERS.PHARMACY_ADMIN.organisationId
+                    }
                     error={errors.organisationId?.message}
                   />
                 )}
@@ -228,14 +385,24 @@ export function RegisterPage() {
                     <Upload size={18} />
                     <h3>Professional Verification</h3>
                   </div>
+                  {selectedRole === "HEALTH_MINISTRY_ADMIN" && (
+                    <p className="field-helper upload-helper">
+                      {ROLE_HELPERS.HEALTH_MINISTRY_ADMIN.credential}
+                    </p>
+                  )}
                   <label className="upload-drop">
                     <input
+                      key={selectedRole}
                       type="file"
                       accept=".pdf,.jpg,.jpeg,.png"
                       {...register("credentialFile")}
                     />
-                    <span>{credentialLabel}</span>
-                    <small>Max 5MB • PDF, JPG, PNG</small>
+                    <span>{selectedCredentialName ?? credentialLabel}</span>
+                    <small>
+                      {selectedCredentialName
+                        ? "Selected file is ready to be submitted with this request."
+                        : "Max 5MB • PDF, JPG, PNG"}
+                    </small>
                   </label>
                 </section>
               )}
@@ -249,8 +416,11 @@ export function RegisterPage() {
                   type="submit"
                   className="primary-button"
                   isLoading={isSubmitting}
+                  disabled={submitMessage?.type === "success"}
                 >
-                  Create Digital Health ID
+                  {submitMessage?.type === "success"
+                    ? "Redirecting..."
+                    : "Create Digital Health ID"}
                 </Button>
               </div>
 

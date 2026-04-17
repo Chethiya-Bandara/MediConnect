@@ -342,6 +342,16 @@ html.dark .field-input::placeholder {
   color: var(--danger);
 }
 
+.field-helper {
+  font-size: 0.72rem;
+  color: var(--text-soft);
+  line-height: 1.45;
+}
+
+.upload-helper {
+  margin: 0.45rem 0 0;
+}
+
 .field-select {
   appearance: none;
 }

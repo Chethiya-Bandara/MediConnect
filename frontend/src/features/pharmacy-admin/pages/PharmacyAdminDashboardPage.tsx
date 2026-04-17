@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   Bell,
   Box,
+  CheckCircle2,
   HeartPulse,
   LogOut,
   Moon,
@@ -55,12 +56,40 @@ function normalizeNumberInput(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function noticeClassName(message: string | null | undefined) {
+  if (!message) {
+    return "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
+  }
+
+  const lowered = message.toLowerCase();
+  if (
+    lowered.includes("fail")
+    || lowered.includes("error")
+    || lowered.includes("missing")
+    || lowered.includes("blocked")
+    || lowered.includes("not exposed")
+  ) {
+    return "border-red-200 bg-red-50 text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300";
+  }
+
+  return "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300";
+}
+
+function formatStatusLabel(value: string | null | undefined) {
+  if (!value) return "Unknown";
+  return value.replaceAll("_", " ");
+}
+
 export function PharmacyAdminDashboardPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [section, setSection] = useState<PharmacyAdminSection>("dashboard");
   const [isDark, setIsDark] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [inventoryStatusFilter, setInventoryStatusFilter] = useState("ALL");
+  const [staffStatusFilter, setStaffStatusFilter] = useState("ALL");
+  const [inventoryFeedback, setInventoryFeedback] = useState<string | null>(null);
+  const [reportFeedback, setReportFeedback] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     medicineName: "",
     stockQuantity: "0",
@@ -68,6 +97,7 @@ export function PharmacyAdminDashboardPage() {
   });
   const [drafts, setDrafts] = useState<Record<string, { stockQuantity: string; unitPrice: string }>>({});
   const dashboard = usePharmacyAdminDashboard(user?.organisationId ?? null);
+  const deferredStaffFilter = useDeferredValue(staffStatusFilter);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("theme");
@@ -110,6 +140,25 @@ export function PharmacyAdminDashboardPage() {
   const topMovingItems = activeSummary?.reportSummary.fastMovingItems ?? [];
   const recentAdjustments = activeSummary?.reportSummary.recentAdjustments ?? [];
   const staff = activeSummary?.staff ?? [];
+  const inventoryRows = useMemo(() => {
+    return dashboard.filteredInventory.filter((item) => {
+      if (inventoryStatusFilter === "ALL") return true;
+      const quantity = item.stockQuantity ?? 0;
+      if (inventoryStatusFilter === "LOW") return quantity > 0 && quantity <= 25;
+      if (inventoryStatusFilter === "OUT") return quantity <= 0;
+      if (inventoryStatusFilter === "HEALTHY") return quantity > 25;
+      return true;
+    });
+  }, [dashboard.filteredInventory, inventoryStatusFilter]);
+  const staffStatusOptions = useMemo(
+    () => Array.from(new Set(staff.map((member) => member.status || "UNKNOWN"))).sort(),
+    [staff],
+  );
+  const filteredStaff = useMemo(() => {
+    if (deferredStaffFilter === "ALL") return staff;
+    return staff.filter((member) => member.status === deferredStaffFilter);
+  }, [deferredStaffFilter, staff]);
+  const maxDispensedUnits = topMovingItems[0]?.unitsDispensed ?? 0;
 
   const updateDraftField = (itemId: string, field: "stockQuantity" | "unitPrice", value: string) => {
     setDrafts((current) => ({
@@ -128,11 +177,17 @@ export function PharmacyAdminDashboardPage() {
       unitPrice: String(item.unitPrice ?? 0),
     };
 
-    await dashboard.updateMedicine({
+    const success = await dashboard.updateMedicine({
       itemId: item.id,
       stockQuantity: normalizeNumberInput(draft.stockQuantity),
       unitPrice: normalizeNumberInput(draft.unitPrice),
     });
+
+    setInventoryFeedback(
+      success
+        ? `${item.medicineName} updated successfully.`
+        : dashboard.actionMessage ?? `Failed to update ${item.medicineName}.`,
+    );
   };
 
   const handleCreateMedicine = async () => {
@@ -151,11 +206,14 @@ export function PharmacyAdminDashboardPage() {
     if (success) {
       setCreateForm({ medicineName: "", stockQuantity: "0", unitPrice: "0" });
       setShowCreateForm(false);
+      setInventoryFeedback("New inventory item added successfully.");
+    } else {
+      setInventoryFeedback(dashboard.actionMessage ?? "Inventory item creation failed.");
     }
   };
 
   const actionBanner = dashboard.actionMessage ? (
-    <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+    <div className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.actionMessage)}`}>
       {dashboard.actionMessage}
     </div>
   ) : null;
@@ -294,6 +352,16 @@ export function PharmacyAdminDashboardPage() {
         <div className="mb-6 space-y-3">
           {errorBanner}
           {actionBanner}
+          {inventoryFeedback ? (
+            <div className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(inventoryFeedback)}`}>
+              {inventoryFeedback}
+            </div>
+          ) : null}
+          {reportFeedback ? (
+            <div className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(reportFeedback)}`}>
+              {reportFeedback}
+            </div>
+          ) : null}
         </div>
 
         {section === "dashboard" ? (
@@ -375,6 +443,49 @@ export function PharmacyAdminDashboardPage() {
                 </div>
               </div>
             </div>
+
+            <div className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-bold">Live Inventory Health</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      Straight from current inventory rows, with no guessed or fabricated metrics.
+                    </p>
+                  </div>
+                  <CheckCircle2 className="text-emerald-500 dark:text-emerald-400" size={22} />
+                </div>
+                <div className="mt-6 grid gap-4 md:grid-cols-3">
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Tracked items</p>
+                    <p className="mt-2 text-2xl font-extrabold">{dashboard.stats.totalItems}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Priced items</p>
+                    <p className="mt-2 text-2xl font-extrabold">{dashboard.stats.pricedItems}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Average price</p>
+                    <p className="mt-2 text-2xl font-extrabold">{formatLkr(dashboard.stats.averageUnitPrice)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <h3 className="text-lg font-bold">Operational Notes</h3>
+                <div className="mt-5 space-y-3 text-sm text-slate-600 dark:text-slate-300">
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                    Pharmacy ID in scope: <span className="font-bold">{activePharmacyId || "Not assigned"}</span>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                    Dashboard summary source: <span className="font-bold">{activeSummary ? "Live backend summary" : "Inventory-only fallback"}</span>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                    Staff action module: <span className="font-bold">Currently unavailable</span>, so permission updates remain disabled until backend support is available.
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -443,13 +554,45 @@ export function PharmacyAdminDashboardPage() {
                     type="text"
                   />
                 </div>
-                <div className="flex gap-2">
-                  <button type="button" onClick={dashboard.exportInventoryCsv} className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800">
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    value={inventoryStatusFilter}
+                    onChange={(event) => setInventoryStatusFilter(event.target.value)}
+                    className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    <option value="ALL">All stock states</option>
+                    <option value="HEALTHY">Healthy stock</option>
+                    <option value="LOW">Low stock</option>
+                    <option value="OUT">Out of stock</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      dashboard.exportInventoryCsv();
+                      setReportFeedback(`Exported ${inventoryRows.length} inventory row(s) to CSV.`);
+                    }}
+                    className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800"
+                  >
                     Export CSV
                   </button>
                   <button type="button" onClick={() => void dashboard.loadInventory()} className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800">
                     Refresh
                   </button>
+                </div>
+              </div>
+
+              <div className="mb-6 grid gap-4 md:grid-cols-3">
+                <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Visible rows</p>
+                  <p className="mt-2 text-2xl font-extrabold">{inventoryRows.length}</p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Low stock</p>
+                  <p className="mt-2 text-2xl font-extrabold text-red-600 dark:text-red-400">{dashboard.stats.lowStockItems}</p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Out of stock</p>
+                  <p className="mt-2 text-2xl font-extrabold">{dashboard.stats.outOfStockItems}</p>
                 </div>
               </div>
 
@@ -461,16 +604,21 @@ export function PharmacyAdminDashboardPage() {
                       <th className="px-6 py-4">Current Stock</th>
                       <th className="px-6 py-4">Unit Price (LKR)</th>
                       <th className="px-6 py-4">Updated</th>
+                      <th className="px-6 py-4">Row State</th>
                       <th className="px-6 py-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {dashboard.filteredInventory.map((item) => {
+                    {inventoryRows.length > 0 ? inventoryRows.map((item) => {
                       const draft = drafts[item.id] ?? {
                         stockQuantity: String(item.stockQuantity ?? 0),
                         unitPrice: String(item.unitPrice ?? 0),
                       };
                       const lowStock = (item.stockQuantity ?? 0) > 0 && (item.stockQuantity ?? 0) <= 25;
+                      const outOfStock = (item.stockQuantity ?? 0) <= 0;
+                      const dirty =
+                        draft.stockQuantity !== String(item.stockQuantity ?? 0)
+                        || draft.unitPrice !== String(item.unitPrice ?? 0);
                       const rowClass = lowStock
                         ? "bg-error-container/5 hover:bg-error-container/10"
                         : "hover:bg-slate-50 dark:hover:bg-slate-800/40";
@@ -478,11 +626,11 @@ export function PharmacyAdminDashboardPage() {
                       return (
                         <tr key={item.id} className={cn("transition-colors", rowClass)}>
                           <td className="px-6 py-4">
-                            <p className={cn("font-bold", lowStock ? "text-error" : "text-blue-900 dark:text-blue-300")}>
-                              {item.medicineName}
-                            </p>
-                            <p className="text-[10px] text-slate-400">{item.id}</p>
-                          </td>
+                              <p className={cn("font-bold", lowStock ? "text-error" : "text-blue-900 dark:text-blue-300")}>
+                                {item.medicineName}
+                              </p>
+                              <p className="text-[10px] text-slate-400">{item.id}</p>
+                            </td>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <input
@@ -512,11 +660,47 @@ export function PharmacyAdminDashboardPage() {
                           </td>
                           <td className="px-6 py-4 text-xs font-medium">{formatDateTime(item.updatedAt ?? item.createdAt)}</td>
                           <td className="px-6 py-4">
+                            <div className="space-y-2 text-xs">
+                              <span
+                                className={cn(
+                                  "inline-flex rounded-full px-3 py-1 font-bold uppercase tracking-[0.18em]",
+                                  outOfStock
+                                    ? "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                                    : lowStock
+                                      ? "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-300"
+                                      : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300",
+                                )}
+                              >
+                                {outOfStock ? "Out" : lowStock ? "Low" : "Healthy"}
+                              </span>
+                              {dirty ? (
+                                <p className="text-amber-700 dark:text-amber-300">Unsaved inline changes</p>
+                              ) : (
+                                <p className="text-slate-500 dark:text-slate-400">Synced with latest loaded row</p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
                             <div className="flex justify-end gap-3">
                               <button type="button" onClick={() => void handleSaveItem(item)} disabled={dashboard.isMutatingInventory} className="text-xs font-bold text-primary hover:underline dark:text-blue-400">
                                 Save Changes
                               </button>
-                              <button type="button" onClick={() => void dashboard.removeMedicine(item.id)} disabled={dashboard.isMutatingInventory} className="inline-flex items-center gap-1 text-xs font-bold text-error hover:underline">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const confirmed = window.confirm(`Delete ${item.medicineName} from inventory?`);
+                                  if (!confirmed) return;
+                                  void dashboard.removeMedicine(item.id).then((success) => {
+                                    setInventoryFeedback(
+                                      success
+                                        ? `${item.medicineName} removed from inventory.`
+                                        : dashboard.actionMessage ?? `Failed to remove ${item.medicineName}.`,
+                                    );
+                                  });
+                                }}
+                                disabled={dashboard.isMutatingInventory}
+                                className="inline-flex items-center gap-1 text-xs font-bold text-error hover:underline"
+                              >
                                 <Trash2 size={12} />
                                 Delete
                               </button>
@@ -524,7 +708,15 @@ export function PharmacyAdminDashboardPage() {
                           </td>
                         </tr>
                       );
-                    })}
+                    }) : (
+                      <tr>
+                        <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+                          {dashboard.isLoadingInventory
+                            ? "Refreshing inventory rows..."
+                            : "No inventory items matched the current search and stock filters."}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -534,15 +726,41 @@ export function PharmacyAdminDashboardPage() {
 
         {section === "staff" ? (
           <div className="space-y-8 transition-opacity duration-300">
-            <header>
-              <h1 className="text-3xl font-extrabold tracking-tight">Pharmacist Management</h1>
-              <p className="mt-2 text-slate-500 dark:text-slate-400">
-                Registered dispensers under this pharmacy organisation, loaded from the backend.
-              </p>
+            <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h1 className="text-3xl font-extrabold tracking-tight">Pharmacist Management</h1>
+                <p className="mt-2 text-slate-500 dark:text-slate-400">
+                  Registered dispensers under this pharmacy organisation, loaded from the backend.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <select
+                  value={staffStatusFilter}
+                  onChange={(event) => setStaffStatusFilter(event.target.value)}
+                  className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-bold dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <option value="ALL">All staff statuses</option>
+                  {staffStatusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {formatStatusLabel(status)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    dashboard.notifyMissingStaffAction();
+                    setInventoryFeedback("Staff permission updates are blocked until the backend exposes a staff-management endpoint.");
+                  }}
+                  className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-slate-700"
+                >
+                  Permission Controls
+                </button>
+              </div>
             </header>
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-              {staff.map((member) => (
+              {filteredStaff.length > 0 ? filteredStaff.map((member) => (
                 <div key={member.id} className="group relative overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="mb-6 flex items-center gap-4">
                     <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-200 font-bold text-slate-500 dark:bg-slate-800">
@@ -556,17 +774,36 @@ export function PharmacyAdminDashboardPage() {
                     </div>
                   </div>
                   <div className="mb-6 space-y-2">
-                    <p className="flex justify-between text-[11px]"><span>Status:</span><span className="font-bold text-green-600">{member.status}</span></p>
+                    <p className="flex justify-between text-[11px]"><span>Status:</span><span className="font-bold text-green-600">{formatStatusLabel(member.status)}</span></p>
+                    <p className="flex justify-between text-[11px]"><span>Email:</span><span>{member.email ?? "Not supplied"}</span></p>
                     <p className="flex justify-between text-[11px]"><span>Dispense events:</span><span>{member.dispenseEventsCount}</span></p>
                     <p className="flex justify-between text-[11px]"><span>Last activity:</span><span>{formatDateTime(member.lastDispensedAt)}</span></p>
                   </div>
-                  <button type="button" onClick={dashboard.notifyMissingStaffAction} className="w-full rounded-lg bg-slate-100 py-2 text-[10px] font-bold uppercase tracking-widest transition-colors hover:bg-error/10 hover:text-error dark:bg-slate-800">
-                    Revoke Access
+                  <button
+                    type="button"
+                    onClick={() => {
+                      dashboard.notifyMissingStaffAction();
+                      setInventoryFeedback(`Permission changes for ${member.name} are unavailable until the backend exposes that module.`);
+                    }}
+                    className="w-full rounded-lg bg-slate-100 py-2 text-[10px] font-bold uppercase tracking-widest transition-colors hover:bg-error/10 hover:text-error dark:bg-slate-800"
+                  >
+                    Access Control Unavailable
                   </button>
                 </div>
-              ))}
+              )) : (
+                <div className="md:col-span-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+                  No staff rows matched the current status filter.
+                </div>
+              )}
 
-              <button type="button" onClick={dashboard.notifyMissingStaffAction} className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 p-6 text-slate-400 transition-all hover:border-primary hover:text-primary dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  dashboard.notifyMissingStaffAction();
+                  setInventoryFeedback("New pharmacist registration will be available once backend staff-management support is released.");
+                }}
+                className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 p-6 text-slate-400 transition-all hover:border-primary hover:text-primary dark:border-slate-800"
+              >
                 <UserCog className="mb-2" size={36} />
                 <p className="text-xs font-bold uppercase tracking-widest">Register New Pharmacist</p>
               </button>
@@ -584,7 +821,14 @@ export function PharmacyAdminDashboardPage() {
                 </p>
               </div>
               <div className="flex gap-4">
-                <button type="button" onClick={dashboard.exportRevenueCsv} className="rounded-xl bg-slate-800 px-6 py-2 text-xs font-bold text-white dark:bg-slate-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    dashboard.exportRevenueCsv();
+                    setReportFeedback("Revenue CSV exported from the currently loaded backend summary.");
+                  }}
+                  className="rounded-xl bg-slate-800 px-6 py-2 text-xs font-bold text-white dark:bg-slate-700"
+                >
                   Download CSV Report
                 </button>
               </div>
@@ -616,8 +860,28 @@ export function PharmacyAdminDashboardPage() {
                     <p className="flex justify-between"><span>Fast Movers Listed</span><span className="font-bold">{topMovingItems.length}</span></p>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                  Revenue trend charts can plug in here later, but the numbers above are already live from backend tables instead of fake dashboard wallpaper.
+                <div className="rounded-2xl border border-slate-200 p-6 dark:border-slate-700">
+                  <h3 className="text-lg font-bold">Fast-Moving Items</h3>
+                  <div className="mt-5 space-y-4">
+                    {topMovingItems.length > 0 ? topMovingItems.map((item) => {
+                      const width = maxDispensedUnits > 0 ? `${Math.max(16, Math.round((item.unitsDispensed / maxDispensedUnits) * 100))}%` : "16%";
+                      return (
+                        <div key={item.medicineName}>
+                          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                            <span className="font-semibold">{item.medicineName}</span>
+                            <span className="text-slate-500 dark:text-slate-400">{item.unitsDispensed} units</span>
+                          </div>
+                          <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800">
+                            <div className="h-2.5 rounded-full bg-blue-600 dark:bg-blue-500" style={{ width }} />
+                          </div>
+                        </div>
+                      );
+                    }) : (
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        No fast-moving item data came back from the current backend summary.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -646,6 +910,10 @@ export function PharmacyAdminDashboardPage() {
                     </p>
                   )}
                 </div>
+              </div>
+
+              <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300">
+                Export actions use the live backend summary already loaded on this page. If charts look sparse, the source data itself is limited.
               </div>
             </div>
           </div>

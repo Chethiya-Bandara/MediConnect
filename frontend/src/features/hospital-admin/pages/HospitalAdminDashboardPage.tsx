@@ -5,9 +5,11 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  Filter,
   LayoutDashboard,
   LogOut,
   Moon,
+  RefreshCcw,
   Search,
   ShieldCheck,
   Stethoscope,
@@ -22,6 +24,7 @@ import type { AffiliationDecisionStatus, CreateAvailabilityPayload } from "../ty
 
 type DashboardView = "overview" | "staffing" | "scheduling" | "audit";
 type ThemeMode = "light" | "dark";
+type StaffFilter = "all" | "pending" | "approved" | "revoked";
 
 const navItems = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -108,6 +111,49 @@ function buildGeneratedSlots(slotDate: string, startTime: string, endTime: strin
   return slots;
 }
 
+function noticeTone(message: string | null | undefined) {
+  if (!message) return "neutral";
+  const lowered = message.toLowerCase();
+  if (
+    lowered.includes("fail") ||
+    lowered.includes("error") ||
+    lowered.includes("invalid") ||
+    lowered.includes("could not") ||
+    lowered.includes("not found") ||
+    lowered.includes("unavailable")
+  ) {
+    return "error";
+  }
+  return "success";
+}
+
+function noticeClassName(message: string | null | undefined) {
+  const tone = noticeTone(message);
+  if (tone === "error") {
+    return "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300";
+  }
+  if (tone === "success") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-300";
+  }
+  return "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
+}
+
+function formatStatusLabel(value: string | null | undefined) {
+  if (!value) return "Unknown";
+  return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getRelativeDayLabel(date: string) {
+  const today = new Date();
+  const target = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+  const delta = Math.round((target.getTime() - new Date(today.toDateString()).getTime()) / 86_400_000);
+  if (delta === 0) return "Today";
+  if (delta === 1) return "Tomorrow";
+  if (delta === -1) return "Yesterday";
+  return null;
+}
+
 export function HospitalAdminDashboardPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -124,8 +170,15 @@ export function HospitalAdminDashboardPage() {
   const [endTime, setEndTime] = useState("12:00");
   const [slotDurationMinutes, setSlotDurationMinutes] = useState(15);
   const [auditSearch, setAuditSearch] = useState("");
+  const [staffSearch, setStaffSearch] = useState("");
+  const [staffFilter, setStaffFilter] = useState<StaffFilter>("all");
+  const [auditActionFilter, setAuditActionFilter] = useState("ALL");
+  const [auditRoleFilter, setAuditRoleFilter] = useState("ALL");
+  const [slotSaveMessage, setSlotSaveMessage] = useState<string | null>(null);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   const deferredAuditSearch = useDeferredValue(auditSearch.trim().toLowerCase());
+  const deferredStaffSearch = useDeferredValue(staffSearch.trim().toLowerCase());
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("hospital-admin-theme");
@@ -164,18 +217,87 @@ export function HospitalAdminDashboardPage() {
   );
 
   const filteredAuditLogs = useMemo(() => {
-    if (!deferredAuditSearch) {
-      return dashboard.auditLogs;
-    }
+    return dashboard.auditLogs.filter((row) => {
+      const matchesSearch = !deferredAuditSearch
+        || [row.actorName, row.actorRole, row.action, row.details]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(deferredAuditSearch);
+      const matchesAction = auditActionFilter === "ALL" || (row.action ?? "UNKNOWN") === auditActionFilter;
+      const matchesRole = auditRoleFilter === "ALL" || (row.actorRole ?? "Unknown") === auditRoleFilter;
+      return matchesSearch && matchesAction && matchesRole;
+    });
+  }, [auditActionFilter, auditRoleFilter, dashboard.auditLogs, deferredAuditSearch]);
 
-    return dashboard.auditLogs.filter((row) =>
-      [row.actorName, row.actorRole, row.action, row.details]
+  const filteredPendingAffiliations = useMemo(() => {
+    return dashboard.pendingAffiliations.filter((row) => {
+      const matchesStatus = staffFilter === "all" || staffFilter === "pending";
+      const haystack = [
+        row.doctorName,
+        row.doctorEmail,
+        row.doctorId,
+        row.specialization,
+        row.slmcNumber,
+      ]
         .filter(Boolean)
         .join(" ")
-        .toLowerCase()
-        .includes(deferredAuditSearch),
-    );
-  }, [dashboard.auditLogs, deferredAuditSearch]);
+        .toLowerCase();
+      const matchesSearch = !deferredStaffSearch || haystack.includes(deferredStaffSearch);
+      return matchesStatus && matchesSearch;
+    });
+  }, [dashboard.pendingAffiliations, deferredStaffSearch, staffFilter]);
+
+  const filteredActiveStaff = useMemo(() => {
+    return dashboard.activeStaff.filter((row) => {
+      const matchesStatus = staffFilter === "all" || staffFilter === "approved";
+      const haystack = [
+        row.doctorName,
+        row.doctorEmail,
+        row.doctorId,
+        row.specialization,
+        row.slmcNumber,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const matchesSearch = !deferredStaffSearch || haystack.includes(deferredStaffSearch);
+      return matchesStatus && matchesSearch;
+    });
+  }, [dashboard.activeStaff, deferredStaffSearch, staffFilter]);
+
+  const auditActionOptions = useMemo(
+    () => Array.from(new Set(dashboard.auditLogs.map((row) => row.action ?? "UNKNOWN"))).sort(),
+    [dashboard.auditLogs],
+  );
+
+  const auditRoleOptions = useMemo(
+    () => Array.from(new Set(dashboard.auditLogs.map((row) => row.actorRole ?? "Unknown"))).sort(),
+    [dashboard.auditLogs],
+  );
+
+  const slotValidationMessage = useMemo(() => {
+    if (!selectedDoctorId) return "Pick a doctor before generating slots.";
+    if (!slotDate) return "Pick a schedule date first.";
+    if (slotDurationMinutes < 5) return "Slot duration should be at least 5 minutes.";
+    if (endTime <= startTime) return "End time has to be later than start time.";
+    if (generatedSlots.length === 0) return "This range produces zero bookable slots.";
+    return null;
+  }, [endTime, generatedSlots.length, selectedDoctorId, slotDate, slotDurationMinutes, startTime]);
+
+  const generatedSlotSummary = useMemo(() => {
+    if (generatedSlots.length === 0) {
+      return null;
+    }
+
+    return {
+      total: generatedSlots.length,
+      first: generatedSlots[0],
+      last: generatedSlots[generatedSlots.length - 1],
+      sessionMinutes: generatedSlots.length * slotDurationMinutes,
+      dayLabel: getRelativeDayLabel(slotDate),
+    };
+  }, [generatedSlots, slotDate, slotDurationMinutes]);
 
   const metrics = useMemo(
     () => [
@@ -221,14 +343,20 @@ export function HospitalAdminDashboardPage() {
   };
 
   const handleInviteDoctor = async () => {
-    if (!inviteEmail.trim() || !inviteHospitalId.trim()) {
+    const normalizedEmail = inviteEmail.trim().toLowerCase();
+    const normalizedHospitalId = inviteHospitalId.trim();
+    if (!normalizedEmail || !normalizedHospitalId) {
       return;
     }
 
-    await dashboard.sendInvite({
-      doctorEmail: inviteEmail.trim(),
-      hospitalId: inviteHospitalId.trim(),
+    const success = await dashboard.sendInvite({
+      doctorEmail: normalizedEmail,
+      hospitalId: normalizedHospitalId,
     });
+
+    if (success) {
+      setInviteEmail("");
+    }
   };
 
   const handleAffiliationDecision = async (
@@ -243,7 +371,7 @@ export function HospitalAdminDashboardPage() {
   };
 
   const handleCreateAvailability = async () => {
-    if (!selectedDoctorId || !slotDate) {
+    if (!selectedDoctorId || !slotDate || slotValidationMessage) {
       return;
     }
 
@@ -256,7 +384,15 @@ export function HospitalAdminDashboardPage() {
     };
 
     dashboard.setAvailabilityDoctorIdInput(selectedDoctorId);
-    await dashboard.addAvailability(payload);
+    const success = await dashboard.addAvailability(payload);
+    setSlotSaveMessage(
+      success
+        ? `Availability saved for ${formatShortDate(slotDate)} at ${new Date().toLocaleTimeString("en-LK", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}.`
+        : null,
+    );
   };
 
   const handleLoadAvailability = async (doctorId: string) => {
@@ -265,6 +401,11 @@ export function HospitalAdminDashboardPage() {
   };
 
   const exportAuditLogs = () => {
+    if (filteredAuditLogs.length === 0) {
+      setExportMessage("Nothing matched the current filters, so there is nothing useful to export.");
+      return;
+    }
+
     downloadCsv(
       "hospital-admin-audit-logs.csv",
       [
@@ -278,6 +419,7 @@ export function HospitalAdminDashboardPage() {
         ]),
       ],
     );
+    setExportMessage(`Exported ${filteredAuditLogs.length} audit row(s) to CSV.`);
   };
 
   return (
@@ -568,18 +710,84 @@ export function HospitalAdminDashboardPage() {
                   onClick={() => void dashboard.refreshDashboard()}
                   className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:opacity-90 dark:bg-slate-700"
                 >
-                  <Clock3 size={16} />
+                  <RefreshCcw size={16} />
                   Refresh
                 </button>
               </header>
 
+              <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:grid-cols-[1.4fr,0.8fr,0.8fr]">
+                <label className="space-y-2">
+                  <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                    <Search size={14} />
+                    Search doctors
+                  </span>
+                  <input
+                    type="text"
+                    value={staffSearch}
+                    onChange={(event) => setStaffSearch(event.target.value)}
+                    placeholder="Name, email, doctor ID, specialization, SLMC"
+                    className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                    <Filter size={14} />
+                    Affiliation state
+                  </span>
+                  <select
+                    value={staffFilter}
+                    onChange={(event) => setStaffFilter(event.target.value as StaffFilter)}
+                    className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="all">All live staff data</option>
+                    <option value="pending">Pending requests only</option>
+                    <option value="approved">Approved staff only</option>
+                    <option value="revoked">Revoked affiliations</option>
+                  </select>
+                </label>
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                  <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-800">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                      Pending visible
+                    </p>
+                    <p className="mt-2 text-2xl font-extrabold">
+                      {filteredPendingAffiliations.length}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-800">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                      Approved visible
+                    </p>
+                    <p className="mt-2 text-2xl font-extrabold">
+                      {filteredActiveStaff.length}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              {staffFilter === "revoked" ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300">
+                  Revoked affiliation history is not included in the current backend dashboard payload yet, so this view only shows the live records currently available.
+                </div>
+              ) : null}
+
               <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1.6fr,0.9fr]">
                 <div className="space-y-8">
                   <section className="rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="border-b border-slate-200 px-6 py-5 dark:border-slate-800">
-                      <h2 className="font-headline text-lg font-bold">
-                        Pending Affiliation Requests
-                      </h2>
+                    <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-5 dark:border-slate-800 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <h2 className="font-headline text-lg font-bold">
+                          Pending Affiliation Requests
+                        </h2>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          Review incoming hospital credentialing requests with live doctor metadata.
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-orange-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">
+                        {filteredPendingAffiliations.length} visible
+                      </span>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-sm">
@@ -587,25 +795,38 @@ export function HospitalAdminDashboardPage() {
                           <tr>
                             <th className="px-6 py-4">Practitioner</th>
                             <th className="px-6 py-4">Specialty</th>
+                            <th className="px-6 py-4">Status</th>
                             <th className="px-6 py-4">SLMC</th>
                             <th className="px-6 py-4">Requested</th>
                             <th className="px-6 py-4 text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {dashboard.pendingAffiliations.length > 0 ? (
-                            dashboard.pendingAffiliations.map((row) => (
+                          {filteredPendingAffiliations.length > 0 ? (
+                            filteredPendingAffiliations.map((row) => (
                               <tr key={row.affiliationId} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
                                 <td className="px-6 py-4">
-                                  <p className="font-bold text-sm">
-                                    {row.doctorName ?? `Doctor ${row.doctorId}`}
-                                  </p>
-                                  <p className="text-xs text-slate-500">
-                                    {row.doctorEmail ?? `Doctor ID ${row.doctorId}`}
-                                  </p>
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                      {buildInitials(row.doctorName)}
+                                    </div>
+                                    <div>
+                                      <p className="font-bold text-sm">
+                                        {row.doctorName ?? `Doctor ${row.doctorId}`}
+                                      </p>
+                                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                                        {row.doctorEmail ?? `Doctor ID ${row.doctorId}`}
+                                      </p>
+                                    </div>
+                                  </div>
                                 </td>
                                 <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">
                                   {row.specialization ?? "Not set"}
+                                </td>
+                                <td className="px-6 py-4">
+                                  <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                    {formatStatusLabel(row.status ?? "PENDING")}
+                                  </span>
                                 </td>
                                 <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">
                                   {row.slmcNumber ?? "Not set"}
@@ -635,8 +856,10 @@ export function HospitalAdminDashboardPage() {
                             ))
                           ) : (
                             <tr>
-                              <td colSpan={5} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
-                                No pending affiliation requests right now.
+                              <td colSpan={6} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                {deferredStaffSearch
+                                  ? "No pending affiliation requests matched your search."
+                                  : "No pending affiliation requests right now."}
                               </td>
                             </tr>
                           )}
@@ -646,12 +869,22 @@ export function HospitalAdminDashboardPage() {
                   </section>
 
                   <section>
-                    <h2 className="mb-4 font-headline text-xl font-bold">
-                      Active Medical Staff Directory
-                    </h2>
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <h2 className="font-headline text-xl font-bold">
+                          Active Medical Staff Directory
+                        </h2>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          Approved hospital staff with direct jump-off into schedule management.
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        {filteredActiveStaff.length} visible
+                      </span>
+                    </div>
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                      {dashboard.activeStaff.length > 0 ? (
-                        dashboard.activeStaff.map((doctor) => (
+                      {filteredActiveStaff.length > 0 ? (
+                        filteredActiveStaff.map((doctor) => (
                           <article
                             key={doctor.affiliationId}
                             className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
@@ -675,6 +908,10 @@ export function HospitalAdminDashboardPage() {
                               <p className="flex justify-between text-xs text-slate-500 dark:text-slate-400">
                                 <span>Doctor ID:</span>
                                 <span className="font-mono">{doctor.doctorId}</span>
+                              </p>
+                              <p className="flex justify-between text-xs text-slate-500 dark:text-slate-400">
+                                <span>Status:</span>
+                                <span>{formatStatusLabel(doctor.status ?? "APPROVED")}</span>
                               </p>
                               <p className="flex justify-between text-xs text-slate-500 dark:text-slate-400">
                                 <span>Joined:</span>
@@ -706,7 +943,9 @@ export function HospitalAdminDashboardPage() {
                         ))
                       ) : (
                         <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 md:col-span-2">
-                          No approved doctors are attached to this hospital yet.
+                          {deferredStaffSearch
+                            ? "No approved staff matched your current doctor search."
+                            : "No approved doctors are attached to this hospital yet."}
                         </div>
                       )}
                     </div>
@@ -715,6 +954,9 @@ export function HospitalAdminDashboardPage() {
 
                 <aside className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <h2 className="font-headline text-lg font-bold">Invite Doctor</h2>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Send an invite against the exact hospital organisation ID. If the backend rejects the org mapping, the error below will explain the failure clearly.
+                  </p>
                   <div className="space-y-4">
                     <input
                       value={inviteEmail}
@@ -738,6 +980,17 @@ export function HospitalAdminDashboardPage() {
                     </button>
                   </div>
 
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-300">
+                    <p className="font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                      Before you send
+                    </p>
+                    <ul className="mt-3 space-y-2">
+                      <li>Use the doctor&apos;s login email, not a personal alias.</li>
+                      <li>Hospital ID must match the backend organisation record exactly.</li>
+                      <li>Pending invites will stay pending until the doctor accepts from their side.</li>
+                    </ul>
+                  </div>
+
                   {dashboard.pendingInvitations.length > 0 ? (
                     <div className="space-y-3 border-t border-slate-200 pt-5 dark:border-slate-800">
                       <h3 className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
@@ -758,13 +1011,13 @@ export function HospitalAdminDashboardPage() {
                   ) : null}
 
                   {dashboard.doctorsMessage ? (
-                    <p className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    <p className={`rounded-xl border px-4 py-3 text-sm ${noticeClassName(dashboard.doctorsMessage)}`}>
                       {dashboard.doctorsMessage}
                     </p>
                   ) : null}
 
                   {dashboard.affiliationsMessage ? (
-                    <p className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    <p className={`rounded-xl border px-4 py-3 text-sm ${noticeClassName(dashboard.affiliationsMessage)}`}>
                       {dashboard.affiliationsMessage}
                     </p>
                   ) : null}
@@ -775,13 +1028,21 @@ export function HospitalAdminDashboardPage() {
 
           {view === "scheduling" ? (
             <section className="space-y-8">
-              <header>
-                <h1 className="font-headline text-3xl font-extrabold tracking-tight">
-                  Scheduling & Availability
-                </h1>
-                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                  Generate real availability slots and load live schedule data for affiliated doctors.
-                </p>
+              <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h1 className="font-headline text-3xl font-extrabold tracking-tight">
+                    Scheduling & Availability
+                  </h1>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    Generate real availability slots and load live schedule data for affiliated doctors.
+                  </p>
+                </div>
+                {generatedSlotSummary ? (
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
+                    {generatedSlotSummary.dayLabel ? `${generatedSlotSummary.dayLabel} • ` : ""}
+                    {generatedSlotSummary.total} slots from {generatedSlotSummary.first} to {generatedSlotSummary.last}
+                  </div>
+                ) : null}
               </header>
 
               <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
@@ -875,12 +1136,47 @@ export function HospitalAdminDashboardPage() {
                     <button
                       type="button"
                       onClick={() => void handleCreateAvailability()}
-                      disabled={dashboard.isSubmittingDoctorAction || !selectedDoctorId || generatedSlots.length === 0}
+                      disabled={dashboard.isSubmittingDoctorAction || Boolean(slotValidationMessage)}
                       className="rounded-lg bg-slate-900 p-2.5 text-white hover:bg-slate-700 disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
                     >
                       <Clock3 size={16} />
                     </button>
                   </div>
+
+                  {slotValidationMessage ? (
+                    <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300">
+                      {slotValidationMessage}
+                    </div>
+                  ) : null}
+
+                  {generatedSlotSummary ? (
+                    <div className="mb-6 grid gap-3 md:grid-cols-4">
+                      <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-800">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Total slots
+                        </p>
+                        <p className="mt-2 text-2xl font-extrabold">{generatedSlotSummary.total}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-800">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          First slot
+                        </p>
+                        <p className="mt-2 text-2xl font-extrabold">{generatedSlotSummary.first}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-800">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Last slot
+                        </p>
+                        <p className="mt-2 text-2xl font-extrabold">{generatedSlotSummary.last}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-800">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Session minutes
+                        </p>
+                        <p className="mt-2 text-2xl font-extrabold">{generatedSlotSummary.sessionMinutes}</p>
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div className="mb-8">
                     <h4 className="mb-3 text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
@@ -917,13 +1213,19 @@ export function HospitalAdminDashboardPage() {
                       <button
                         type="button"
                         onClick={() => void handleCreateAvailability()}
-                        disabled={dashboard.isSubmittingDoctorAction || !selectedDoctorId || generatedSlots.length === 0}
+                        disabled={dashboard.isSubmittingDoctorAction || Boolean(slotValidationMessage)}
                         className="rounded-xl bg-blue-700 px-8 py-3 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60"
                       >
                         Save Availability
                       </button>
                     </div>
                   </div>
+
+                  {slotSaveMessage ? (
+                    <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(slotSaveMessage)}`}>
+                      {slotSaveMessage}
+                    </div>
+                  ) : null}
 
                   {dashboard.availabilitySlots.length > 0 ? (
                     <div className="mt-6 rounded-2xl bg-slate-50 p-4 dark:bg-slate-800">
@@ -945,13 +1247,13 @@ export function HospitalAdminDashboardPage() {
                   ) : null}
 
                   {dashboard.error ? (
-                    <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
+                    <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
                       {dashboard.error}
                     </p>
                   ) : null}
 
                   {dashboard.doctorsMessage ? (
-                    <p className="mt-4 rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    <p className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(dashboard.doctorsMessage)}`}>
                       {dashboard.doctorsMessage}
                     </p>
                   ) : null}
@@ -962,7 +1264,7 @@ export function HospitalAdminDashboardPage() {
 
           {view === "audit" ? (
             <section className="space-y-8">
-              <header className="flex items-end justify-between">
+              <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                 <div>
                   <h1 className="flex items-center gap-3 font-headline text-3xl font-extrabold tracking-tight">
                     Local Audit Logs
@@ -977,14 +1279,15 @@ export function HospitalAdminDashboardPage() {
                 <button
                   type="button"
                   onClick={exportAuditLogs}
-                  className="text-sm font-bold text-blue-700 hover:underline dark:text-blue-400"
+                  disabled={filteredAuditLogs.length === 0}
+                  className="text-sm font-bold text-blue-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400"
                 >
                   Export Local CSV
                 </button>
               </header>
 
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-[1fr,auto]">
+                <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr,0.8fr,0.8fr,auto,auto]">
                   <input
                     type="text"
                     value={auditSearch}
@@ -992,6 +1295,30 @@ export function HospitalAdminDashboardPage() {
                     placeholder="Search actor, action, or detail"
                     className="rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
                   />
+                  <select
+                    value={auditRoleFilter}
+                    onChange={(event) => setAuditRoleFilter(event.target.value)}
+                    className="rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="ALL">All roles</option>
+                    {auditRoleOptions.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={auditActionFilter}
+                    onChange={(event) => setAuditActionFilter(event.target.value)}
+                    className="rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="ALL">All actions</option>
+                    {auditActionOptions.map((action) => (
+                      <option key={action} value={action}>
+                        {formatStatusLabel(action)}
+                      </option>
+                    ))}
+                  </select>
                   <button
                     type="button"
                     onClick={() => void dashboard.refreshDashboard()}
@@ -999,6 +1326,33 @@ export function HospitalAdminDashboardPage() {
                   >
                     Search Local Logs
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuditSearch("");
+                      setAuditRoleFilter("ALL");
+                      setAuditActionFilter("ALL");
+                    }}
+                    className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+
+                <div className="mb-6 flex flex-wrap gap-3">
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    {filteredAuditLogs.length} visible row(s)
+                  </span>
+                  {auditRoleFilter !== "ALL" ? (
+                    <span className="rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                      Role: {auditRoleFilter}
+                    </span>
+                  ) : null}
+                  {auditActionFilter !== "ALL" ? (
+                    <span className="rounded-full bg-cyan-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+                      Action: {formatStatusLabel(auditActionFilter)}
+                    </span>
+                  ) : null}
                 </div>
 
                 <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-800">
@@ -1038,13 +1392,21 @@ export function HospitalAdminDashboardPage() {
                       ) : (
                         <tr>
                           <td colSpan={4} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
-                            No local audit rows matched your current search.
+                            {dashboard.isLoadingDashboard
+                              ? "Refreshing audit logs..."
+                              : "No local audit rows matched the current search and filters."}
                           </td>
                         </tr>
                       )}
                     </tbody>
                   </table>
                 </div>
+
+                {exportMessage ? (
+                  <div className={`mt-6 rounded-xl border px-4 py-3 text-sm ${noticeClassName(exportMessage)}`}>
+                    {exportMessage}
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}

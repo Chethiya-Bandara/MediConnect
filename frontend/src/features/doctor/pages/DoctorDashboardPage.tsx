@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import {
   AlertTriangle,
   Bell,
   CalendarDays,
-  CheckCircle2,
   ChevronRight,
   ClipboardPlus,
   FileArchive,
@@ -16,6 +15,7 @@ import {
   LogOut,
   MessageCircle,
   MoonStar,
+  PencilLine,
   Pill,
   Plus,
   Search,
@@ -31,15 +31,24 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { AlertBanner } from "../../../components/feedback/AlertBanner";
+import { EmptyState } from "../../../components/feedback/EmptyState";
+import { ErrorState } from "../../../components/feedback/ErrorState";
+import { LoadingState } from "../../../components/feedback/LoadingState";
+import { ToastMessage } from "../../../components/feedback/ToastMessage";
 import { useAuth } from "../../auth/context/AuthContext";
 import {
   askDoctorAssistant,
+  createDoctorAvailability,
+  deleteDoctorAvailability,
+  getDoctorAvailability,
   getDoctorDashboard,
   submitDoctorEncounter,
   updateDoctorProfile,
 } from "../api/doctorApi";
 import type {
   DoctorActivePatient,
+  DoctorAvailabilitySlot,
   DoctorDashboardData,
   DoctorScheduleItem,
 } from "../types";
@@ -119,6 +128,44 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
+function formatStatusLabel(value: string | null | undefined) {
+  return (value || "unknown")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatTimeWindow(start: string | null | undefined, end: string | null | undefined) {
+  if (!start || !end) return "Time unavailable";
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return "Time unavailable";
+  }
+
+  return `${startDate.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  })} - ${endDate.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
+}
+
+function affiliationTone(status: string) {
+  const normalized = status.toLowerCase();
+  if (normalized.includes("approved") || normalized.includes("active")) {
+    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
+  }
+  if (normalized.includes("pending")) {
+    return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
+  }
+  if (normalized.includes("reject") || normalized.includes("revok") || normalized.includes("inactive")) {
+    return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
+  }
+  return "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200";
+}
+
 function getTimelineTone(item: DoctorScheduleItem) {
   const status = item.status.toLowerCase();
   if (status === "completed") {
@@ -164,10 +211,15 @@ export function DoctorDashboardPage() {
   const [page, setPage] = useState<DoctorPage>("encounter");
   const [theme, setTheme] = useState<Theme>("light");
   const [modal, setModal] = useState<DoctorModal>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    tone: "success" | "error" | "info";
+  } | null>(null);
   const [dashboard, setDashboard] = useState<DoctorDashboardData | null>(null);
+  const [availabilitySlots, setAvailabilitySlots] = useState<DoctorAvailabilitySlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [diagnosisInput, setDiagnosisInput] = useState("");
   const [encounterType, setEncounterType] = useState("Routine Follow-up");
   const [clinicalNotes, setClinicalNotes] = useState("");
@@ -175,15 +227,21 @@ export function DoctorDashboardPage() {
   const [medDose, setMedDose] = useState("");
   const [medDuration, setMedDuration] = useState("");
   const [prescriptionDraft, setPrescriptionDraft] = useState<DraftPrescriptionItem[]>([]);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [submittingEncounter, setSubmittingEncounter] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [savingAvailability, setSavingAvailability] = useState(false);
+  const [deletingAvailabilityId, setDeletingAvailabilityId] = useState<number | null>(null);
   const [profileName, setProfileName] = useState("");
   const [profileSpecialization, setProfileSpecialization] = useState("");
   const [profileSlmcNumber, setProfileSlmcNumber] = useState("");
+  const [availabilityStart, setAvailabilityStart] = useState("");
+  const [availabilityEnd, setAvailabilityEnd] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const activePatient = dashboard?.active_patient ?? null;
   const doctorName =
@@ -207,8 +265,11 @@ export function DoctorDashboardPage() {
     return schedule.slice(0, 6);
   }, [dashboard]);
 
-  const showToast = (message: string) => {
-    setToast(message);
+  const showToast = (
+    message: string,
+    tone: "success" | "error" | "info" = "success",
+  ) => {
+    setToast({ message, tone });
     window.setTimeout(() => setToast(null), 3200);
   };
 
@@ -216,8 +277,13 @@ export function DoctorDashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const payload = await getDoctorDashboard();
+      const [payload, slots] = await Promise.all([
+        getDoctorDashboard(),
+        getDoctorAvailability(),
+      ]);
       setDashboard(payload);
+      setAvailabilitySlots(slots);
+      setAvailabilityError(null);
       setProfileName(payload.user.name ?? "");
       setProfileSpecialization(payload.doctor.specialization ?? "");
       setProfileSlmcNumber(payload.doctor.slmc_number ?? "");
@@ -275,6 +341,17 @@ export function DoctorDashboardPage() {
     );
   }, [chatMessages, dashboard?.user.id]);
 
+  useEffect(() => {
+    if (!chatOpen) {
+      return;
+    }
+
+    chatScrollRef.current?.scrollTo({
+      top: chatScrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [chatLoading, chatMessages, chatOpen]);
+
   const logoutNow = () => {
     logout();
     navigate("/login");
@@ -282,26 +359,54 @@ export function DoctorDashboardPage() {
 
   const addMedicine = () => {
     const medicine_name = medName.trim();
-    if (!medicine_name) return;
+    if (!medicine_name) {
+      showToast("Medicine name is required before adding a prescription item.", "error");
+      return;
+    }
 
-    setPrescriptionDraft((current) => [
-      ...current,
-      makeDraftMedicine(medicine_name, medDose.trim(), medDuration.trim()),
-    ]);
+    if (editingDraftId) {
+      setPrescriptionDraft((current) =>
+        current.map((item) =>
+          item.id === editingDraftId
+            ? {
+                ...item,
+                medicine_name,
+                dosage: medDose.trim(),
+                duration: medDuration.trim(),
+              }
+            : item,
+        ),
+      );
+      setEditingDraftId(null);
+      showToast("Prescription item updated.");
+    } else {
+      setPrescriptionDraft((current) => [
+        ...current,
+        makeDraftMedicine(medicine_name, medDose.trim(), medDuration.trim()),
+      ]);
+      showToast("Medicine added to the encounter draft.");
+    }
+
     setMedName("");
     setMedDose("");
     setMedDuration("");
-    showToast("Medicine added to the encounter draft.");
+  };
+
+  const editMedicine = (item: DraftPrescriptionItem) => {
+    setEditingDraftId(item.id);
+    setMedName(item.medicine_name);
+    setMedDose(item.dosage);
+    setMedDuration(item.duration);
   };
 
   const submitEncounter = async () => {
     if (!activePatient) {
-      showToast("No active patient is selected yet.");
+      showToast("No active patient is selected yet.", "error");
       return;
     }
 
     if (!diagnosisInput.trim() || !clinicalNotes.trim()) {
-      showToast("Diagnosis and clinical notes are required.");
+      showToast("Diagnosis and clinical notes are required.", "error");
       return;
     }
 
@@ -323,10 +428,17 @@ export function DoctorDashboardPage() {
       setDiagnosisInput("");
       setClinicalNotes("");
       setPrescriptionDraft([]);
+      setEditingDraftId(null);
+      setMedName("");
+      setMedDose("");
+      setMedDuration("");
       showToast("Encounter and prescription saved.");
       await loadDashboard();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Encounter could not be saved");
+      showToast(
+        err instanceof Error ? err.message : "Encounter could not be saved",
+        "error",
+      );
     } finally {
       setSubmittingEncounter(false);
     }
@@ -343,9 +455,60 @@ export function DoctorDashboardPage() {
       showToast("Doctor profile updated.");
       await loadDashboard();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Profile update failed");
+      showToast(
+        err instanceof Error ? err.message : "Profile update failed",
+        "error",
+      );
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const saveAvailability = async () => {
+    const start = new Date(availabilityStart);
+    const end = new Date(availabilityEnd);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      showToast("Select both start and end time for the availability slot.", "error");
+      return;
+    }
+
+    if (end <= start) {
+      showToast("Availability end time must be later than the start time.", "error");
+      return;
+    }
+
+    setSavingAvailability(true);
+    try {
+      await createDoctorAvailability({
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+      });
+      setAvailabilityStart("");
+      setAvailabilityEnd("");
+      showToast("Availability slot saved.");
+      await loadDashboard();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Availability slot could not be saved";
+      setAvailabilityError(message);
+      showToast(message, "error");
+    } finally {
+      setSavingAvailability(false);
+    }
+  };
+
+  const removeAvailability = async (slotId: number) => {
+    setDeletingAvailabilityId(slotId);
+    try {
+      await deleteDoctorAvailability(slotId);
+      showToast("Availability slot removed.");
+      await loadDashboard();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Availability slot could not be removed";
+      setAvailabilityError(message);
+      showToast(message, "error");
+    } finally {
+      setDeletingAvailabilityId(null);
     }
   };
 
@@ -393,9 +556,8 @@ export function DoctorDashboardPage() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-surface dark:bg-slate-950">
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white px-5 py-4 text-sm font-medium text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-          <LoaderCircle className="animate-spin" size={18} />
-          Loading doctor workspace...
+        <div className="w-full max-w-md px-6">
+          <LoadingState message="Loading doctor workspace..." />
         </div>
       </div>
     );
@@ -404,13 +566,12 @@ export function DoctorDashboardPage() {
   if (error) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-surface px-6 dark:bg-slate-950">
-        <div className="w-full max-w-2xl rounded-3xl border border-red-200 bg-white p-8 shadow-sm dark:border-red-900/40 dark:bg-slate-900">
-          <h2 className="text-2xl font-bold text-red-700 dark:text-red-300">Doctor dashboard failed to load</h2>
-          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{error}</p>
+        <div className="w-full max-w-2xl space-y-6">
+          <ErrorState title="Doctor dashboard unavailable" message={error} />
           <button
             type="button"
             onClick={() => void loadDashboard()}
-            className="mt-6 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-white"
+            className="rounded-xl bg-primary px-5 py-3 text-sm font-bold text-white"
           >
             Retry
           </button>
@@ -549,9 +710,11 @@ export function DoctorDashboardPage() {
                       <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${getScheduleBadge(item)}`}>{item.status}</span>
                     </div>
                   )) : (
-                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
-                      No schedule rows yet. Once patients book you through affiliated organisations, queue items will show here.
-                    </div>
+                    <EmptyState
+                      title="No schedule entries yet"
+                      description="Once patients book through your affiliated organisations, upcoming appointments will appear here."
+                      className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
+                    />
                   )}
                 </div>
               </div>
@@ -569,7 +732,7 @@ export function DoctorDashboardPage() {
                       {activePatient
                         ? activePatient.latest_record?.notes
                           ? "Latest patient record is loaded below. Double-check consent and update the encounter instead of winging it."
-                          : "There is an active patient, but no previous encounter note is saved yet. Your next submit becomes the first real record."
+                          : "There is an active patient, but no previous encounter note has been saved yet. Your next submission will create the first encounter record."
                         : "No active patient is loaded. Get affiliations and bookings first."}
                     </p>
                   </div>
@@ -613,14 +776,22 @@ export function DoctorDashboardPage() {
                       <div className="space-y-2">
                         <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Attachments</label>
                         <div className="mt-2 flex flex-wrap gap-4">
-                          <button type="button" onClick={() => showToast("Attachment storage is not wired yet, so no fake upload drama here.")} className="flex h-20 w-20 flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"><Plus className="text-slate-400" size={18} /><span className="text-[8px] font-bold uppercase text-slate-400">ADD</span></button>
+                          <div className="flex min-h-20 flex-1 items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
+                            <Upload size={18} />
+                            <div>
+                              <p className="font-semibold text-slate-700 dark:text-slate-200">Attachments are currently read-only</p>
+                              <p className="mt-1 text-xs">Lab files and images can be reviewed here once backend upload support is enabled for the doctor workspace.</p>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </>
                   ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
-                      No active patient yet.
-                    </div>
+                    <EmptyState
+                      title="No active patient"
+                      description="Open a booked appointment first to create an encounter, notes, and prescription items."
+                      className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
+                    />
                   )}
                 </div>
 
@@ -637,9 +808,26 @@ export function DoctorDashboardPage() {
                     <input value={medDose} onChange={(event) => setMedDose(event.target.value)} className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Dosage" />
                     <input value={medDuration} onChange={(event) => setMedDuration(event.target.value)} className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Duration" />
                     <button type="button" onClick={addMedicine} className="flex items-center justify-center rounded-xl bg-primary-container py-3 text-white shadow-md shadow-blue-500/20 hover:bg-primary">
-                      <Plus size={18} />
+                      {editingDraftId ? <PencilLine size={18} /> : <Plus size={18} />}
                     </button>
                   </div>
+                  {editingDraftId ? (
+                    <div className="mb-4 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200">
+                      <span>Editing an existing prescription item. Save changes or clear the fields to stop editing.</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingDraftId(null);
+                          setMedName("");
+                          setMedDose("");
+                          setMedDuration("");
+                        }}
+                        className="font-bold uppercase tracking-widest"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  ) : null}
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                       <thead className="border-b border-slate-100 text-[10px] uppercase text-slate-400 dark:border-slate-800">
@@ -657,9 +845,14 @@ export function DoctorDashboardPage() {
                             <td className="px-2 py-4 text-slate-500 dark:text-slate-400">{item.dosage || "As directed"}</td>
                             <td className="px-2 py-4 text-slate-500 dark:text-slate-400">{item.duration || "N/A"}</td>
                             <td className="px-2 py-4 text-right">
-                              <button type="button" onClick={() => setPrescriptionDraft((current) => current.filter((entry) => entry.id !== item.id))} className="rounded-lg bg-red-50 p-2 text-red-500 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40">
-                                <Trash2 size={15} />
-                              </button>
+                              <div className="flex justify-end gap-2">
+                                <button type="button" onClick={() => editMedicine(item)} className="rounded-lg bg-blue-50 p-2 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40">
+                                  <PencilLine size={15} />
+                                </button>
+                                <button type="button" onClick={() => setPrescriptionDraft((current) => current.filter((entry) => entry.id !== item.id))} className="rounded-lg bg-red-50 p-2 text-red-500 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40">
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         )) : (
@@ -751,8 +944,61 @@ export function DoctorDashboardPage() {
           {page === "appointments" ? (
             <section className="mx-auto max-w-4xl animate-fadeIn">
               <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div><h2 className="text-3xl font-extrabold text-blue-900 dark:text-blue-400">Clinical Schedule</h2><p className="mt-1 text-sm text-slate-500">Appointments for the doctor.</p></div>
-                <div className="flex items-center gap-4"><button type="button" onClick={() => showToast("Availability management is not wired yet.")} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md">Manage Availability Slots</button><div className="flex items-center gap-2 rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"><CalendarDays className="text-slate-400" size={18} /><span className="text-sm font-bold dark:text-slate-200">{formatDate(new Date().toISOString())}</span></div></div>
+                <div><h2 className="text-3xl font-extrabold text-blue-900 dark:text-blue-400">Clinical Schedule</h2><p className="mt-1 text-sm text-slate-500">Appointments and live doctor availability slots.</p></div>
+                <div className="flex items-center gap-4"><div className="flex items-center gap-2 rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"><CalendarDays className="text-slate-400" size={18} /><span className="text-sm font-bold dark:text-slate-200">{formatDate(new Date().toISOString())}</span></div></div>
+              </div>
+              <div className="mb-8 rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-primary dark:text-blue-400">Availability Management</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Create and remove your own bookable slots using the current backend support.</p>
+                  </div>
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-300">
+                    Patients can only book the live slots listed here.
+                  </div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Start Time</label>
+                    <input type="datetime-local" value={availabilityStart} onChange={(event) => setAvailabilityStart(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">End Time</label>
+                    <input type="datetime-local" value={availabilityEnd} onChange={(event) => setAvailabilityEnd(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                  </div>
+                  <button type="button" onClick={() => void saveAvailability()} disabled={savingAvailability} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md disabled:opacity-60">
+                    {savingAvailability ? "Saving..." : "Add Slot"}
+                  </button>
+                </div>
+                {availabilityError ? (
+                  <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+                    {availabilityError}
+                  </div>
+                ) : null}
+                <div className="mt-5 grid gap-3">
+                  {availabilitySlots.length ? availabilitySlots.map((slot) => (
+                    <div key={slot.id} className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-bold dark:text-slate-200">{formatDate(slot.start_time)}</p>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{formatTimeWindow(slot.start_time, slot.end_time)}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${slot.is_booked ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
+                          {slot.is_booked ? "Booked" : "Open"}
+                        </span>
+                        <button type="button" onClick={() => void removeAvailability(slot.id)} disabled={Boolean(slot.is_booked) || deletingAvailabilityId === slot.id} className="rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300">
+                          {deletingAvailabilityId === slot.id ? "Removing..." : "Remove"}
+                        </button>
+                      </div>
+                    </div>
+                  )) : (
+                    <EmptyState
+                      title="No availability published yet"
+                      description="Add a valid slot above to make your schedule bookable from the patient side."
+                      className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
+                    />
+                  )}
+                </div>
               </div>
               <div className="relative rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div className="absolute bottom-12 left-16 top-12 w-px bg-slate-200 dark:bg-slate-700" />
@@ -766,7 +1012,7 @@ export function DoctorDashboardPage() {
                           <div>
                             <p className="text-lg font-bold dark:text-slate-200">{item.patient.name}</p>
                             <p className="mt-1 text-xs text-slate-500">{item.organisation.name} • {item.patient.dhid ?? "DHID pending"}</p>
-                            <p className="mt-1 text-xs font-medium text-blue-700 dark:text-blue-300">Consent: {item.consent.status}</p>
+                            <p className="mt-1 text-xs font-medium text-blue-700 dark:text-blue-300">Consent: {formatStatusLabel(item.consent.status)}</p>
                           </div>
                           <button type="button" onClick={() => { setPage("encounter"); setDiagnosisInput(""); setClinicalNotes(""); setPrescriptionDraft([]); }} className="rounded-lg bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white">
                             {item.encounter ? "Review" : "Open"}
@@ -775,9 +1021,11 @@ export function DoctorDashboardPage() {
                       </div>
                     </div>
                   )) : (
-                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
-                      No appointments yet.
-                    </div>
+                    <EmptyState
+                      title="No appointments yet"
+                      description="Upcoming visits will appear here once patients book against your live availability."
+                      className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
+                    />
                   )}
                 </div>
               </div>
@@ -791,11 +1039,17 @@ export function DoctorDashboardPage() {
                 <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Professional Identity</h3><div className="grid grid-cols-1 gap-5 md:grid-cols-2"><div><label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Full Name & Title</label><input type="text" value={profileName} onChange={(event) => setProfileName(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" /></div><div><label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">SLMC Reg Number</label><input type="text" value={profileSlmcNumber} onChange={(event) => setProfileSlmcNumber(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" /></div><div className="md:col-span-2"><label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Specialization</label><input type="text" value={profileSpecialization} onChange={(event) => setProfileSpecialization(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" /></div></div></div>
                 <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Hospital Affiliations</h3><div className="space-y-3">{dashboard?.affiliations.length ? dashboard.affiliations.map((item) => (
                   <div key={item.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
-                    <p className="font-bold dark:text-slate-200">{item.organisation.name}</p>
-                    <p className="text-xs text-slate-500">{item.organisation.type ?? "Organisation type unavailable"} • {item.status}</p>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-bold dark:text-slate-200">{item.organisation.name}</p>
+                        <p className="text-xs text-slate-500">{item.organisation.type ?? "Organisation type unavailable"}</p>
+                      </div>
+                      <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${affiliationTone(item.status)}`}>{formatStatusLabel(item.status)}</span>
+                    </div>
                   </div>
-                )) : <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">No doctor affiliations saved yet. That is why schedule/booking looks empty too.</div>}</div></div>
-                <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Credential Upload</h3><div className="flex flex-col gap-2"><label className="cursor-pointer rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-700 dark:bg-slate-800"><span className="flex items-center gap-3"><Upload size={16} /><span className="text-sm dark:text-white">Credential upload UI only</span></span><input type="file" accept=".pdf,.jpg,.jpeg" className="hidden" /></label><p className="text-[10px] font-medium text-slate-500">Real storage pipeline is still not wired, so this stays visual for now instead of lying to you.</p></div></div>
+                )) : <EmptyState title="No affiliations yet" description="Once a hospital approves your affiliation, scheduling and active patient context will appear here." className="rounded-2xl border-slate-200 bg-slate-50 p-4 text-left shadow-none dark:bg-slate-800/40" />}
+                <AlertBanner tone="info" message="Invitation acceptance and doctor-side revoke actions will appear here once the frontend receives a matching backend contract." /></div></div>
+                <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Credential Document</h3><div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400"><div className="flex items-start gap-3"><Upload size={16} className="mt-0.5" /><div><p className="font-semibold text-slate-700 dark:text-slate-200">Credential replacement is unavailable in this workspace</p><p className="mt-1 text-xs">Use the onboarding flow for credential submission until post-registration upload support is available.</p></div></div></div></div>
                 <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">System Preferences</h3><div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50"><div><p className="text-sm font-bold dark:text-slate-200">Dark Mode Interface</p><p className="text-xs text-slate-500">Same shared theme as the rest of the portal.</p></div><button type="button" onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white">Toggle Theme</button></div></div>
                 <div className="border-t border-slate-100 pt-6 text-right dark:border-slate-800"><button type="button" onClick={() => void saveProfile()} disabled={savingProfile} className="rounded-xl bg-green-600 px-8 py-3 font-bold text-white shadow-lg shadow-green-600/20 disabled:cursor-not-allowed disabled:opacity-60">{savingProfile ? "Saving..." : "Save Configuration"}</button></div>
               </div>
@@ -826,15 +1080,15 @@ export function DoctorDashboardPage() {
             <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl dark:bg-slate-900">
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"><ShieldAlert size={28} /></div>
               <h3 className="mb-2 text-xl font-bold dark:text-white">Activate Emergency Protocol?</h3>
-              <p className="mb-6 text-sm leading-relaxed text-slate-500 dark:text-slate-400">UI is ready, but the real ER escalation backend is not wired yet. So this button will stay honest instead of pretending to alert the universe.</p>
-              <div className="flex gap-3"><button type="button" onClick={() => setModal(null)} className="flex-1 rounded-xl bg-slate-100 py-3 font-bold dark:bg-slate-800">Go Back</button><button type="button" onClick={() => { setModal(null); showToast("ER escalation backend is not wired yet."); }} className="flex-1 rounded-xl bg-red-600 py-3 font-bold text-white">Acknowledge</button></div>
+              <p className="mb-6 text-sm leading-relaxed text-slate-500 dark:text-slate-400">Emergency escalation controls are not available in this portal. Use your hospital emergency workflow for live urgent escalation.</p>
+              <div className="flex gap-3"><button type="button" onClick={() => setModal(null)} className="flex-1 rounded-xl bg-slate-100 py-3 font-bold dark:bg-slate-800">Close</button><button type="button" onClick={() => setModal(null)} className="flex-1 rounded-xl bg-red-600 py-3 font-bold text-white">Understood</button></div>
             </div>
           ) : null}
 
           {modal === "archives" ? (
             <div className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-3xl bg-white p-8 shadow-2xl dark:bg-slate-900">
               <div className="mb-6 flex items-center justify-between">
-                <div><h3 className="text-2xl font-bold dark:text-white">{activePatient?.patient.name ?? "Patient"} archives</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Saved encounters and prescriptions only. No fake file props.</p></div>
+                <div><h3 className="text-2xl font-bold dark:text-white">{activePatient?.patient.name ?? "Patient"} archives</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Saved encounters and prescriptions only.</p></div>
                 <button type="button" onClick={() => setModal(null)} className="rounded-full bg-slate-100 p-2 dark:bg-slate-800"><X size={18} /></button>
               </div>
               <div className="space-y-4 overflow-y-auto pr-2">
@@ -843,7 +1097,7 @@ export function DoctorDashboardPage() {
                     <div className="flex items-center gap-4"><div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">{item.type === "prescription" ? <Pill size={18} /> : <FileArchive size={18} />}</div><div><p className="font-bold dark:text-slate-200">{item.title}</p><p className="text-xs font-medium text-slate-500">{item.meta}</p></div></div>
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{item.type}</span>
                   </div>
-                )) : <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">No saved archives for the active patient yet.</div>}
+                )) : <EmptyState title="No saved archives yet" description="Encounter and prescription archive entries will appear here after records have been saved for the active patient." className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40" />}
               </div>
             </div>
           ) : null}
@@ -854,7 +1108,7 @@ export function DoctorDashboardPage() {
         <div className={`${chatOpen ? "flex" : "hidden"} mb-4 w-80 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900`}>
           <div className="flex items-center justify-between bg-primary p-4 text-white"><div className="flex items-center gap-2"><Sparkles size={18} /><span className="text-sm font-bold">Clinical AI</span></div><button type="button" onClick={() => setChatOpen(false)}><X size={16} /></button></div>
           <div className="border-b border-amber-100 bg-amber-50 p-2 text-center dark:border-amber-900 dark:bg-amber-900/30"><p className="text-[8px] font-bold uppercase tracking-widest text-amber-700 dark:text-amber-400">Disclaimer: AI is advisory only, not diagnostic.</p></div>
-          <div className="flex h-64 flex-col gap-3 overflow-y-auto bg-slate-50/50 p-4 dark:bg-slate-800/30">
+          <div ref={chatScrollRef} className="flex h-64 flex-col gap-3 overflow-y-auto bg-slate-50/50 p-4 dark:bg-slate-800/30">
             {chatMessages.map((message) => (
               <div key={message.id} className={`max-w-[85%] rounded-xl p-3 text-[11px] leading-relaxed shadow-sm ${message.role === "assistant" ? "self-start bg-blue-100 text-blue-900 dark:bg-blue-900/50 dark:text-blue-100" : "self-end bg-white dark:bg-slate-700 dark:text-white"}`}>{message.text}</div>
             ))}
@@ -866,7 +1120,7 @@ export function DoctorDashboardPage() {
         <button type="button" onClick={() => setChatOpen((current) => !current)} className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg shadow-primary/30">{chatOpen ? <X size={24} /> : <MessageCircle size={24} />}</button>
       </div>
 
-      {toast ? <div className="fixed left-1/2 top-6 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-full bg-green-600 px-6 py-3 text-sm font-bold text-white shadow-2xl"><CheckCircle2 size={18} /><span>{toast}</span></div> : null}
+      {toast ? <ToastMessage message={toast.message} tone={toast.tone} /> : null}
     </div>
   );
 }

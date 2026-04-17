@@ -26,7 +26,7 @@ export const hospitalAdminGovernanceNotes = [
 
 export const hospitalAdminOperationalNotes = [
   "The known backend currently supports doctor invite, availability create/view, affiliation decision, and affiliation revoke.",
-  "If hospital-admin routes are still not mounted in the running backend, this dashboard will show clean errors instead of fake green lights.",
+  "If hospital-admin routes are still not mounted in the running backend, this dashboard will show clear errors instead of misleading success states.",
   "Hospital scheduling is proposal-aligned here, but not every surrounding admin list endpoint exists yet.",
 ];
 

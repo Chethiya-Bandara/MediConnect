@@ -22,7 +22,7 @@ export const pharmacyAdminSectionTabs: Array<{
 export const pharmacyAdminComplianceNotes = [
   "Pharmacy admins manage stock, unit pricing, and operational readiness without touching diagnosis notes or encounter history.",
   "Final billing should be itemised and server-driven, not hand-typed by whoever happens to be clicking around.",
-  "If the backend inventory routes are not mounted yet, this dashboard shows clean error states instead of fake success theatre.",
+  "If the backend inventory routes are not mounted yet, this dashboard shows clear error states instead of misleading success states.",
 ];
 
 export const pharmacyAdminOperationalNotes = [

@@ -1,4 +1,5 @@
 import type {
+  AvailableSlot,
   AssistantReply,
   BookingOption,
   ConsentUpdateResult,
@@ -37,11 +38,19 @@ export async function getBookingOptions() {
   return response.items;
 }
 
+export async function getAvailableSlots(doctorId: number) {
+  const search = new URLSearchParams();
+  search.set("doctor_id", String(doctorId));
+
+  const response = await apiRequest<{ slots: AvailableSlot[] }>(
+    `${endpoints.patient.availableSlots}?${search.toString()}`,
+  );
+
+  return Array.isArray(response.slots) ? response.slots : [];
+}
+
 export function createAppointment(payload: {
-  doctor_id: number;
-  organisation_id: number;
-  start_time: string;
-  end_time: string;
+  slot_id: number;
 }) {
   return apiRequest<DashboardAppointment>(endpoints.patient.appointments, {
     method: "POST",

@@ -109,7 +109,7 @@ export const registrationSchema = z
     }
 
     if (
-      ["HOSPITAL_ADMIN", "PHARMACY_ADMIN", "HEALTH_MINISTRY_ADMIN"].includes(values.role) &&
+      ["HOSPITAL_ADMIN", "PHARMACY_ADMIN"].includes(values.role) &&
       !values.organisationId?.trim()
     ) {
       context.addIssue({

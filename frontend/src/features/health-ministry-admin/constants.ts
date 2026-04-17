@@ -28,6 +28,6 @@ export const healthMinistryGovernanceNotes = [
 
 export const healthMinistryOperationalNotes = [
   "The live backend currently exposes analytics and governance-style write endpoints, but approval contract mismatches may still trigger server errors.",
-  "This dashboard uses only known backend routes and shows clean failure states instead of pretending ghost data is real.",
+  "This dashboard uses only known backend routes and shows clear failure states when live data is unavailable.",
   "Health ministry oversight is designed around district trends, doctor approval review, and organisation governance.",
 ];

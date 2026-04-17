@@ -10,6 +10,7 @@ export const endpoints = {
     appointments: "/patient/dashboard/appointments",
     profile: "/patient/dashboard/profile",
     bookingOptions: "/patient/dashboard/booking-options",
+    availableSlots: "/patient/dashboard/available-slots",
     records: "/patient/dashboard/records",
     pharmacy: "/patient/dashboard/pharmacy",
     dispensing: "/patient/dashboard/dispensing",
@@ -20,6 +21,8 @@ export const endpoints = {
     profile: "/doctor/dashboard/profile",
     encounters: "/doctor/dashboard/encounters/submit",
     assistant: "/doctor/dashboard/assistant/respond",
+    availability: "/doctor/dashboard/availability",
+    inviteAcceptBase: "/doctor/dashboard/invite/accept",
   },
   pharmacist: {
     prescriptions: "/pharmacist/dashboard/prescriptions",

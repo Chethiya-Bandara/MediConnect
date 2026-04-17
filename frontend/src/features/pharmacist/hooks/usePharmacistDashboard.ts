@@ -400,25 +400,36 @@ export function usePharmacistDashboard(
 
   const lookupPrescription = () => {
     const query = searchQuery.trim().toLowerCase();
+    setActionMessage(null);
+
     if (!query) {
       setActionMessage("Enter a DHID or prescription ID first.");
       return false;
     }
 
-    const exactMatch =
-      filteredPrescriptions.find((item) =>
-        [item.id, item.patientDhid ?? ""].some(
-          (value) => value.toLowerCase() === query,
-        ),
-      ) ?? filteredPrescriptions[0];
+    const exactMatch = prescriptions.find((item) =>
+      [item.id, item.patientDhid ?? ""].some(
+        (value) => value.toLowerCase() === query,
+      ),
+    );
 
-    if (!exactMatch) {
+    if (exactMatch) {
+      setSelectedPrescriptionId(exactMatch.id);
+      setActionMessage(`Loaded exact queue match ${exactMatch.id}.`);
+      return true;
+    }
+
+    const partialMatch = filteredPrescriptions[0];
+
+    if (!partialMatch) {
       setActionMessage("No prescription matched that DHID or ID.");
       return false;
     }
 
-    setSelectedPrescriptionId(exactMatch.id);
-    setActionMessage(null);
+    setSelectedPrescriptionId(partialMatch.id);
+    setActionMessage(
+      `No exact match found. Showing the closest live queue result ${partialMatch.id} instead.`,
+    );
     return true;
   };
 

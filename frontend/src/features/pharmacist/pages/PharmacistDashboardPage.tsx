@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   Bell,
   Fingerprint,
@@ -8,6 +8,7 @@ import {
   LogOut,
   Moon,
   Pill,
+  QrCode,
   RefreshCcw,
   ScanLine,
   Search,
@@ -53,12 +54,30 @@ function getInitials(name?: string | null) {
     .join("");
 }
 
+function formatStatusLabel(value: string | null | undefined) {
+  if (!value) return "Unknown";
+  return value.replaceAll("_", " ");
+}
+
+function noticeClassName(tone: "error" | "info" | "success") {
+  if (tone === "success") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300";
+  }
+  if (tone === "info") {
+    return "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300";
+  }
+  return "border-red-200 bg-red-50 text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300";
+}
+
 export function PharmacistDashboardPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [section, setSection] = useState<PharmacistSection>("dispensing");
   const [isDark, setIsDark] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyStatusFilter, setHistoryStatusFilter] = useState("ALL");
   const dashboard = usePharmacistDashboard(user?.id, user?.organisationId ?? null);
+  const deferredHistorySearch = useDeferredValue(historySearch.trim().toLowerCase());
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("theme");
@@ -82,6 +101,66 @@ export function PharmacistDashboardPage() {
   const selectedPrescription = dashboard.selectedDetail?.prescription ?? null;
   const latestDispenseEvent = dashboard.selectedDetail?.dispensationHistory[0] ?? null;
   const userInitials = getInitials(user?.name);
+  const lookupQuery = dashboard.searchQuery.trim();
+  const looksLikeDhid = /^dhid-/i.test(lookupQuery);
+  const quickLookupResults = useMemo(
+    () => dashboard.filteredPrescriptions.slice(0, 6),
+    [dashboard.filteredPrescriptions],
+  );
+  const historyStatusOptions = useMemo(
+    () => Array.from(new Set(dashboard.history.map((entry) => entry.status))).sort(),
+    [dashboard.history],
+  );
+  const filteredHistory = useMemo(() => {
+    return dashboard.history.filter((entry) => {
+      const matchesSearch = !deferredHistorySearch
+        || [
+          entry.prescriptionId,
+          entry.patientDhid ?? "",
+          entry.patientName ?? "",
+          entry.status,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(deferredHistorySearch);
+      const matchesStatus = historyStatusFilter === "ALL" || entry.status === historyStatusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [dashboard.history, deferredHistorySearch, historyStatusFilter]);
+  const plannedUnits = useMemo(
+    () =>
+      dashboard.plannedItems.reduce((sum, { quantityToDispense }) => sum + quantityToDispense, 0),
+    [dashboard.plannedItems],
+  );
+  const partialValidationIssues = useMemo(
+    () =>
+      dashboard.plannedItems.filter(
+        ({ item, plan, quantityToDispense }) =>
+          plan.action === "PARTIALLY_DISPENSED"
+          && ((item.remainingQuantity ?? 0) <= 0 || quantityToDispense <= 0 || quantityToDispense >= (item.remainingQuantity ?? 0)),
+      ),
+    [dashboard.plannedItems],
+  );
+  const dispenseGuardMessage = useMemo(() => {
+    if (!selectedPrescription) return "Select a live prescription before trying to dispense anything.";
+    if (!dashboard.pharmacyId.trim()) return "Enter the pharmacy organisation ID before the backend will accept a dispense request.";
+    if (dashboard.unsupportedSelections.length > 0) {
+      return "Cancelled and expired item transitions are not supported by the current pharmacist endpoint.";
+    }
+    if (partialValidationIssues.length > 0) {
+      return "One or more partial-dispense lines are invalid. Partial quantity must be lower than the remaining quantity and above zero.";
+    }
+    if (dashboard.billingItems.length === 0) {
+      return "Choose at least one valid line-item action so the bill and dispense payload are real.";
+    }
+    return null;
+  }, [
+    dashboard.billingItems.length,
+    dashboard.pharmacyId,
+    dashboard.unsupportedSelections.length,
+    partialValidationIssues.length,
+    selectedPrescription,
+  ]);
 
   const headerAlerts = useMemo(() => {
     const items: Array<{
@@ -300,31 +379,81 @@ export function PharmacistDashboardPage() {
                 Enter a Digital Health ID or prescription ID to fetch live authorised prescriptions and process dispensing safely.
               </p>
 
-              <div className="flex flex-col gap-4 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row">
-                <div className="relative flex-1">
-                  <Fingerprint className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input
-                    value={dashboard.searchQuery}
-                    onChange={(event) => dashboard.setSearchQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        dashboard.lookupPrescription();
-                      }
-                    }}
-                    className="w-full rounded-xl border-none bg-transparent py-3.5 pl-12 pr-4 font-mono text-sm placeholder:text-slate-400 focus:ring-0 dark:text-white"
-                    placeholder="DHID-XXXX-XXXX or prescription ID"
-                    type="text"
-                  />
+              <div className="grid gap-4 lg:grid-cols-[1.35fr,0.65fr]">
+                <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                        DHID / Prescription Lookup
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        Paste a `DHID-XXXX-XXXX` or a prescription ID from the live queue.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                      {dashboard.filteredPrescriptions.length} live match{dashboard.filteredPrescriptions.length === 1 ? "" : "es"}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-4 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-2 dark:border-slate-800 dark:bg-slate-900 sm:flex-row">
+                    <div className="relative flex-1">
+                      <Fingerprint className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input
+                        value={dashboard.searchQuery}
+                        onChange={(event) => dashboard.setSearchQuery(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            dashboard.lookupPrescription();
+                          }
+                        }}
+                        className="w-full rounded-xl border-none bg-transparent py-3.5 pl-12 pr-4 font-mono text-sm placeholder:text-slate-400 focus:ring-0 dark:text-white"
+                        placeholder="DHID-XXXX-XXXX or prescription ID"
+                        type="text"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => dashboard.lookupPrescription()}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-8 py-3 text-sm font-bold text-white transition-all hover:brightness-110 dark:bg-blue-600"
+                    >
+                      <ScanLine size={18} />
+                      Verify & Lookup
+                    </button>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-3 text-xs">
+                    <span className="rounded-full bg-blue-50 px-3 py-1 font-bold text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                      {looksLikeDhid ? "Lookup mode: DHID" : "Lookup mode: Queue / prescription ID"}
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                      Privacy boundary: no diagnosis or encounter notes exposed
+                    </span>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => dashboard.lookupPrescription()}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-8 py-3 text-sm font-bold text-white transition-all hover:brightness-110 dark:bg-blue-600"
-                >
-                  <ScanLine size={18} />
-                  Verify & Lookup
-                </button>
+
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                  <div className="mb-4 flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-800">
+                      <QrCode size={22} />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                        Scan-ready lane
+                      </p>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        Browser camera scanning is not available yet, so use a scanned DHID or prescription ID from your verified workflow.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center dark:border-slate-700 dark:bg-slate-950">
+                    <QrCode className="mx-auto mb-3 text-slate-300 dark:text-slate-700" size={42} />
+                    <p className="text-sm font-semibold">Scan lane reserved</p>
+                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      For now, scan the patient QR outside the browser and paste the verified DHID here.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -333,15 +462,7 @@ export function PharmacistDashboardPage() {
                 {headerAlerts.map((alert) => (
                   <div
                     key={`${alert.title}-${alert.description}`}
-                    className={cn(
-                      "rounded-2xl border px-4 py-3 text-sm",
-                      alert.tone === "success" &&
-                        "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300",
-                      alert.tone === "info" &&
-                        "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300",
-                      alert.tone === "error" &&
-                        "border-red-200 bg-red-50 text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300",
-                    )}
+                    className={cn("rounded-2xl border px-4 py-3 text-sm", noticeClassName(alert.tone))}
                   >
                     <p className="font-bold">{alert.title}</p>
                     <p className="mt-1">{alert.description}</p>
@@ -365,6 +486,68 @@ export function PharmacistDashboardPage() {
                     <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Estimated Queue Value</p>
                     <p className="mt-3 text-3xl font-extrabold">{formatLkr(dashboard.stats.estimatedValue)}</p>
                   </div>
+                </div>
+
+                <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500">
+                        Live Queue Matches
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        Pick the exact prescription before dispensing so the selected queue item matches the live backend record.
+                      </p>
+                    </div>
+                    {lookupQuery ? (
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        Query: {lookupQuery}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {dashboard.isLoadingList ? (
+                    <div className="rounded-2xl bg-slate-50 px-4 py-10 text-center text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                      Refreshing pharmacist queue...
+                    </div>
+                  ) : quickLookupResults.length > 0 ? (
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {quickLookupResults.map((result) => {
+                        const active = result.id === dashboard.selectedPrescriptionId;
+                        return (
+                          <button
+                            key={result.id}
+                            type="button"
+                            onClick={() => dashboard.setSelectedPrescriptionId(result.id)}
+                            className={cn(
+                              "rounded-2xl border p-4 text-left transition-all",
+                              active
+                                ? "border-blue-300 bg-blue-50 shadow-sm dark:border-blue-700 dark:bg-blue-950/30"
+                                : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900",
+                            )}
+                          >
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <p className="font-mono text-xs font-bold text-slate-700 dark:text-slate-300">
+                                {result.id}
+                              </p>
+                              <PrescriptionStatusBadge status={result.status} />
+                            </div>
+                            <p className="font-semibold">
+                              {result.patientDhid ?? "DHID not supplied"}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                              {result.totalItems ?? 0} item(s) • issued {result.issuedAt ? formatDate(result.issuedAt) : "unknown"}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                      {lookupQuery
+                        ? "Nothing in the live queue matched that DHID or prescription id."
+                        : "Type a DHID or prescription ID to surface live queue matches."}
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -452,6 +635,7 @@ export function PharmacistDashboardPage() {
                           <tr>
                             <th className="px-6 py-3">Medicine & Dosage</th>
                             <th className="px-6 py-3">Quantity</th>
+                            <th className="px-6 py-3">Transition</th>
                             <th className="px-6 py-3 text-right">Status Action</th>
                           </tr>
                         </thead>
@@ -463,10 +647,20 @@ export function PharmacistDashboardPage() {
                                 <p className="mt-1 text-xs italic text-slate-500 dark:text-slate-400">
                                   {item.dosage ?? "Dosage not supplied"}
                                 </p>
-                                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                                  {item.instructions ?? "No extra instructions from backend."}
-                                </p>
-                              </td>
+                                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                    {item.instructions ?? "No extra instructions from backend."}
+                                  </p>
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                      Current: {formatStatusLabel(selectedPrescription.status)}
+                                    </span>
+                                    {item.remainingQuantity !== null && item.remainingQuantity <= 0 ? (
+                                      <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                                        Fully dispensed already
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </td>
                               <td className="px-6 py-5">
                                 <div className="space-y-1 text-sm">
                                   <p className="font-bold">Prescribed: {item.quantity ?? "N/A"} units</p>
@@ -480,6 +674,21 @@ export function PharmacistDashboardPage() {
                                     )}
                                   >
                                     Remaining: {item.remainingQuantity ?? "Unknown"}
+                                  </p>
+                                </div>
+                              </td>
+                              <td className="px-6 py-5">
+                                <div className="space-y-2 text-xs">
+                                  <p className="font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                                    Planned result
+                                  </p>
+                                  <p className="rounded-xl bg-slate-100 px-3 py-2 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                    {formatStatusLabel(plan.action)}
+                                  </p>
+                                  <p className="text-slate-500 dark:text-slate-400">
+                                    {quantityToDispense > 0
+                                      ? `${quantityToDispense} unit(s) will be sent in this request.`
+                                      : "No units will be sent with the current action."}
                                   </p>
                                 </div>
                               </td>
@@ -529,6 +738,11 @@ export function PharmacistDashboardPage() {
                                   <p className="text-xs text-slate-500 dark:text-slate-400">
                                     This action dispenses <span className="font-bold text-slate-800 dark:text-slate-200">{quantityToDispense}</span> unit(s) now.
                                   </p>
+                                  {plan.action === "PARTIALLY_DISPENSED" && quantityToDispense >= (item.remainingQuantity ?? 0) && (item.remainingQuantity ?? 0) > 0 ? (
+                                    <p className="max-w-[220px] text-right text-xs text-amber-700 dark:text-amber-300">
+                                      This equals the full remaining quantity. If you are issuing everything, switch the line to <span className="font-bold">DISPENSED</span>.
+                                    </p>
+                                  ) : null}
                                 </div>
                               </td>
                             </tr>
@@ -565,6 +779,21 @@ export function PharmacistDashboardPage() {
                   </label>
 
                   <div className="mb-8 space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl bg-white/5 px-4 py-3">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-100/70">
+                          Planned items
+                        </p>
+                        <p className="mt-2 text-2xl font-extrabold">{dashboard.billingItems.length}</p>
+                      </div>
+                      <div className="rounded-2xl bg-white/5 px-4 py-3">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-100/70">
+                          Planned units
+                        </p>
+                        <p className="mt-2 text-2xl font-extrabold">{plannedUnits}</p>
+                      </div>
+                    </div>
+
                     {dashboard.billingItems.length > 0 ? (
                       dashboard.billingItems.map((item) => (
                         <div key={item.id} className="flex justify-between gap-3 text-sm text-white/80">
@@ -590,10 +819,20 @@ export function PharmacistDashboardPage() {
                     </div>
                   </div>
 
+                  {dispenseGuardMessage ? (
+                    <div className="mb-5 rounded-2xl border border-red-300/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                      {dispenseGuardMessage}
+                    </div>
+                  ) : (
+                    <div className="mb-5 rounded-2xl border border-emerald-300/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                      Dispense payload looks valid against the current frontend checks.
+                    </div>
+                  )}
+
                   <button
                     type="button"
                     onClick={() => void dashboard.dispenseSelected()}
-                    disabled={dashboard.isDispensing || !dashboard.selectedDetail || dashboard.billingItems.length === 0}
+                    disabled={dashboard.isDispensing || Boolean(dispenseGuardMessage)}
                     className="w-full rounded-xl bg-cyan-500 py-4 text-sm font-extrabold text-blue-950 shadow-lg transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {dashboard.isDispensing ? "PROCESSING..." : "COMPLETE DISPENSE"}
@@ -662,6 +901,50 @@ export function PharmacistDashboardPage() {
               </p>
             </header>
 
+            <div className="mb-6 grid gap-4 lg:grid-cols-[1.4fr,0.8fr,0.8fr]">
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <label className="block text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Search history
+                </label>
+                <div className="relative mt-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    value={historySearch}
+                    onChange={(event) => setHistorySearch(event.target.value)}
+                    placeholder="Prescription ID, DHID, status"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    type="text"
+                  />
+                </div>
+              </div>
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <label className="block text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Status filter
+                </label>
+                <select
+                  value={historyStatusFilter}
+                  onChange={(event) => setHistoryStatusFilter(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                >
+                  <option value="ALL">All statuses</option>
+                  {historyStatusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {formatStatusLabel(status)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Visible events
+                </p>
+                <p className="mt-3 text-3xl font-extrabold">{filteredHistory.length}</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  Filtered from live dispense history only
+                </p>
+              </div>
+            </div>
+
             {dashboard.historyError ? (
               <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
                 {dashboard.historyError}
@@ -673,11 +956,13 @@ export function PharmacistDashboardPage() {
                 <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
                   Loading live dispense history...
                 </div>
-              ) : dashboard.history.length === 0 ? (
+              ) : filteredHistory.length === 0 ? (
                 <div className="flex min-h-[320px] flex-col items-center justify-center px-6 text-center">
                   <History className="mb-4 text-slate-300 dark:text-slate-700" size={52} />
                   <p className="font-medium text-slate-400">
-                    No dispense events recorded yet for this pharmacist.
+                    {dashboard.history.length === 0
+                      ? "No dispense events recorded yet for this pharmacist."
+                      : "No dispense events matched the current search and filters."}
                   </p>
                 </div>
               ) : (
@@ -691,10 +976,11 @@ export function PharmacistDashboardPage() {
                         <th className="px-6 py-4 font-semibold">Items</th>
                         <th className="px-6 py-4 font-semibold">Value</th>
                         <th className="px-6 py-4 font-semibold">Status</th>
+                        <th className="px-6 py-4 font-semibold">Backend-safe detail</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {dashboard.history.map((entry) => (
+                      {filteredHistory.map((entry) => (
                         <tr key={entry.id} className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/40">
                           <td className="px-6 py-4 font-mono text-xs">{formatDateTime(entry.dispensedAt)}</td>
                           <td className="px-6 py-4">
@@ -708,6 +994,9 @@ export function PharmacistDashboardPage() {
                           <td className="px-6 py-4">{formatLkr(entry.estimatedTotal)}</td>
                           <td className="px-6 py-4">
                             <PrescriptionStatusBadge status={entry.status} />
+                          </td>
+                          <td className="px-6 py-4 text-xs text-slate-500 dark:text-slate-400">
+                            Medicine count, DHID, and billing metadata only. Diagnosis and encounter notes stay blocked.
                           </td>
                         </tr>
                       ))}

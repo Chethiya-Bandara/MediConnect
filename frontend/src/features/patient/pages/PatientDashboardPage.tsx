@@ -20,10 +20,16 @@ import {
 } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { AlertBanner } from "../../../components/feedback/AlertBanner";
+import { EmptyState } from "../../../components/feedback/EmptyState";
+import { ErrorState } from "../../../components/feedback/ErrorState";
+import { LoadingState } from "../../../components/feedback/LoadingState";
+import { ToastMessage } from "../../../components/feedback/ToastMessage";
 import { useAuth } from "../../auth/context/AuthContext";
 import {
   askHealthAssistant,
   createAppointment,
+  getAvailableSlots,
   getAppointments,
   getBookingOptions,
   getDashboardOverview,
@@ -35,6 +41,7 @@ import {
   updatePatientProfile,
 } from "../api/patientApi";
 import type {
+  AvailableSlot,
   AssistantChatMessage,
   BookingOption,
   DashboardAppointment,
@@ -65,6 +72,7 @@ const navItems = [
 
 const initialForm = {
   optionKey: "",
+  slotId: "",
   startTime: "",
   endTime: "",
 };
@@ -112,6 +120,10 @@ function statusTone(status: string) {
   return "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300";
 }
 
+function formatStatusLabel(status: string) {
+  return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function formatLkr(value: number) {
   return new Intl.NumberFormat("en-LK", {
     style: "currency",
@@ -130,6 +142,7 @@ export function PatientDashboardPage() {
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [appointments, setAppointments] = useState<DashboardAppointment[]>([]);
   const [bookingOptions, setBookingOptions] = useState<BookingOption[]>([]);
+  const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [records, setRecords] = useState<DashboardRecord[]>([]);
   const [pharmacyItems, setPharmacyItems] = useState<PharmacyInventoryItem[]>([]);
   const [dispensingSummary, setDispensingSummary] = useState<DispensingSummary>({
@@ -143,7 +156,10 @@ export function PatientDashboardPage() {
   const [pharmacyQuery, setPharmacyQuery] = useState("");
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [pharmacyError, setPharmacyError] = useState<string | null>(null);
+  const [slotError, setSlotError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isPharmacyLoading, setIsPharmacyLoading] = useState(false);
+  const [isSlotsLoading, setIsSlotsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<DashboardAppointment | null>(null);
   const [appointmentForm, setAppointmentForm] = useState(initialForm);
@@ -153,8 +169,9 @@ export function PatientDashboardPage() {
   const [isAssistantLoading, setIsAssistantLoading] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; tone: "success" | "error" | "info" } | null>(null);
   const assistantScrollRef = useRef<HTMLDivElement | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
 
   const displayName = overview?.user.name || user?.name || user?.email?.split("@")[0] || "Patient";
   const avatarSeed = encodeURIComponent(displayName);
@@ -172,10 +189,21 @@ export function PatientDashboardPage() {
     () => bookingOptions.find((item) => `${item.doctor_id}:${item.organisation_id}` === appointmentForm.optionKey) ?? null,
     [appointmentForm.optionKey, bookingOptions],
   );
+  const selectedSlot = useMemo(
+    () => availableSlots.find((slot) => String(slot.id) === appointmentForm.slotId) ?? null,
+    [appointmentForm.slotId, availableSlots],
+  );
 
-  const showToast = (message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(null), 2800);
+  const showToast = (
+    message: string,
+    tone: "success" | "error" | "info" = "success",
+  ) => {
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+
+    setToast({ message, tone });
+    toastTimeoutRef.current = window.setTimeout(() => setToast(null), 2800);
   };
 
   const loadDashboard = async () => {
@@ -199,7 +227,7 @@ export function PatientDashboardPage() {
       setPharmacyItems(pharmacyData);
       setDispensingSummary(dispensingData);
     } catch (error) {
-      setDashboardError(error instanceof Error ? error.message : "Failed to load dashboard. Try reloading dashboard.");
+      setDashboardError(error instanceof Error ? error.message : "Dashboard data could not be loaded. Refresh the page to try again.");
     } finally {
       setIsLoading(false);
     }
@@ -275,19 +303,70 @@ export function PatientDashboardPage() {
     });
   }, [deferredAssistantMessages, isAssistantLoading]);
 
+  useEffect(() => () => {
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(async () => {
+      setIsPharmacyLoading(true);
       try {
         const items = await searchPharmacy(pharmacyQuery);
         setPharmacyItems(items);
         setPharmacyError(null);
       } catch (error) {
-        setPharmacyError(error instanceof Error ? error.message : "Pharmacy search failed");
+      setPharmacyError(error instanceof Error ? error.message : "Pharmacy inventory search could not be completed.");
+      } finally {
+        setIsPharmacyLoading(false);
       }
     }, 250);
 
     return () => window.clearTimeout(timer);
   }, [pharmacyQuery]);
+
+  useEffect(() => {
+    if (editingAppointment || !selectedOption) {
+      setAvailableSlots([]);
+      setSlotError(null);
+      return;
+    }
+
+    const loadSlots = async () => {
+      setIsSlotsLoading(true);
+      setSlotError(null);
+
+      try {
+        const slots = await getAvailableSlots(selectedOption.doctor_id);
+        const scopedSlots = slots.filter((slot) =>
+          slot.organisation_id === null || slot.organisation_id === selectedOption.organisation_id,
+        );
+        setAvailableSlots(scopedSlots);
+      } catch (error) {
+        setAvailableSlots([]);
+        setSlotError(
+          error instanceof Error
+            ? error.message
+            : "Available slots could not be loaded right now.",
+        );
+      } finally {
+        setIsSlotsLoading(false);
+      }
+    };
+
+    void loadSlots();
+  }, [editingAppointment, selectedOption]);
+
+  useEffect(() => {
+    if (!editingAppointment && selectedSlot) {
+      setAppointmentForm((current) => ({
+        ...current,
+        startTime: selectedSlot.start_time.slice(0, 16),
+        endTime: selectedSlot.end_time.slice(0, 16),
+      }));
+    }
+  }, [editingAppointment, selectedSlot]);
 
   const sendAssistantMessage = async (preset?: string) => {
     const text = (preset ?? assistantInput).trim();
@@ -332,7 +411,7 @@ export function PatientDashboardPage() {
           "I hit a snag reaching the assistant right now. Check the Gemini edge function config or try again in a moment.",
         ),
       ]);
-      showToast(fallbackText);
+      showToast(fallbackText, "error");
     } finally {
       setIsAssistantLoading(false);
     }
@@ -356,6 +435,8 @@ export function PatientDashboardPage() {
   const openCreateModal = () => {
     setEditingAppointment(null);
     setAppointmentForm(initialForm);
+    setAvailableSlots([]);
+    setSlotError(null);
     setModal("appointment");
   };
 
@@ -363,47 +444,67 @@ export function PatientDashboardPage() {
     setEditingAppointment(appointment);
     setAppointmentForm({
       optionKey: `${appointment.doctor.id}:${appointment.organisation.id}`,
+      slotId: "",
       startTime: appointment.start_time.slice(0, 16),
       endTime: appointment.end_time.slice(0, 16),
     });
+    setAvailableSlots([]);
+    setSlotError(null);
     setModal("appointment");
   };
 
   const submitAppointment = async () => {
     if (!appointmentForm.optionKey) {
-      showToast("Select a doctor and organisation first.");
+      showToast("Select a doctor and organisation first.", "error");
       return;
     }
-
-    if (!appointmentForm.startTime || !appointmentForm.endTime) {
-      showToast("Start and end times are required.");
-      return;
-    }
-
-    const [doctorId, organisationId] = appointmentForm.optionKey.split(":").map(Number);
 
     setIsSubmitting(true);
     try {
       if (editingAppointment) {
+        if (!appointmentForm.startTime || !appointmentForm.endTime) {
+          showToast("Start and end times are required for rescheduling.", "error");
+          return;
+        }
+
+        const startTime = new Date(appointmentForm.startTime);
+        const endTime = new Date(appointmentForm.endTime);
+
+        if (Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) {
+          showToast("Enter valid reschedule timestamps.", "error");
+          return;
+        }
+
+        if (endTime <= startTime) {
+          showToast("End time must be later than start time.", "error");
+          return;
+        }
+
         await updateAppointment(editingAppointment.id, {
-          start_time: new Date(appointmentForm.startTime).toISOString(),
-          end_time: new Date(appointmentForm.endTime).toISOString(),
+          start_time: startTime.toISOString(),
+          end_time: endTime.toISOString(),
         });
-        showToast("Appointment updated.");
+        showToast("Appointment update request saved.");
       } else {
+        if (!appointmentForm.slotId) {
+          showToast("Pick a live slot before booking.", "error");
+          return;
+        }
+
         await createAppointment({
-          doctor_id: doctorId,
-          organisation_id: organisationId,
-          start_time: new Date(appointmentForm.startTime).toISOString(),
-          end_time: new Date(appointmentForm.endTime).toISOString(),
+          slot_id: Number(appointmentForm.slotId),
         });
         showToast("Appointment booked.");
       }
 
       setModal(null);
+      setAppointmentForm(initialForm);
       await loadDashboard();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Appointment request failed");
+      showToast(
+        error instanceof Error ? error.message : "Appointment request failed",
+        "error",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -415,7 +516,10 @@ export function PatientDashboardPage() {
       showToast("Appointment cancelled.");
       await loadDashboard();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Failed to cancel appointment");
+      showToast(
+        error instanceof Error ? error.message : "Failed to cancel appointment",
+        "error",
+      );
     }
   };
 
@@ -428,7 +532,10 @@ export function PatientDashboardPage() {
       showToast(nextGranted ? "Consent granted." : "Consent revoked.");
       await loadDashboard();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Consent update failed");
+      showToast(
+        error instanceof Error ? error.message : "Consent update failed",
+        "error",
+      );
     }
   };
 
@@ -441,7 +548,7 @@ export function PatientDashboardPage() {
   const saveProfile = async () => {
     const cleaned = profileName.trim();
     if (cleaned.length < 3) {
-      showToast("Name must be at least 3 characters.");
+      showToast("Name must be at least 3 characters.", "error");
       return;
     }
 
@@ -451,7 +558,10 @@ export function PatientDashboardPage() {
       showToast("Profile updated.");
       await loadDashboard();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Profile update failed");
+      showToast(
+        error instanceof Error ? error.message : "Profile update failed",
+        "error",
+      );
     } finally {
       setIsSavingProfile(false);
     }
@@ -557,8 +667,13 @@ export function PatientDashboardPage() {
         ) : null}
 
         <div className="mx-auto flex-1 max-w-7xl px-4 pb-28 pt-24 md:px-8 md:pb-12">
-          {isLoading ? <div className="rounded-[1.7rem] border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">Loading dashboard...</div> : null}
-          {!isLoading && dashboardError ? <div className="rounded-[1.7rem] border border-red-200 bg-red-50 p-8 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">{dashboardError}</div> : null}
+          {isLoading ? <LoadingState message="Loading your patient dashboard..." /> : null}
+          {!isLoading && dashboardError ? (
+            <ErrorState
+              title="Patient dashboard unavailable"
+              message={dashboardError}
+            />
+          ) : null}
           {!isLoading && !dashboardError && page === "overview" && overview ? (
             <section className="space-y-6">
               <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
@@ -597,7 +712,11 @@ export function PatientDashboardPage() {
                   </div>
                   <div className="space-y-4">
                     {upcomingAppointments.length === 0 ? (
-                      <div className="rounded-xl bg-slate-50 p-5 text-sm text-slate-500 dark:bg-slate-800/50 dark:text-slate-400">No appointments have been recorded yet.</div>
+                      <EmptyState
+                        title="No upcoming appointments"
+                        description="Once you confirm a live booking, your next appointment will show up here with consent and status details."
+                        className="rounded-xl border-0 bg-slate-50 p-5 text-left shadow-none dark:bg-slate-800/50"
+                      />
                     ) : (
                       upcomingAppointments.slice(0, 4).map((item) => (
                         <article key={item.id} className="rounded-[1.4rem] bg-slate-50 p-4 dark:bg-slate-800/50">
@@ -652,7 +771,11 @@ export function PatientDashboardPage() {
                       <p className="mt-2 text-base font-medium">{overview.recent_record.notes || "No consultation notes were saved for this record."}</p>
                     </div>
                   ) : (
-                    <div className="rounded-xl border border-dashed border-slate-300 p-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">No encounter records exist yet for this patient.</div>
+                    <EmptyState
+                      title="No encounter records yet"
+                      description="Your consultation history will appear here once a doctor saves your first encounter."
+                      className="rounded-xl p-5"
+                    />
                   )}
                 </div>
               </div>
@@ -756,7 +879,11 @@ export function PatientDashboardPage() {
               </div>
               <div className="grid gap-4">
                 {records.length === 0 ? (
-                  <div className="rounded-[1.7rem] border border-dashed border-slate-300 p-8 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">No medical records exist yet.</div>
+                  <EmptyState
+                    title="No medical records yet"
+                    description="Encounter notes and linked prescriptions will appear here after your first completed consultation."
+                    className="rounded-[1.7rem]"
+                  />
                 ) : (
                   records.map((record) => (
                     <article key={record.id} className="rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -813,12 +940,21 @@ export function PatientDashboardPage() {
               </div>
 
               {bookingOptions.length === 0 ? (
-                <div className="rounded-[1.7rem] border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">No bookable doctor affiliations exist yet.</div>
+                <AlertBanner
+                  tone="info"
+                  title="Booking availability is limited"
+                  message="No bookable doctor affiliations are available right now. Appointment booking will open as soon as live availability slots are published from the backend."
+                  className="rounded-[1.7rem]"
+                />
               ) : null}
 
               <div className="grid gap-4">
                 {appointments.length === 0 ? (
-                  <div className="rounded-[1.7rem] border border-dashed border-slate-300 p-8 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">No appointments recorded yet.</div>
+                  <EmptyState
+                    title="No appointments yet"
+                    description="When you reserve a live slot, it will appear here with confirmation status, consent details, and follow-up actions."
+                    className="rounded-[1.7rem]"
+                  />
                 ) : (
                   appointments.map((item) => (
                     <article key={item.id} className="rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -836,7 +972,7 @@ export function PatientDashboardPage() {
                             </p>
                           ) : null}
                         </div>
-                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}>{item.status}</span>
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}>{formatStatusLabel(item.status)}</span>
                       </div>
                       <div className="mt-4 flex flex-wrap gap-2">
                         {["cancelled", "completed"].includes(item.status.toLowerCase()) ? null : (
@@ -852,7 +988,9 @@ export function PatientDashboardPage() {
                             {item.consent.granted ? "Revoke Consent" : "Grant Consent"}
                           </button>
                         )}
-                        <button type="button" onClick={() => openRescheduleModal(item)} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white dark:bg-blue-600">Reschedule</button>
+                        {["cancelled", "completed"].includes(item.status.toLowerCase()) ? null : (
+                          <button type="button" onClick={() => openRescheduleModal(item)} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white dark:bg-blue-600">Reschedule</button>
+                        )}
                         <button type="button" onClick={() => void cancelAppointment(item.id)} disabled={item.status.toLowerCase() === "cancelled"} className="rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:opacity-50 dark:bg-red-900/20 dark:text-red-400">Cancel</button>
                       </div>
                     </article>
@@ -889,9 +1027,11 @@ export function PatientDashboardPage() {
 
                 <div className="grid gap-4">
                   {dispensingSummary.items.length === 0 ? (
-                    <div className="rounded-[1.4rem] border border-dashed border-slate-300 p-6 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                      No dispensing or billing records exist yet for this patient.
-                    </div>
+                    <EmptyState
+                      title="No dispensing records yet"
+                      description="Completed pharmacy issues and billing line items will show here once a prescription has been processed."
+                      className="rounded-[1.4rem] p-6"
+                    />
                   ) : (
                     dispensingSummary.items.map((item) => (
                       <article key={item.id} className="rounded-[1.45rem] bg-slate-50 p-5 dark:bg-slate-800/50">
@@ -902,7 +1042,7 @@ export function PatientDashboardPage() {
                             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{formatDateTime(item.created_at)}</p>
                           </div>
                           <div className="text-left md:text-right">
-                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}>{item.status}</span>
+                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}>{formatStatusLabel(item.status)}</span>
                             <p className="mt-3 text-sm font-semibold text-slate-500 dark:text-slate-400">Dispensed: {formatLkr(item.total_price)}</p>
                             <p className="mt-1 text-base font-bold text-primary dark:text-blue-400">Billed: {formatLkr(item.billed_total)}</p>
                           </div>
@@ -940,10 +1080,21 @@ export function PatientDashboardPage() {
                   <input type="text" value={pharmacyQuery} onChange={(event) => setPharmacyQuery(event.target.value)} placeholder="Search medicine..." className="w-full rounded-xl border-slate-200 bg-white py-3 pl-11 pr-4 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
                 </div>
               </div>
-              {pharmacyError ? <div className="rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{pharmacyError}</div> : null}
+              {isPharmacyLoading ? <LoadingState message="Refreshing pharmacy inventory..." /> : null}
+              {pharmacyError ? (
+                <AlertBanner
+                  tone="error"
+                  title="Pharmacy search unavailable"
+                  message={pharmacyError}
+                />
+              ) : null}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {pharmacyItems.length === 0 ? (
-                  <div className="rounded-[1.7rem] border border-dashed border-slate-300 p-8 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">No pharmacy inventory exists yet for this query.</div>
+                  <EmptyState
+                    title="No pharmacy results"
+                    description="Try a different medicine name or wait until matching inventory is published by connected pharmacies."
+                    className="rounded-[1.7rem] md:col-span-2 xl:col-span-3"
+                  />
                 ) : (
                   pharmacyItems.map((item) => (
                     <article key={item.id} className="rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1046,43 +1197,110 @@ export function PatientDashboardPage() {
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-2xl font-bold">{editingAppointment ? "Reschedule Appointment" : "Book Appointment"}</h3>
-                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">This writes to the appointment table. If options are empty, your database still needs doctor affiliations.</p>
+                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                  {editingAppointment
+                    ? "Rescheduling currently updates the appointment window directly. Use this only after the clinic has already confirmed the new time."
+                    : "Booking uses live availability slots from the backend. If no slots appear, this doctor has not published a bookable window yet."}
+                </p>
               </div>
               <button type="button" onClick={() => setModal(null)} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
                 <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Doctor and Organisation</label>
-                <select value={appointmentForm.optionKey} onChange={(event) => setAppointmentForm((current) => ({ ...current, optionKey: event.target.value }))} disabled={editingAppointment !== null} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white">
-                  <option value="">Select an available slot owner</option>
-                  {bookingOptions.map((item) => (
-                    <option key={`${item.doctor_id}:${item.organisation_id}`} value={`${item.doctor_id}:${item.organisation_id}`}>
-                      {item.doctor_name} • {item.organisation_name}
-                    </option>
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Doctor and Organisation</label>
+                  <select value={appointmentForm.optionKey} onChange={(event) => setAppointmentForm((current) => ({ ...current, optionKey: event.target.value, slotId: "", startTime: "", endTime: "" }))} disabled={editingAppointment !== null} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white">
+                    <option value="">Select an available slot owner</option>
+                    {bookingOptions.map((item) => (
+                      <option key={`${item.doctor_id}:${item.organisation_id}`} value={`${item.doctor_id}:${item.organisation_id}`}>
+                        {item.doctor_name} • {item.organisation_name}
+                      </option>
                   ))}
                 </select>
               </div>
 
               {selectedOption ? <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">{selectedOption.specialization || "Specialization not set"} • {selectedOption.organisation_name}</div> : null}
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Start Time</label>
-                  <input type="datetime-local" value={appointmentForm.startTime} onChange={(event) => setAppointmentForm((current) => ({ ...current, startTime: event.target.value }))} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+              {editingAppointment ? (
+                <>
+                  <AlertBanner
+                    tone="info"
+                    message="Slot reassignment is not available from the current backend contract, so this form only updates the requested appointment window."
+                  />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Start Time</label>
+                      <input type="datetime-local" value={appointmentForm.startTime} onChange={(event) => setAppointmentForm((current) => ({ ...current, startTime: event.target.value }))} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">End Time</label>
+                      <input type="datetime-local" value={appointmentForm.endTime} onChange={(event) => setAppointmentForm((current) => ({ ...current, endTime: event.target.value }))} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Available Slots</label>
+                    {isSlotsLoading ? (
+                      <LoadingState message="Loading live slots..." />
+                    ) : slotError ? (
+                      <AlertBanner tone="error" message={slotError} />
+                    ) : selectedOption && availableSlots.length === 0 ? (
+                      <AlertBanner
+                        tone="info"
+                        message="No open slots are published for this doctor right now. Booking will be available once the hospital releases a live slot."
+                      />
+                    ) : (
+                      <div className="grid gap-3">
+                        {availableSlots.map((slot) => {
+                          const active = appointmentForm.slotId === String(slot.id);
+                          return (
+                            <button
+                              key={slot.id}
+                              type="button"
+                              onClick={() =>
+                                setAppointmentForm((current) => ({
+                                  ...current,
+                                  slotId: String(slot.id),
+                                  startTime: slot.start_time.slice(0, 16),
+                                  endTime: slot.end_time.slice(0, 16),
+                                }))
+                              }
+                              className={`rounded-xl border px-4 py-4 text-left transition ${
+                                active
+                                  ? "border-primary bg-blue-50 text-blue-900 dark:border-blue-500 dark:bg-blue-950/30 dark:text-blue-100"
+                                  : "border-slate-200 bg-white hover:border-primary/50 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-slate-800"
+                              }`}
+                            >
+                              <p className="text-sm font-bold">{formatDateTime(slot.start_time)}</p>
+                              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ends {formatDateTime(slot.end_time)}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected Start Time</label>
+                      <input type="datetime-local" value={appointmentForm.startTime} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected End Time</label>
+                      <input type="datetime-local" value={appointmentForm.endTime} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">End Time</label>
-                  <input type="datetime-local" value={appointmentForm.endTime} onChange={(event) => setAppointmentForm((current) => ({ ...current, endTime: event.target.value }))} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
-                </div>
-              </div>
+              )}
             </div>
 
             <div className="mt-6 flex gap-3">
               <button type="button" onClick={() => setModal(null)} className="flex-1 rounded-xl bg-slate-100 py-3 font-bold dark:bg-slate-800">Close</button>
-              <button type="button" onClick={() => void submitAppointment()} disabled={isSubmitting} className="flex-1 rounded-xl bg-primary py-3 font-bold text-white disabled:opacity-60 dark:bg-blue-600">
+              <button type="button" onClick={() => void submitAppointment()} disabled={isSubmitting || (!editingAppointment && (!selectedOption || !appointmentForm.slotId || isSlotsLoading))} className="flex-1 rounded-xl bg-primary py-3 font-bold text-white disabled:opacity-60 dark:bg-blue-600">
                 {isSubmitting ? "Saving..." : editingAppointment ? "Save Changes" : "Book Now"}
               </button>
             </div>
@@ -1090,7 +1308,7 @@ export function PatientDashboardPage() {
         </div>
       ) : null}
 
-      {toast ? <div className="fixed left-1/2 top-6 z-[100] -translate-x-1/2 rounded-full bg-emerald-600 px-6 py-3 text-sm font-bold text-white shadow-2xl">{toast}</div> : null}
+      {toast ? <ToastMessage message={toast.message} tone={toast.tone} /> : null}
     </div>
   );
 }
