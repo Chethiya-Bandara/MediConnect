@@ -37,6 +37,7 @@ export const registrationSchema = z
     specialization: z.string().trim().optional(),
     licenseNumber: z.string().trim().optional(),
     pharmacyId: z.string().trim().optional(),
+    organisationId: z.string().trim().optional(),
     password: z
       .string()
       .min(10, "Password must be at least 10 characters.")
@@ -104,6 +105,17 @@ export const registrationSchema = z
         code: z.ZodIssueCode.custom,
         path: ["pharmacyId"],
         message: "Pharmacy ID is required for pharmacists.",
+      });
+    }
+
+    if (
+      ["HOSPITAL_ADMIN", "PHARMACY_ADMIN", "HEALTH_MINISTRY_ADMIN"].includes(values.role) &&
+      !values.organisationId?.trim()
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["organisationId"],
+        message: "Organization ID is required for this role.",
       });
     }
   });

@@ -24,9 +24,11 @@ export const endpoints = {
   pharmacist: {
     prescriptions: "/pharmacist/dashboard/prescriptions",
     dispense: "/pharmacist/dashboard/dispense",
+    history: "/pharmacist/dashboard/history",
   },
   pharmacyAdmin: {
     inventoryBase: "/pharmacy-admin/inventory",
+    dashboardBase: "/pharmacy-admin/dashboard",
   },
   hospitalAdmin: {
     dashboard: "/hospital-admin/dashboard",
