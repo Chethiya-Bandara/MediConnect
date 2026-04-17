@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.supabase import supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker
-from app.middleware.consent_guard import check_consent
+from app.middleware.consent_guard import check_consent, auto_revoke_consent
 
 router = APIRouter(prefix="/doctor/dashboard", tags=["doctor-dashboard"])
 
@@ -975,6 +975,15 @@ def submit_encounter(
         supabase_admin.table("appointments").update({"status": "completed"}).eq(
             "id", appointment["id"]
         ).execute()
+
+        # ── Auto-Revoke Consent (Bihanga B-3.1.2) ─────────────────
+        # Automatically revoke patient consent after encounter is finalised
+        # Prevents doctor from accessing history after appointment completes
+        auto_revoke_consent(
+            appointment_id=appointment["id"],
+            doctor_user_id=context["user_id"],
+            reason="Encounter finalised — consent auto-revoked by system"
+        )
 
     _log_audit_action(context["user_id"], "ENCOUNTER_SUBMITTED", "encounters", encounter["id"])
     if prescription:

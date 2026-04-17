@@ -102,15 +102,25 @@ def check_consent(doctor_id: int, appointment_id: int) -> bool:
 
     latest_action = consent_logs[0].get("action", "")
 
-    if latest_action != "CONSENT_GRANTED":
-        # Latest action was CONSENT_REVOKED or unknown
+    if latest_action == "CONSENT_AUTO_REVOKED":
+        # Encounter was finalised — consent auto-revoked by system
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
-                "Access denied. Patient has revoked consent for this appointment. "
-                "You cannot access their medical history."
+                "Access denied. This appointment has been finalised. "
+                "Consent was automatically revoked when the encounter was completed."
             )
         )
+
+        if latest_action != "CONSENT_GRANTED":
+            # Latest action was CONSENT_REVOKED or unknown
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Access denied. Patient has revoked consent for this appointment. "
+                    "You cannot access their medical history."
+                )
+            )
 
     return True
 
@@ -159,3 +169,70 @@ def get_consent_status(appointment_id: int) -> dict:
         "status":       "Granted" if granted else "Revoked",
         "last_updated": latest.get("timestamp"),
     }
+
+def auto_revoke_consent(
+    appointment_id: int,
+    doctor_user_id: str,
+    reason: str = "Encounter finalised — consent auto-revoked"
+) -> bool:
+    """
+    Automatically revokes patient consent when an encounter is finalised.
+    Called after appointment is marked as completed.
+
+    Logs CONSENT_AUTO_REVOKED to audit_logs so the revocation
+    is traceable and cannot be mistaken for a manual revocation.
+
+    Args:
+        appointment_id:  The appointment being finalised
+        doctor_user_id:  The doctor's user ID (for audit log)
+        reason:          Why consent was revoked (for audit trail)
+
+    Returns:
+        True if revocation was logged successfully
+        False if it failed (non-blocking — encounter still completes)
+    """
+    try:
+        from datetime import datetime
+        supabase_admin.table("audit_logs").insert({
+            "action":    "CONSENT_AUTO_REVOKED",
+            "entity":    "appointment_consent",
+            "entity_id": appointment_id,
+            "user_id":   doctor_user_id,
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "notes":     reason,
+        }).execute()
+        return True
+
+    except Exception:
+        # Auto-revocation failure should NOT block the encounter from completing
+        # Log the failure but let the encounter proceed
+        return False
+
+
+def is_appointment_finalised(appointment_id: int) -> bool:
+    """
+    Checks if an appointment has been finalised (completed).
+    Used to prevent doctors from accessing history of completed appointments.
+
+    Args:
+        appointment_id: The appointment to check
+
+    Returns:
+        True if appointment is completed, False otherwise
+    """
+    try:
+        appointment = (
+            supabase_admin.table("appointments")
+            .select("status")
+            .eq("id", appointment_id)
+            .single()
+            .execute()
+            .data
+        )
+        if not appointment:
+            return False
+
+        return (appointment.get("status") or "").lower() == "completed"
+
+    except Exception:
+        return False
