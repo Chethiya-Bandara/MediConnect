@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.supabase import supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker
+from app.middleware.consent_guard import check_consent
 
 router = APIRouter(prefix="/doctor/dashboard", tags=["doctor-dashboard"])
 
@@ -876,6 +877,14 @@ def submit_encounter(
     context = _require_doctor_context(authorization)
     doctor = context["doctor"]
 
+    # ── Consent Guard (Bihanga B-3.1.1) ──────────────────────────
+    # Doctor must have patient consent before accessing history
+    if payload.appointment_id is not None:
+        check_consent(
+            doctor_id=doctor["id"],
+            appointment_id=payload.appointment_id
+        )
+
     patient_rows = (
         supabase_admin.table("patients")
         .select("*")
@@ -1172,4 +1181,82 @@ async def upload_license(
         "file_url":  file_url,
         "message":   "SLMC license uploaded successfully",
         "file_size": f"{len(contents) / 1024:.1f}KB",
+    }
+
+@router.get("/patients/{patient_id}/history")
+def get_patient_history(
+    patient_id: int,
+    appointment_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Returns a patient's medical history for a specific appointment.
+    Requires patient consent — blocked with 403 if not granted.
+    Consent Guard applied (Bihanga B-3.1.1)
+    """
+    context = _require_doctor_context(authorization)
+    doctor  = context["doctor"]
+
+    # ── Consent Guard ─────────────────────────────────────────────
+    check_consent(
+        doctor_id=doctor["id"],
+        appointment_id=appointment_id
+    )
+
+    # ── Fetch patient encounters ──────────────────────────────────
+    try:
+        encounters = (
+            supabase_admin.table("encounters")
+            .select("*")
+            .eq("patient_id", patient_id)
+            .order("created_at", desc=True)
+            .execute()
+            .data or []
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not fetch patient history"
+        )
+
+    # ── Fetch prescriptions ───────────────────────────────────────
+    encounter_ids = [e["id"] for e in encounters]
+    prescriptions = []
+    if encounter_ids:
+        try:
+            prescriptions = (
+                supabase_admin.table("prescriptions")
+                .select("*")
+                .in_("encounter_id", encounter_ids)
+                .execute()
+                .data or []
+            )
+        except Exception:
+            pass
+
+    prescriptions_map = {}
+    for p in prescriptions:
+        prescriptions_map.setdefault(p["encounter_id"], []).append(p)
+
+    # ── Log the access ────────────────────────────────────────────
+    _log_audit_action(
+        context["user_id"],
+        "PATIENT_HISTORY_ACCESSED",
+        "encounters",
+        patient_id
+    )
+
+    return {
+        "patient_id":   patient_id,
+        "doctor_id":    doctor["id"],
+        "consent":      "granted",
+        "encounters":   [
+            {
+                "id":           e.get("id"),
+                "created_at":   e.get("created_at"),
+                "notes":        e.get("notes"),
+                "prescriptions": prescriptions_map.get(e["id"], [])
+            }
+            for e in encounters
+        ]
     }
