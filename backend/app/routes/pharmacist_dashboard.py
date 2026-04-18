@@ -130,7 +130,8 @@ def verify_prescription(prescription_id: int):
     try:
         prescription = (
             supabase_admin.table("prescriptions")
-            .select("*")
+            .select("id, status, created_at, patient_id, doctor_id, signature")
+            # ❌ encounter_id excluded — no path to clinical notes (B-5.1.1)
             .eq("id", prescription_id)
             .single()
             .execute()
@@ -245,11 +246,14 @@ def dispense_prescription(
     pharmacy_id      = payload.pharmacy_id
     items_to_dispense = payload.items
 
-    pres = supabase_admin.table("prescriptions") \
-        .select("*") \
-        .eq("id", prescription_id) \
-        .single() \
+    pres = (
+        supabase_admin.table("prescriptions")
+        .select("id, status, patient_id, doctor_id")
+        # ❌ encounter_id excluded — no path to clinical notes (B-5.1.1)
+        .eq("id", prescription_id)
+        .single()
         .execute()
+    )
 
     if not pres.data:
         raise HTTPException(404, "Prescription not found")
