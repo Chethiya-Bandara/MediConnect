@@ -1,56 +1,220 @@
-from fastapi import APIRouter, Depends, HTTPException
-from app.config.supabase import supabase
+# app/routes/pharmacist_dashboard.py
+# Pharmacist dashboard endpoints
+# Signature verification added by Bihanga (B-4.1.2)
+
 from datetime import datetime
-from app.middleware.role_checker import RoleChecker
-from app.schemas.pharmacist_schema import DispenseItem, DispenseRequest
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel
 
 from app.config.supabase import supabase, supabase_admin
+from app.middleware.role_checker import RoleChecker, PharmacistOnly
+from app.middleware.prescription_signer import (
+    build_prescription_payload,
+    verify_prescription_signature,
+)
 from app.utils.helpers import validate_dhid
 
 router = APIRouter(prefix="/pharmacist/dashboard", tags=["Pharmacist-dashboard"])
 
-@router.get("/prescriptions")
-def get_prescriptions():
-    res = supabase.table("prescriptions") \
-        .select("*") \
-        .eq("status", "PENDING") \
-        .execute()
 
+# ── Schemas ───────────────────────────────────────────────────────────────────
+
+class DispenseItem(BaseModel):
+    id:       int
+    quantity: int
+
+
+class DispenseRequest(BaseModel):
+    pharmacy_id: int
+    items:       list[DispenseItem]
+
+
+# ── Helper ────────────────────────────────────────────────────────────────────
+
+def reduce_stock(drug_name: str, pharmacy_id: int, quantity: int):
+    item = (
+        supabase.table("inventory")
+        .select("*")
+        .eq("drug_name", drug_name)
+        .eq("pharmacy_id", pharmacy_id)
+        .single()
+        .execute()
+    )
+    if item.data["stock"] < quantity:
+        raise HTTPException(400, "Not enough stock")
+
+    supabase.table("inventory").update({
+        "stock": item.data["stock"] - quantity
+    }).eq("id", item.data["id"]).execute()
+
+
+# ── Prescription Endpoints ────────────────────────────────────────────────────
+
+@router.get("/prescriptions", dependencies=[Depends(PharmacistOnly)])
+def get_prescriptions():
+    """Returns all pending prescriptions. Pharmacists only."""
+    res = supabase_admin.table("prescriptions") \
+        .select("*") \
+        .eq("status", "active") \
+        .execute()
     return res.data
 
-@router.get("/prescriptions/{prescription_id}")
-def get_prescription_details(prescription_id: str):
 
-    prescription = supabase.table("prescriptions") \
+@router.get("/prescriptions/{prescription_id}", dependencies=[Depends(PharmacistOnly)])
+def get_prescription_details(prescription_id: str):
+    """Returns prescription details and items. Pharmacists only."""
+    prescription = supabase_admin.table("prescriptions") \
         .select("*") \
         .eq("id", prescription_id) \
         .single() \
         .execute()
 
-    items = supabase.table("prescription_items") \
+    items = supabase_admin.table("prescription_items") \
         .select("*") \
         .eq("prescription_id", prescription_id) \
         .execute()
 
     return {
         "prescription": prescription.data,
-        "items": items.data
+        "items":        items.data
     }
 
+
+# ── Signature Verification (Bihanga B-4.1.2) ─────────────────────────────────
+
+@router.get("/verify/{prescription_id}", dependencies=[Depends(PharmacistOnly)])
+def verify_prescription(prescription_id: int):
+    """
+    Verifies the RSA-SHA256 digital signature of a prescription.
+    Pharmacists MUST call this before dispensing medication.
+
+    Returns:
+        valid: True  → prescription is genuine, safe to dispense
+        valid: False → prescription may be tampered, DO NOT dispense
+    """
+
+    # ── Get prescription ──────────────────────────────────────────
+    try:
+        prescription = (
+            supabase_admin.table("prescriptions")
+            .select("*")
+            .eq("id", prescription_id)
+            .single()
+            .execute()
+            .data
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    # ── Check signature exists ────────────────────────────────────
+    signature = prescription.get("signature")
+    if not signature:
+        return {
+            "prescription_id": prescription_id,
+            "valid":           False,
+            "status":          "UNSIGNED",
+            "message":         "This prescription has no digital signature. "
+                               "It may have been created before signing was implemented.",
+            "safe_to_dispense": False,
+        }
+
+    # ── Get prescription items ────────────────────────────────────
+    try:
+        items = (
+            supabase_admin.table("prescription_items")
+            .select("*")
+            .eq("prescription_id", prescription_id)
+            .execute()
+            .data or []
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not fetch prescription items")
+
+    # ── Get doctor's public key ───────────────────────────────────
+    doctor_id = prescription.get("doctor_id")
+    try:
+        doctor = (
+            supabase_admin.table("doctors")
+            .select("id, public_key")
+            .eq("id", doctor_id)
+            .single()
+            .execute()
+            .data
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+
+    public_key = doctor.get("public_key") if doctor else None
+    if not public_key:
+        return {
+            "prescription_id": prescription_id,
+            "valid":           False,
+            "status":          "NO_PUBLIC_KEY",
+            "message":         "Doctor's public key is not registered. "
+                               "Cannot verify this prescription.",
+            "safe_to_dispense": False,
+        }
+
+    # ── Rebuild canonical payload ─────────────────────────────────
+    payload_str = build_prescription_payload(
+        prescription_id = prescription_id,
+        patient_id      = prescription.get("patient_id"),
+        doctor_id       = doctor_id,
+        items           = items,
+        created_at      = str(prescription.get("created_at", ""))
+    )
+
+    # ── Verify signature ──────────────────────────────────────────
+    is_valid = verify_prescription_signature(
+        payload_str    = payload_str,
+        signature_b64  = signature,
+        public_key_pem = public_key
+    )
+
+    # ── Log verification attempt ──────────────────────────────────
+    try:
+        supabase_admin.table("audit_logs").insert({
+            "action":    "PRESCRIPTION_VERIFIED" if is_valid else "PRESCRIPTION_VERIFY_FAILED",
+            "entity":    "prescriptions",
+            "entity_id": prescription_id,
+            "timestamp": datetime.now().astimezone().isoformat(),
+        }).execute()
+    except Exception:
+        pass
+
+    return {
+        "prescription_id":  prescription_id,
+        "valid":            is_valid,
+        "status":           "VALID" if is_valid else "INVALID",
+        "message":          "Prescription signature is valid. Safe to dispense."
+                            if is_valid else
+                            "Prescription signature is INVALID. "
+                            "Do NOT dispense — this prescription may have been tampered with.",
+        "safe_to_dispense": is_valid,
+        "doctor_id":        doctor_id,
+        "patient_id":       prescription.get("patient_id"),
+    }
+
+
+# ── Dispense Endpoint ─────────────────────────────────────────────────────────
 
 @router.post("/dispense/{prescription_id}")
 def dispense_prescription(
     prescription_id: str,
     payload: DispenseRequest,
-    user = Depends(RoleChecker(["PHARMACIST"]))
+    user: dict = Depends(PharmacistOnly)
 ):
-
-    pharmacist_id = user["id"]
-    pharmacy_id = payload.pharmacy_id
+    """Dispenses a prescription. Pharmacists only."""
+    pharmacist_id    = user.get("user_id")
+    pharmacy_id      = payload.pharmacy_id
     items_to_dispense = payload.items
 
-    # 1. Get prescription
-    pres = supabase.table("prescriptions") \
+    pres = supabase_admin.table("prescriptions") \
         .select("*") \
         .eq("id", prescription_id) \
         .single() \
@@ -58,17 +222,15 @@ def dispense_prescription(
 
     if not pres.data:
         raise HTTPException(404, "Prescription not found")
-    
+
     if pres.data["status"] == "DISPENSED":
         raise HTTPException(400, "Prescription already fully dispensed.")
 
-    # 2. Loop through items
     for item in items_to_dispense:
-
         item_id = item.id
-        qty = item.quantity
+        qty     = item.quantity
 
-        db_item = supabase.table("prescription_items") \
+        db_item = supabase_admin.table("prescription_items") \
             .select("*") \
             .eq("id", item_id) \
             .single() \
@@ -82,70 +244,51 @@ def dispense_prescription(
         if qty > remaining:
             raise HTTPException(400, f"Cannot dispense more than remaining ({remaining})")
 
-        # 3. Reduce stock
         reduce_stock(db_item.data["drug_name"], pharmacy_id, qty)
 
-        # 4. Update dispensed quantity
         new_dispensed = db_item.data.get("dispensed_quantity", 0) + qty
-
-        supabase.table("prescription_items").update({
+        supabase_admin.table("prescription_items").update({
             "dispensed_quantity": new_dispensed
         }).eq("id", item_id).execute()
 
-    # 5. Determine overall status
-    all_items = supabase.table("prescription_items") \
+    all_items  = supabase_admin.table("prescription_items") \
         .select("*") \
         .eq("prescription_id", prescription_id) \
         .execute()
 
-    fully_done = True
-
-    for item in all_items.data:
-        if item.get("dispensed_quantity", 0) < item["quantity"]:
-            fully_done = False
-            break
+    fully_done = all(
+        item.get("dispensed_quantity", 0) >= item["quantity"]
+        for item in all_items.data
+    )
 
     new_status = "DISPENSED" if fully_done else "PARTIALLY_DISPENSED"
 
-    # 6. Update prescription status
-    supabase.table("prescriptions").update({
+    supabase_admin.table("prescriptions").update({
         "status": new_status
     }).eq("id", prescription_id).execute()
 
-    # 7. Log dispensation
-    supabase.table("dispensations").insert({
+    supabase_admin.table("dispensations").insert({
         "prescription_id": prescription_id,
-        "pharmacist_id": pharmacist_id,
-        "dispensed_at": datetime.utcnow().isoformat(),
-        "status": new_status
+        "pharmacist_id":   pharmacist_id,
+        "dispensed_at":    datetime.utcnow().isoformat(),
+        "status":          new_status
     }).execute()
 
     return {
         "message": "Dispensing successful",
-        "status": new_status
+        "status":  new_status
     }
 
-def reduce_stock(drug_name, pharmacy_id, quantity):
-    item = supabase.table("inventory") \
-        .select("*") \
-        .eq("drug_name", drug_name) \
-        .eq("pharmacy_id", pharmacy_id) \
-        .single() \
-        .execute()
 
-    if item.data["stock"] < quantity:
-        raise HTTPException(400, "Not enough stock")
+# ── DHID Lookup ───────────────────────────────────────────────────────────────
 
-    supabase.table("inventory").update({
-        "stock": item.data["stock"] - quantity
-    }).eq("id", item.data["id"]).execute()
-
-@router.get("/dhid/{dhid}")
-def get_prescriptions(dhid: str):
+@router.get("/dhid/{dhid}", dependencies=[Depends(PharmacistOnly)])
+def get_prescriptions_by_dhid(dhid: str):
+    """Looks up prescriptions by patient DHID. Pharmacists only."""
     if not validate_dhid(dhid):
-        raise HTTPException(400)
+        raise HTTPException(400, "Invalid DHID format")
 
     return supabase_admin.table("prescriptions") \
         .select("*") \
         .eq("patient_dhid", dhid) \
-        .execute()
+        .execute().data
