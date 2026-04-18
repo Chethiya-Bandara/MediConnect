@@ -862,6 +862,57 @@ def create_appointment(
     if not slot:
         raise HTTPException(status_code=400, detail="Slot not available")
 
+    # ── Double-Booking Prevention (Bihanga B-3.2.2) ───────────────
+
+    # Check 1 — Patient doesn't already have an overlapping appointment
+    slot_start = slot["start_time"]
+    slot_end   = slot["end_time"]
+
+    patient_conflicts = (
+        supabase_admin.table("appointments")
+        .select("id, start_time, end_time, status")
+        .eq("patient_id", patient["id"])
+        .not_.in_("status", ["cancelled", "completed"])
+        .lt("start_time", slot_end)
+        .gt("end_time", slot_start)
+        .execute()
+        .data or []
+    )
+
+    if patient_conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "Double booking detected",
+                "message": "You already have an appointment during this time slot. "
+                           "Please cancel it before booking a new one.",
+                "conflict_appointment_id": patient_conflicts[0]["id"]
+            }
+        )
+
+    # Check 2 — Doctor doesn't already have another patient at same time
+    doctor_conflicts = (
+        supabase_admin.table("appointments")
+        .select("id, start_time, end_time, status")
+        .eq("doctor_id", slot["doctor_id"])
+        .not_.in_("status", ["cancelled", "completed"])
+        .lt("start_time", slot_end)
+        .gt("end_time", slot_start)
+        .execute()
+        .data or []
+    )
+
+    if doctor_conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "Doctor unavailable",
+                "message": "This doctor already has an appointment during this time. "
+                           "Please choose a different time slot.",
+            }
+        )
+
+
     # Validate doctor affiliation is approved
     affiliation = supabase_admin.table("doctor_affiliations") \
         .select("*") \
