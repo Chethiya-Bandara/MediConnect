@@ -266,3 +266,86 @@ def is_valid_nic(nic: str) -> bool:
     new_format = _re.match(r'^\d{12}$', nic)
 
     return bool(old_format or new_format)
+
+# ── Search Query Sanitisation (B-5.1.2) ──────────────────────────────────────
+# Sanitises medicine search queries to prevent injection attacks.
+#
+# Even though Supabase uses parameterized queries (preventing SQL injection),
+# we still sanitise to:
+#   1. Remove LIKE wildcard abuse (% and _ characters)
+#   2. Strip dangerous special characters
+#   3. Limit query length
+#   4. Prevent NoSQL/pattern injection attempts
+
+def sanitize_search_query(query: str, max_length: int = 100) -> str:
+    """
+    Sanitises a search query for safe use in database queries.
+    Removes dangerous characters and patterns.
+
+    Args:
+        query:      Raw search query from user input
+        max_length: Maximum allowed query length (default 100)
+
+    Returns:
+        Sanitised query string safe for database use
+    """
+    if not query or not isinstance(query, str):
+        return ""
+
+    # Step 1 — Strip whitespace
+    cleaned = query.strip()
+
+    # Step 2 — Enforce length limit
+    cleaned = cleaned[:max_length]
+
+    # Step 3 — Remove SQL wildcard characters that could abuse LIKE queries
+    # % → matches any sequence of characters in LIKE
+    # _ → matches any single character in LIKE
+    cleaned = cleaned.replace("%", "")
+    cleaned = cleaned.replace("_", " ")
+
+    # Step 4 — Remove SQL injection special characters
+    dangerous_chars = ["'", '"', ";", "--", "/*", "*/", "\\", "\x00"]
+    for char in dangerous_chars:
+        cleaned = cleaned.replace(char, "")
+
+    # Step 5 — Remove NoSQL injection patterns
+    nosql_patterns = ["$where", "$gt", "$lt", "$ne", "$in", "$or", "$and"]
+    cleaned_lower = cleaned.lower()
+    for pattern in nosql_patterns:
+        if pattern in cleaned_lower:
+            cleaned = re.sub(re.escape(pattern), "", cleaned, flags=re.IGNORECASE)
+
+    # Step 6 — Collapse multiple spaces
+    cleaned = " ".join(cleaned.split())
+
+    return cleaned
+
+
+def is_safe_search_query(query: str) -> bool:
+    """
+    Checks if a search query is safe without modifying it.
+    Returns False if dangerous patterns are detected.
+
+    Args:
+        query: Raw search query to check
+
+    Returns:
+        True if query appears safe, False if suspicious
+    """
+    if not query:
+        return True
+
+    suspicious_patterns = [
+        "'", '"', ";", "--", "/*", "*/",
+        "DROP", "DELETE", "INSERT", "UPDATE", "SELECT",
+        "UNION", "OR 1=1", "AND 1=1",
+        "$where", "$gt", "$ne",
+    ]
+
+    query_upper = query.upper()
+    for pattern in suspicious_patterns:
+        if pattern.upper() in query_upper:
+            return False
+
+    return True

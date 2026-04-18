@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.supabase import supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker
-from app.utils.helpers import validate_dhid, mask_nic
+from app.utils.helpers import validate_dhid, mask_nic, sanitize_search_query
 
 router = APIRouter(prefix="/patient/dashboard", tags=["patient-dashboard"])
 
@@ -1124,9 +1124,12 @@ def search_pharmacy(
 ):
     _require_patient_context(authorization)
 
+    # ── Sanitise search query (Bihanga B-5.1.2) ──────────────────
+    safe_query = sanitize_search_query(query, max_length=100)
+
     inventory_query = supabase_admin.table("inventory").select("*").order("medicine_name")
-    if query.strip():
-        inventory_query = inventory_query.ilike("medicine_name", f"%{query.strip()}%")
+    if safe_query:
+        inventory_query = inventory_query.ilike("medicine_name", f"%{safe_query}%")
     rows = inventory_query.limit(50).execute().data or []
 
     pharmacy_lookup = {}
