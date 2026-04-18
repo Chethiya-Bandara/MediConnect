@@ -54,31 +54,62 @@ def reduce_stock(drug_name: str, pharmacy_id: int, quantity: int):
 
 @router.get("/prescriptions", dependencies=[Depends(PharmacistOnly)])
 def get_prescriptions():
-    """Returns all pending prescriptions. Pharmacists only."""
-    res = supabase_admin.table("prescriptions") \
-        .select("*") \
-        .eq("status", "active") \
+    """
+    Returns all active prescriptions for dispensing.
+    Pharmacists only.
+    Clinical notes and encounter data are deliberately excluded.
+    Only pharmacy-relevant fields are returned (B-4.2.1)
+    """
+    res = (
+        supabase_admin.table("prescriptions")
+        .select(
+            "id, status, created_at, patient_id, doctor_id, signature"
+            # ❌ encounter_id excluded — prevents joining to clinical notes
+            # ❌ notes excluded — clinical data not for pharmacists
+        )
+        .eq("status", "active")
         .execute()
+    )
     return res.data
 
 
 @router.get("/prescriptions/{prescription_id}", dependencies=[Depends(PharmacistOnly)])
 def get_prescription_details(prescription_id: str):
-    """Returns prescription details and items. Pharmacists only."""
-    prescription = supabase_admin.table("prescriptions") \
-        .select("*") \
-        .eq("id", prescription_id) \
-        .single() \
+    """
+    Returns prescription details and items for dispensing.
+    Pharmacists only.
+    Clinical notes and encounter data strictly excluded (B-4.2.1)
+    """
+    # ── Pharmacy-safe prescription fields only ────────────────────
+    prescription = (
+        supabase_admin.table("prescriptions")
+        .select(
+            "id, status, created_at, patient_id, doctor_id, signature"
+            # ❌ encounter_id excluded — no path to clinical notes
+        )
+        .eq("id", prescription_id)
+        .single()
         .execute()
+    )
 
-    items = supabase_admin.table("prescription_items") \
-        .select("*") \
-        .eq("prescription_id", prescription_id) \
+    if not prescription.data:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    # ── Pharmacy-safe prescription items only ─────────────────────
+    items = (
+        supabase_admin.table("prescription_items")
+        .select(
+            "id, prescription_id, medicine_name, dosage, quantity, instructions, dispensed_quantity"
+            # ❌ No clinical fields — only dispensing-relevant data
+        )
+        .eq("prescription_id", prescription_id)
         .execute()
+    )
 
     return {
         "prescription": prescription.data,
-        "items":        items.data
+        "items":        items.data,
+        "note":         "Clinical notes and encounter data are not available to pharmacy staff."
     }
 
 
@@ -284,11 +315,38 @@ def dispense_prescription(
 
 @router.get("/dhid/{dhid}", dependencies=[Depends(PharmacistOnly)])
 def get_prescriptions_by_dhid(dhid: str):
-    """Looks up prescriptions by patient DHID. Pharmacists only."""
+    """
+    Looks up prescriptions by patient DHID.
+    Pharmacists only.
+    Returns pharmacy-safe fields only — no clinical notes (B-4.2.1)
+    """
     if not validate_dhid(dhid):
         raise HTTPException(400, "Invalid DHID format")
 
-    return supabase_admin.table("prescriptions") \
-        .select("*") \
-        .eq("patient_dhid", dhid) \
-        .execute().data
+    # Get patient_id from DHID first
+    try:
+        patient = (
+            supabase_admin.table("patients")
+            .select("id")
+            .eq("dhid", dhid)
+            .single()
+            .execute()
+            .data
+        )
+    except Exception:
+        raise HTTPException(404, "Patient not found")
+
+    if not patient:
+        raise HTTPException(404, "Patient not found")
+
+    # Return pharmacy-safe prescription fields only
+    return (
+        supabase_admin.table("prescriptions")
+        .select(
+            "id, status, created_at, patient_id, doctor_id, signature"
+            # ❌ encounter_id excluded — no path to clinical notes
+        )
+        .eq("patient_id", patient["id"])
+        .execute()
+        .data
+    )
