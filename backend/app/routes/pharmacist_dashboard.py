@@ -31,6 +31,17 @@ class DispenseRequest(BaseModel):
     items:       list[DispenseItem]
 
 
+class BillItem(BaseModel):
+    inventory_id: int
+    quantity:     int
+
+
+class BillRequest(BaseModel):
+    pharmacy_id:     int
+    prescription_id: int
+    items:           list[BillItem]
+
+
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def reduce_stock(drug_name: str, pharmacy_id: int, quantity: int):
@@ -354,3 +365,112 @@ def get_prescriptions_by_dhid(dhid: str):
         .execute()
         .data
     )
+
+# ── Bill Generation (Bihanga B-5.2.1) ────────────────────────────────────────
+# unitPrice MUST come from server-side DB — never from client request
+# This prevents price manipulation attacks
+
+@router.post("/generate-bill", dependencies=[Depends(PharmacistOnly)])
+def generate_bill(
+    payload: BillRequest,
+    current_user: dict = Depends(PharmacistOnly)
+):
+    """
+    Generates a bill for dispensed medicines.
+    Prices are ALWAYS fetched from server-side inventory DB.
+    Client-submitted prices are completely ignored. (B-5.2.1)
+
+    Attack prevented:
+      Client sends unit_price: 0.01 → ignored
+      Server fetches unit_price: 5.00 → used for billing
+    """
+    bill_lines  = []
+    total_amount = 0.0
+
+    for item in payload.items:
+
+        # ── Fetch price from SERVER-SIDE DB ──────────────────────
+        # Client cannot manipulate this price
+        try:
+            inventory_item = (
+                supabase_admin.table("inventory")
+                .select("id, medicine_name, unit_price, stock_quantity, pharmacy_id")
+                .eq("id", item.inventory_id)
+                .eq("pharmacy_id", payload.pharmacy_id)
+                .single()
+                .execute()
+                .data
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Medicine ID {item.inventory_id} not found in this pharmacy's inventory"
+            )
+
+        if not inventory_item:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Medicine ID {item.inventory_id} not found"
+            )
+
+        # ── Validate stock availability ───────────────────────────
+        if inventory_item["stock_quantity"] < item.quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient stock for {inventory_item['medicine_name']}. "
+                       f"Available: {inventory_item['stock_quantity']}, "
+                       f"Requested: {item.quantity}"
+            )
+
+        # ── Calculate line total using SERVER price ───────────────
+        # unit_price comes from DB — client has NO input here
+        server_unit_price = float(inventory_item["unit_price"])
+        line_total        = server_unit_price * item.quantity
+
+        bill_lines.append({
+            "inventory_id":   item.inventory_id,
+            "medicine_name":  inventory_item["medicine_name"],
+            "quantity":       item.quantity,
+            "unit_price":     server_unit_price,   # ← always from DB
+            "line_total":     line_total,
+        })
+
+        total_amount += line_total
+
+    # ── Store bill in DB ──────────────────────────────────────────
+    try:
+        bill = supabase_admin.table("billing").insert({
+            "prescription_id": payload.prescription_id,
+            "pharmacy_id":     payload.pharmacy_id,
+            "pharmacist_id":   current_user.get("user_id"),
+            "total_amount":    round(total_amount, 2),
+            "status":          "pending",
+            "created_at":      __import__("datetime").datetime.now().astimezone().isoformat(),
+        }).execute().data
+    except Exception:
+        # Bill storage failure should not block returning the bill summary
+        bill = None
+
+    # ── Log the billing action ────────────────────────────────────
+    try:
+        supabase_admin.table("audit_logs").insert({
+            "action":    "BILL_GENERATED",
+            "entity":    "billing",
+            "entity_id": bill[0]["id"] if bill else 0,
+            "user_id":   current_user.get("user_id"),
+            "timestamp": __import__("datetime").datetime.now().astimezone().isoformat(),
+        }).execute()
+    except Exception:
+        pass
+
+    return {
+        "success":        True,
+        "prescription_id": payload.prescription_id,
+        "pharmacy_id":    payload.pharmacy_id,
+        "bill_lines":     bill_lines,
+        "total_amount":   round(total_amount, 2),
+        "currency":       "LKR",
+        "note":           "All prices fetched from server-side inventory. "
+                          "Client-submitted prices are not accepted.",
+        "bill_id":        bill[0]["id"] if bill else None,
+    }
