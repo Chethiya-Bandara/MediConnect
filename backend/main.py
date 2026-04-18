@@ -22,9 +22,16 @@ _RATE_LIMIT_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
 
 # Per-endpoint rate limit rules: path → (max_requests, window_seconds)
 _ENDPOINT_LIMITS: dict[str, tuple[int, int]] = {
-    "/login":           (5,  60),    # 5 per minute
-    "/register":        (3,  600),   # 3 per 10 minutes
-    "/forgot-password": (5,  60),    # 5 per minute
+    # Auth endpoints
+    "/login":                    (5,  60),    # 5 per minute
+    "/register":                 (3,  600),   # 3 per 10 minutes
+    "/forgot-password":          (5,  60),    # 5 per minute
+
+    # Appointment endpoints — prevent ID enumeration
+    "/patient/dashboard/appointments": (30, 60),  # 30 per minute
+
+    # DHID lookup — prevent enumeration
+    "/patient/dashboard/lookup": (10, 60),    # 10 per minute
 }
 _DEFAULT_LIMIT = (90, 60)            # 90 per minute for all other routes
 

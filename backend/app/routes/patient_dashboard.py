@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config.supabase import supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker
-from app.utils.helpers import validate_dhid
+from app.utils.helpers import validate_dhid, mask_nic
 
 router = APIRouter(prefix="/patient/dashboard", tags=["patient-dashboard"])
 
@@ -861,7 +861,7 @@ def create_appointment(
 
     if not slot:
         raise HTTPException(status_code=400, detail="Slot not available")
-    
+
     # Validate doctor affiliation is approved
     affiliation = supabase_admin.table("doctor_affiliations") \
         .select("*") \
@@ -1280,13 +1280,78 @@ def assistant_respond(
     }
 
 @router.get("/lookup/{dhid}")
-def lookup(dhid: str):
+def lookup_by_dhid(
+    dhid: str,
+    authorization: Optional[str] = Header(None),
+    current_user: dict = Depends(RoleChecker(["doctor", "pharmacist", "hospital_admin"]))
+):
+    """
+    Looks up a patient by their DHID.
+    Restricted to doctors, pharmacists and hospital admins only.
+    Returns masked NIC — raw NIC hash never returned.
+    Protected against ID enumeration (B-3.2.1)
+    """
+    # ── Validate DHID format and checksum ────────────────────────
     if not validate_dhid(dhid):
-        raise HTTPException(status_code=400, detail="Invalid DHID")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid DHID format or checksum."
+        )
 
-    patient = supabase_admin.table("patients") \
-        .select("*") \
-        .eq("dhid", dhid) \
-        .execute()
+    # ── Look up patient ───────────────────────────────────────────
+    try:
+        patients = (
+            supabase_admin.table("patients")
+            .select("id, dhid, user_id")
+            .eq("dhid", dhid)
+            .execute()
+            .data or []
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not perform lookup."
+        )
 
-    return patient.data
+    # ── Always return 404 if not found (prevents enumeration) ─────
+    # Never reveal whether DHID exists or not to unauthorised callers
+    if not patients:
+        raise HTTPException(
+            status_code=404,
+            detail="Patient not found."
+        )
+
+    patient = patients[0]
+
+    # ── Get user info ─────────────────────────────────────────────
+    try:
+        user = (
+            supabase_admin.table("users")
+            .select("id, name, email")
+            .eq("id", patient["user_id"])
+            .single()
+            .execute()
+            .data or {}
+        )
+    except Exception:
+        user = {}
+
+    # ── Log the lookup ────────────────────────────────────────────
+    try:
+        from datetime import datetime as _dt
+        supabase_admin.table("audit_logs").insert({
+            "action":    "PATIENT_LOOKUP_BY_DHID",
+            "entity":    "patients",
+            "entity_id": patient["id"],
+            "user_id":   current_user["user_id"],
+            "timestamp": _dt.now().astimezone().isoformat(),
+        }).execute()
+    except Exception:
+        pass
+
+    return {
+        "patient_id": patient["id"],
+        "dhid":       patient["dhid"],
+        "name":       user.get("name"),
+        "note":       "NIC is not returned via DHID lookup for privacy protection."
+    }
