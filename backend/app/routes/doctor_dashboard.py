@@ -14,6 +14,7 @@ from app.config.supabase import supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker, get_current_user
 from app.middleware.consent_guard import check_consent, auto_revoke_consent
 from app.middleware.ai_anonymiser import anonymise_and_check
+from app.middleware.ai_disclaimer import build_safe_response
 
 router = APIRouter(prefix="/doctor/dashboard", tags=["doctor-dashboard"])
 
@@ -1030,15 +1031,18 @@ def doctor_assistant_respond(
 
     edge_answer = _call_gemini_edge(payload.message, payload.history, snapshot)
     if edge_answer:
-        return {
-            "answer": edge_answer,
-            "source": "gemini_edge",
-        }
+        # ── Attach disclaimer (Bihanga B-6.2.1) ──────────────────
+        return build_safe_response(
+            answer = edge_answer,
+            source = "gemini_edge",
+            role   = "doctor"
+        )
 
-    return {
-        "answer": _doctor_assistant_fallback(payload.message, snapshot),
-        "source": "doctor_fallback",
-    }
+    return build_safe_response(
+        answer = _doctor_assistant_fallback(payload.message, snapshot),
+        source = "doctor_fallback",
+        role   = "doctor"
+    )
 
 @router.post("/availability")
 def create_availability_slot(

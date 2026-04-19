@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.config.supabase import supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker
 from app.utils.helpers import validate_dhid, mask_nic, sanitize_search_query
+from app.middleware.ai_disclaimer import build_safe_response
 
 router = APIRouter(prefix="/patient/dashboard", tags=["patient-dashboard"])
 
@@ -1323,15 +1324,18 @@ def assistant_respond(
 
     edge_answer = _call_gemini_edge(payload.message, payload.history, snapshot)
     if edge_answer:
-        return {
-            "answer": edge_answer,
-            "source": "gemini_edge",
-        }
+        # ── Attach disclaimer (Bihanga B-6.2.1) ──────────────────
+        return build_safe_response(
+            answer = edge_answer,
+            source = "gemini_edge",
+            role   = "patient"
+        )
 
-    return {
-        "answer": _fallback_assistant_answer(payload.message, snapshot),
-        "source": "patient_fallback",
-    }
+    return build_safe_response(
+        answer = _fallback_assistant_answer(payload.message, snapshot),
+        source = "patient_fallback",
+        role   = "patient"
+    )
 
 @router.get("/lookup/{dhid}")
 def lookup_by_dhid(
