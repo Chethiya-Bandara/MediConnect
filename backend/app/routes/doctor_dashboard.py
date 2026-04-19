@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.config.supabase import supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker, get_current_user
 from app.middleware.consent_guard import check_consent, auto_revoke_consent
-from app.middleware.ai_anonymiser import anonymise_doctor_snapshot
+from app.middleware.ai_anonymiser import anonymise_and_check
 
 router = APIRouter(prefix="/doctor/dashboard", tags=["doctor-dashboard"])
 
@@ -700,7 +700,7 @@ def _call_gemini_edge(message: str, history: list[AssistantHistoryMessage], snap
 
     token = os.getenv("GEMINI_EDGE_FUNCTION_TOKEN") or os.getenv("SUPABASE_SERVICE_KEY")
    # ── Anonymise snapshot before sending to Gemini (Bihanga B-6.1.1) ──
-    anon_snapshot = anonymise_doctor_snapshot(snapshot)
+    anon_snapshot = anonymise_and_check(snapshot, context="doctor")
 
     payload = {
         "message": message,

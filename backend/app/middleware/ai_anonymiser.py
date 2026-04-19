@@ -201,3 +201,70 @@ def anonymise_patient_snapshot(snapshot: dict) -> dict:
         Anonymised snapshot safe for external AI API
     """
     return anonymise_snapshot(snapshot, context="patient")
+
+# ── Aggregation Safety (B-6.1.2) ─────────────────────────────────────────────
+# Prevents re-identification through small sample statistics.
+# Any stat based on fewer than MIN_SAMPLE_SIZE individuals is suppressed.
+
+MIN_SAMPLE_SIZE = 5
+SUPPRESSED_VALUE = "[SUPPRESSED: insufficient sample size]"
+
+
+def apply_aggregation_checks(snapshot: dict) -> dict:
+    """
+    Applies minimum sample size checks to statistical data in a snapshot.
+    Suppresses any count or stat based on fewer than 5 individuals.
+
+    This prevents re-identification attacks through small group statistics.
+    For example: "1 patient seen today" reveals exactly who that patient is.
+
+    Args:
+        snapshot: Anonymised snapshot (should be anonymised first)
+
+    Returns:
+        Snapshot with small-sample statistics suppressed
+    """
+    if not snapshot or not isinstance(snapshot, dict):
+        return snapshot
+
+    result = copy.deepcopy(snapshot)
+
+    # ── Check stats block ─────────────────────────────────────────
+    stats = result.get("stats", {})
+    if stats and isinstance(stats, dict):
+        for key, value in stats.items():
+            if isinstance(value, int) and 0 < value < MIN_SAMPLE_SIZE:
+                stats[key] = SUPPRESSED_VALUE
+
+    # ── Check schedule list ───────────────────────────────────────
+    schedule = result.get("schedule", [])
+    if isinstance(schedule, list) and 0 < len(schedule) < MIN_SAMPLE_SIZE:
+        result["schedule_note"] = (
+            f"Schedule details suppressed: fewer than {MIN_SAMPLE_SIZE} "
+            f"appointments in this view."
+        )
+        # Keep schedule but flag it
+        result["schedule_suppressed"] = True
+
+    return result
+
+
+def anonymise_and_check(snapshot: dict, context: str = "doctor") -> dict:
+    """
+    Combined function: anonymises PII then applies aggregation checks.
+    This is the main function to call before sending data to Gemini.
+
+    Args:
+        snapshot: Raw dashboard snapshot
+        context:  "doctor" or "patient"
+
+    Returns:
+        Fully anonymised and aggregation-checked snapshot
+    """
+    # Step 1 — Anonymise PII
+    anon = anonymise_snapshot(snapshot, context=context)
+
+    # Step 2 — Apply aggregation checks
+    safe = apply_aggregation_checks(anon)
+
+    return safe
