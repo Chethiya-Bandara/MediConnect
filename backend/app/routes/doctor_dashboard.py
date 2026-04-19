@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.config.supabase import supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker, get_current_user
 from app.middleware.consent_guard import check_consent, auto_revoke_consent
+from app.middleware.ai_anonymiser import anonymise_doctor_snapshot
 
 router = APIRouter(prefix="/doctor/dashboard", tags=["doctor-dashboard"])
 
@@ -119,7 +120,7 @@ class AssistantRequest(BaseModel):
         if len(cleaned) > 4000:
             raise ValueError("Message is too long")
         return cleaned
-    
+
 class AffiliationRequest(BaseModel):
     hospital_id: int
 
@@ -698,11 +699,14 @@ def _call_gemini_edge(message: str, history: list[AssistantHistoryMessage], snap
         return None
 
     token = os.getenv("GEMINI_EDGE_FUNCTION_TOKEN") or os.getenv("SUPABASE_SERVICE_KEY")
+   # ── Anonymise snapshot before sending to Gemini (Bihanga B-6.1.1) ──
+    anon_snapshot = anonymise_doctor_snapshot(snapshot)
+
     payload = {
         "message": message,
         "history": [{"role": item.role, "text": item.text} for item in history[-12:]],
-        "doctor_context": snapshot,
-        "patient_context": snapshot.get("active_patient"),
+        "doctor_context": anon_snapshot,
+        "patient_context": anon_snapshot.get("active_patient"),
     }
     encoded = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
