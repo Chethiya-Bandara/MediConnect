@@ -32,10 +32,6 @@ def register(user: RegisterRequest):
     if not is_valid_nic(user.nic):
         raise HTTPException(400, "Invalid NIC")
 
-    # DHID Validity check
-    if not validate_dhid(user.dhid):
-        raise HTTPException(400, "Invalid DHID")
-
     role = user.role
     auth_res = supabase.auth.sign_up({
         "email": user.email,

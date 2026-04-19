@@ -18,6 +18,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     role: str
+    dhid: Optional[str] = None
 
     fullName: Optional[str] = None
     nic: Optional[str] = None
