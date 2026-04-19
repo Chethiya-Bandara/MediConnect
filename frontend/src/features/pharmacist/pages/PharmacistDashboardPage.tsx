@@ -304,20 +304,7 @@ export function PharmacistDashboardPage() {
       </aside>
 
       <header className="fixed left-64 right-0 top-0 z-30 flex h-16 items-center justify-between border-b border-slate-100 bg-white/80 px-8 shadow-sm backdrop-blur-xl transition-colors dark:border-slate-800 dark:bg-slate-950/80">
-        <div className="flex items-center gap-6">
-          <div className="flex h-10 items-center gap-3 border-r border-slate-200 pr-6 dark:border-slate-800">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-900 shadow-inner">
-              <HeartPulse className="text-white" size={18} />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold leading-none text-blue-900 dark:text-blue-200">
-                Health Identity
-              </h2>
-              <p className="text-[9px] font-bold uppercase tracking-tight text-slate-500 dark:text-slate-400">
-                Verified Professional
-              </p>
-            </div>
-          </div>
+        <div className="flex items-center">
           <span className="font-headline text-xl font-extrabold tracking-tight text-blue-900 dark:text-blue-400">
             National Health Portal
           </span>

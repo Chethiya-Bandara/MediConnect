@@ -18,10 +18,162 @@
 
 from fastapi import Depends, HTTPException, status, Header
 from typing import Optional
-from app.config.supabase import supabase, supabase_admin
+from app.config.supabase import execute_with_retry, supabase, supabase_admin
 
 
 # ── Core Token Verifier ───────────────────────────────────────────────────────
+
+def _load_user_row(user_id: str):
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("users")
+            .select("id, email, role, name")
+            .eq("id", user_id)
+            .execute()
+            .data
+        ),
+        default=[],
+    )
+    return rows[0] if rows else None
+
+
+def _provision_missing_user_row(user_id: str, auth_user: Optional[object]) -> Optional[dict]:
+    if auth_user is None:
+        return None
+
+    metadata = getattr(auth_user, "user_metadata", None) or {}
+    role = str(metadata.get("role") or "").strip().lower()
+    email = getattr(auth_user, "email", None) or metadata.get("email")
+    name = metadata.get("full_name") or metadata.get("name") or email
+
+    allowed_roles = {
+        "patient",
+        "doctor",
+        "pharmacist",
+        "hospital_admin",
+        "pharmacy_admin",
+        "health_ministry_admin",
+    }
+
+    if not email or role not in allowed_roles:
+        return None
+
+    try:
+        execute_with_retry(
+            lambda: supabase_admin.table("users").insert(
+                {
+                    "id": user_id,
+                    "email": email,
+                    "role": role,
+                    "name": name,
+                }
+            ).execute(),
+            attempts=2,
+        )
+    except Exception as exc:
+        message = str(exc).lower()
+        if "duplicate key value" not in message and "users_pkey" not in message:
+            raise
+
+    return _load_user_row(user_id)
+
+
+def build_user_context(
+    user_id: str,
+    token: Optional[str] = None,
+    auth_user: Optional[object] = None,
+) -> dict:
+    """
+    Loads the shared user context returned to protected routes and /me.
+    Enriches the base user row with role-specific profile data when available.
+    """
+    db_user = _load_user_row(user_id)
+    if not db_user:
+        db_user = _provision_missing_user_row(user_id, auth_user)
+
+    if not db_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found.",
+        )
+
+    user_role = db_user.get("role", "").lower()
+    context = {
+        "token": token,
+        "user_id": user_id,
+        "id": user_id,
+        "email": db_user.get("email"),
+        "name": db_user.get("name"),
+        "role": user_role,
+    }
+
+    try:
+        if user_role == "pharmacist":
+            pharmacist = execute_with_retry(
+                lambda: (
+                    supabase_admin.table("pharmacists")
+                    .select("organisation_id")
+                    .eq("user_id", user_id)
+                    .single()
+                    .execute()
+                    .data
+                ),
+                default=None,
+            )
+            if pharmacist:
+                context["organisation_id"] = pharmacist.get("organisation_id")
+
+        elif user_role == "doctor":
+            doctor = execute_with_retry(
+                lambda: (
+                    supabase_admin.table("doctors")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .single()
+                    .execute()
+                    .data
+                ),
+                default=None,
+            )
+            if doctor:
+                context["doctor_id"] = doctor.get("id")
+
+        elif user_role == "patient":
+            patient = execute_with_retry(
+                lambda: (
+                    supabase_admin.table("patients")
+                    .select("id, dhid")
+                    .eq("user_id", user_id)
+                    .single()
+                    .execute()
+                    .data
+                ),
+                default=None,
+            )
+            if patient:
+                context["patient_id"] = patient.get("id")
+                context["dhid"] = patient.get("dhid")
+
+        elif user_role in {"hospital_admin", "pharmacy_admin", "health_ministry_admin"}:
+            admin_profile = execute_with_retry(
+                lambda: (
+                    supabase_admin.table("admin_profiles")
+                    .select("admin_role, organisation_id")
+                    .eq("user_id", user_id)
+                    .single()
+                    .execute()
+                    .data
+                ),
+                default=None,
+            )
+            if admin_profile:
+                context["admin_role"] = admin_profile.get("admin_role")
+                context["organisation_id"] = admin_profile.get("organisation_id")
+    except Exception:
+        # Missing role-specific rows should not block authentication.
+        pass
+
+    return context
 
 def get_current_user(
     authorization: Optional[str] = Header(None)
@@ -68,35 +220,7 @@ def get_current_user(
 
     user_id = auth_user.user.id
 
-    # Get user role from database
-    try:
-        db_user = (
-            supabase_admin.table("users")
-            .select("id, email, role, name")
-            .eq("id", user_id)
-            .single()
-            .execute()
-            .data
-        )
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found.",
-        )
-
-    if not db_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found.",
-        )
-
-    return {
-        "token":   token,
-        "user_id": user_id,
-        "email":   db_user.get("email"),
-        "name":    db_user.get("name"),
-        "role":    db_user.get("role", "").lower(),
-    }
+    return build_user_context(user_id, token=token, auth_user=auth_user.user)
 
 
 # ── RoleChecker Class ─────────────────────────────────────────────────────────

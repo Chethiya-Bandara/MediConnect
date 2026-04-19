@@ -7,6 +7,7 @@ import type {
   GovernanceTargetType,
   HealthMinistryAuditLog,
   HealthMinistryDashboardStats,
+  ManagedOrganisationItem,
   PendingDoctorItem,
   PendingOrganisationItem,
 } from "../types";
@@ -58,6 +59,18 @@ interface DashboardResponse {
     organisation_name?: string | null;
     action?: string | null;
     details?: string | null;
+  }>;
+}
+
+interface OrganisationRegistryResponse {
+  items?: Array<{
+    id?: string | number | null;
+    name?: string | null;
+    type?: string | null;
+    status?: string | null;
+    created_at?: string | null;
+    linked_table?: string | null;
+    linked_record_id?: number | null;
   }>;
 }
 
@@ -135,6 +148,25 @@ function normalizeAuditLogs(payload: DashboardResponse["audit_logs"]): HealthMin
   }));
 }
 
+function normalizeManagedOrganisations(
+  payload: OrganisationRegistryResponse["items"],
+): ManagedOrganisationItem[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload.map((item) => ({
+    id: asString(item.id) ?? "",
+    name: item.name ?? null,
+    type: item.type ?? null,
+    status: item.status ?? null,
+    createdAt: item.created_at ?? null,
+    linkedTable: item.linked_table ?? null,
+    linkedRecordId:
+      typeof item.linked_record_id === "number" ? item.linked_record_id : null,
+  }));
+}
+
 export async function getHealthMinistryDashboard() {
   const response = await apiRequest<DashboardResponse>(
     endpoints.healthMinistryAdmin.dashboard,
@@ -146,6 +178,29 @@ export async function getHealthMinistryDashboard() {
     pendingDoctors: normalizePendingDoctors(response.pending_doctors),
     auditLogs: normalizeAuditLogs(response.audit_logs),
   };
+}
+
+export async function getManagedOrganisations() {
+  const response = await apiRequest<OrganisationRegistryResponse>(
+    endpoints.healthMinistryAdmin.organisationsBase,
+  );
+
+  return normalizeManagedOrganisations(response.items);
+}
+
+export async function createManagedOrganisation(payload: {
+  name: string;
+  type: string;
+  status: string;
+}) {
+  return apiRequest<{ message?: string }>(endpoints.healthMinistryAdmin.organisationsBase, {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name,
+      type: payload.type,
+      status: payload.status,
+    }),
+  });
 }
 
 function normalizeDiagnosisList(payload: unknown): DiagnosisMetric[] {

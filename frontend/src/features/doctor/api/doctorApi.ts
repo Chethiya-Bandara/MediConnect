@@ -1,5 +1,6 @@
 import type {
   DoctorAssistantReply,
+  DoctorAffiliationHospitalOption,
   DoctorAvailabilitySlot,
   DoctorDashboardData,
 } from "../types";
@@ -86,6 +87,33 @@ export function deleteDoctorAvailability(slotId: number) {
     `${endpoints.doctor.availability}/${slotId}`,
     {
       method: "DELETE",
+    },
+  );
+}
+
+export async function getDoctorAffiliationHospitals() {
+  const response = await apiRequest<{ hospitals: DoctorAffiliationHospitalOption[] }>(
+    endpoints.doctor.affiliationHospitals,
+  );
+  return Array.isArray(response.hospitals) ? response.hospitals : [];
+}
+
+export function requestDoctorAffiliation(payload: { hospital_id: number }) {
+  return apiRequest<{ message: string; affiliation_id: number }>(
+    endpoints.doctor.affiliationRequest,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function revokeDoctorAffiliation(payload: { affiliation_id: number }) {
+  return apiRequest<{ message: string; affiliation_id: number }>(
+    endpoints.doctor.affiliationRevoke,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
     },
   );
 }

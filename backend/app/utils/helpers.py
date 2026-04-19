@@ -41,13 +41,21 @@ def generate_dhid() -> str:
 
 def validate_dhid(dhid: str) -> bool:
     """
-    Validates a DHID by checking its format and checksum.
+    Validates a DHID by checking its format.
+    The active data set contains legacy IDs in the form `DHID-XXXX-XXXX`,
+    while newer flows may emit `DHID-XXXX-YYYYC` with a checksum digit.
+    This validator accepts both so older patient records do not become invalid overnight.
     Used to verify a DHID is genuine and not forged or guessed.
 
-    Format: DHID-XXXX-YYYYC
-      XXXX = 4 digits
-      YYYY = 4 digits
-      C    = checksum digit (sum of XXXX + YYYY digits % 10)
+    Supported formats:
+      1. DHID-XXXX-YYYY
+         XXXX = 4 digits
+         YYYY = 4 digits
+
+      2. DHID-XXXX-YYYYC
+         XXXX = 4 digits
+         YYYY = 4 digits
+         C    = checksum digit (sum of XXXX + YYYY digits % 10)
 
     Args:
         dhid: DHID string to validate e.g. "DHID-1234-56786"
@@ -74,13 +82,20 @@ def validate_dhid(dhid: str) -> bool:
     if not segment1.isdigit() or len(segment1) != 4:
         return False
 
-    # Check segment 2: exactly 5 characters (4 digits + 1 checksum)
-    if not segment2_with_check.isdigit() or len(segment2_with_check) != 5:
+    if not segment2_with_check.isdigit():
+        return False
+
+    # Legacy format: DHID-XXXX-YYYY
+    if len(segment2_with_check) == 4:
+        return True
+
+    # Checksum-aware format: DHID-XXXX-YYYYC
+    if len(segment2_with_check) != 5:
         return False
 
     # Extract the 4 data digits and checksum digit
-    segment2  = segment2_with_check[:4]
-    checksum  = int(segment2_with_check[4])
+    segment2 = segment2_with_check[:4]
+    checksum = int(segment2_with_check[4])
 
     # Recalculate checksum
     all_digits        = segment1 + segment2

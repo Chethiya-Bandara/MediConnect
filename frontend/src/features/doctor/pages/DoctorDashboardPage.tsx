@@ -3,12 +3,12 @@ import type { KeyboardEvent } from "react";
 import {
   AlertTriangle,
   Bell,
+  Building2,
   CalendarDays,
   ChevronRight,
   ClipboardPlus,
   FileArchive,
   FolderOpen,
-  HelpCircle,
   LayoutDashboard,
   LoaderCircle,
   Lock,
@@ -41,19 +41,23 @@ import {
   askDoctorAssistant,
   createDoctorAvailability,
   deleteDoctorAvailability,
+  getDoctorAffiliationHospitals,
   getDoctorAvailability,
   getDoctorDashboard,
+  requestDoctorAffiliation,
+  revokeDoctorAffiliation,
   submitDoctorEncounter,
   updateDoctorProfile,
 } from "../api/doctorApi";
 import type {
   DoctorActivePatient,
+  DoctorAffiliationHospitalOption,
   DoctorAvailabilitySlot,
   DoctorDashboardData,
   DoctorScheduleItem,
 } from "../types";
 
-type DoctorPage = "overview" | "encounter" | "appointments" | "settings";
+type DoctorPage = "overview" | "encounter" | "appointments" | "affiliations" | "settings";
 type DoctorModal = "submit" | "urgent" | "archives" | null;
 type Theme = "light" | "dark";
 
@@ -74,6 +78,7 @@ const navItems = [
   { id: "overview", label: "Doctor Overview", icon: LayoutDashboard },
   { id: "encounter", label: "Encounter Record", icon: ClipboardPlus },
   { id: "appointments", label: "Schedule", icon: CalendarDays },
+  { id: "affiliations", label: "Hospital Access", icon: Building2 },
   { id: "settings", label: "Profile Settings", icon: Settings },
 ] as const;
 
@@ -217,6 +222,7 @@ export function DoctorDashboardPage() {
   } | null>(null);
   const [dashboard, setDashboard] = useState<DoctorDashboardData | null>(null);
   const [availabilitySlots, setAvailabilitySlots] = useState<DoctorAvailabilitySlot[]>([]);
+  const [affiliationHospitals, setAffiliationHospitals] = useState<DoctorAffiliationHospitalOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
@@ -232,6 +238,8 @@ export function DoctorDashboardPage() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingAvailability, setSavingAvailability] = useState(false);
   const [deletingAvailabilityId, setDeletingAvailabilityId] = useState<number | null>(null);
+  const [requestingHospitalId, setRequestingHospitalId] = useState<number | null>(null);
+  const [revokingAffiliationId, setRevokingAffiliationId] = useState<number | null>(null);
   const [profileName, setProfileName] = useState("");
   const [profileSpecialization, setProfileSpecialization] = useState("");
   const [profileSlmcNumber, setProfileSlmcNumber] = useState("");
@@ -265,6 +273,15 @@ export function DoctorDashboardPage() {
     return schedule.slice(0, 6);
   }, [dashboard]);
 
+  const approvedAffiliations = useMemo(
+    () =>
+      (dashboard?.affiliations ?? []).filter((item) => {
+        const normalized = item.status.toLowerCase();
+        return normalized.includes("approved") || normalized.includes("active");
+      }),
+    [dashboard],
+  );
+
   const showToast = (
     message: string,
     tone: "success" | "error" | "info" = "success",
@@ -277,12 +294,14 @@ export function DoctorDashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [payload, slots] = await Promise.all([
+      const [payload, slots, hospitals] = await Promise.all([
         getDoctorDashboard(),
         getDoctorAvailability(),
+        getDoctorAffiliationHospitals(),
       ]);
       setDashboard(payload);
       setAvailabilitySlots(slots);
+      setAffiliationHospitals(hospitals);
       setAvailabilityError(null);
       setProfileName(payload.user.name ?? "");
       setProfileSpecialization(payload.doctor.specialization ?? "");
@@ -465,6 +484,11 @@ export function DoctorDashboardPage() {
   };
 
   const saveAvailability = async () => {
+    if (approvedAffiliations.length === 0) {
+      showToast("Get one hospital approval before publishing live slots.", "error");
+      return;
+    }
+
     const start = new Date(availabilityStart);
     const end = new Date(availabilityEnd);
 
@@ -509,6 +533,38 @@ export function DoctorDashboardPage() {
       showToast(message, "error");
     } finally {
       setDeletingAvailabilityId(null);
+    }
+  };
+
+  const submitAffiliationRequest = async (hospitalId: number) => {
+    setRequestingHospitalId(hospitalId);
+    try {
+      await requestDoctorAffiliation({ hospital_id: hospitalId });
+      showToast("Hospital join request sent.");
+      await loadDashboard();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Hospital request could not be sent",
+        "error",
+      );
+    } finally {
+      setRequestingHospitalId(null);
+    }
+  };
+
+  const revokeAffiliation = async (affiliationId: number) => {
+    setRevokingAffiliationId(affiliationId);
+    try {
+      await revokeDoctorAffiliation({ affiliation_id: affiliationId });
+      showToast("Hospital access updated.");
+      await loadDashboard();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Affiliation could not be updated",
+        "error",
+      );
+    } finally {
+      setRevokingAffiliationId(null);
     }
   };
 
@@ -616,20 +672,6 @@ export function DoctorDashboardPage() {
           })}
         </nav>
         <div className="mt-auto space-y-1 px-4">
-          <div className="mb-4 rounded-xl border border-red-100 bg-red-50 p-4 dark:border-red-900/30 dark:bg-red-950/20">
-            <button
-              type="button"
-              onClick={() => setModal("urgent")}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-700 py-2 text-xs font-bold uppercase text-white"
-            >
-              <ShieldAlert size={14} />
-              ER Protocol
-            </button>
-          </div>
-          <button type="button" className="flex w-full items-center gap-3 px-4 py-2 text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400">
-            <HelpCircle size={14} />
-            Help Center
-          </button>
           <button type="button" onClick={logoutNow} className="flex w-full items-center gap-3 px-4 py-2 text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400">
             <LogOut size={14} />
             Sign Out
@@ -954,9 +996,14 @@ export function DoctorDashboardPage() {
                     <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Create and remove your own bookable slots using the current backend support.</p>
                   </div>
                   <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-300">
-                    Patients can only book the live slots listed here.
+                    {approvedAffiliations.length
+                      ? `Active hospital access: ${approvedAffiliations.map((item) => item.organisation.name).join(", ")}`
+                      : "Join an approved hospital before publishing live slots."}
                   </div>
                 </div>
+                {approvedAffiliations.length === 0 ? (
+                  <AlertBanner tone="info" message="No approved hospital access yet. Open the Hospital Access tab and send a join request before you publish availability." />
+                ) : null}
                 <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
                   <div>
                     <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Start Time</label>
@@ -966,7 +1013,7 @@ export function DoctorDashboardPage() {
                     <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">End Time</label>
                     <input type="datetime-local" value={availabilityEnd} onChange={(event) => setAvailabilityEnd(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
                   </div>
-                  <button type="button" onClick={() => void saveAvailability()} disabled={savingAvailability} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md disabled:opacity-60">
+                  <button type="button" onClick={() => void saveAvailability()} disabled={savingAvailability || approvedAffiliations.length === 0} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md disabled:opacity-60">
                     {savingAvailability ? "Saving..." : "Add Slot"}
                   </button>
                 </div>
@@ -1032,23 +1079,148 @@ export function DoctorDashboardPage() {
             </section>
           ) : null}
 
+          {page === "affiliations" ? (
+            <section className="animate-fadeIn">
+              <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h2 className="text-3xl font-extrabold text-blue-900 dark:text-blue-400">Hospital Access</h2>
+                  <p className="mt-1 text-sm text-slate-500">Request to join approved hospitals before you open live clinic time.</p>
+                </div>
+                <div className="rounded-2xl border border-slate-100 bg-white px-5 py-4 text-right shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Approved Access</p>
+                  <p className="mt-1 text-2xl font-black dark:text-white">{approvedAffiliations.length}</p>
+                </div>
+              </div>
+
+              <div className="mb-8 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="mb-6 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Join Requests</p>
+                      <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">Approved hospitals directory</h3>
+                    </div>
+                    <div className="rounded-2xl bg-blue-50 px-4 py-3 text-xs text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                      Pick a hospital, send the join request, then wait for admin approval.
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4">
+                    {affiliationHospitals.length ? affiliationHospitals.map((hospital) => {
+                      const normalizedStatus = (hospital.current_status ?? "").toLowerCase();
+                      const hasApproved = normalizedStatus.includes("approved") || normalizedStatus.includes("active");
+                      const hasPending = normalizedStatus.includes("pending");
+
+                      return (
+                        <div key={hospital.id} className="rounded-3xl border border-slate-100 bg-slate-50 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-800/40">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                  <Building2 size={20} />
+                                </div>
+                                <div>
+                                  <p className="text-lg font-extrabold dark:text-slate-100">{hospital.name}</p>
+                                  <p className="text-xs uppercase tracking-widest text-slate-500">{hospital.type ?? "Hospital"} • {formatStatusLabel(hospital.status)}</p>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${hospital.current_status ? affiliationTone(hospital.current_status) : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"}`}>
+                                  {hospital.current_status ?? "No Request Yet"}
+                                </span>
+                                {hasApproved ? (
+                                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                    Ready For Scheduling
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-3">
+                              <button
+                                type="button"
+                                onClick={() => void submitAffiliationRequest(hospital.id)}
+                                disabled={!hospital.can_request || requestingHospitalId === hospital.id}
+                                className="rounded-2xl bg-primary px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {requestingHospitalId === hospital.id
+                                  ? "Sending..."
+                                  : hasApproved
+                                    ? "Already Joined"
+                                    : hasPending
+                                      ? "Pending Review"
+                                      : "Request Join"}
+                              </button>
+                              {hospital.current_affiliation_id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void revokeAffiliation(hospital.current_affiliation_id!)}
+                                  disabled={revokingAffiliationId === hospital.current_affiliation_id}
+                                  className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-xs font-bold uppercase tracking-widest text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300"
+                                >
+                                  {revokingAffiliationId === hospital.current_affiliation_id ? "Updating..." : "Withdraw"}
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }) : (
+                      <EmptyState
+                        title="No hospitals available"
+                        description="Approved hospital organisations are not visible yet, so there is nothing to request from this doctor workspace."
+                        className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Your Status</p>
+                    <h3 className="mt-2 text-2xl font-extrabold dark:text-white">Current hospital links</h3>
+                    <div className="mt-6 space-y-3">
+                      {dashboard?.affiliations.length ? dashboard.affiliations.map((item) => (
+                        <div key={item.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="font-bold dark:text-slate-200">{item.organisation.name}</p>
+                              <p className="mt-1 text-xs text-slate-500">{item.created_at ? `Requested ${formatDate(item.created_at)}` : "Join request on file"}</p>
+                            </div>
+                            <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${affiliationTone(item.status)}`}>
+                              {formatStatusLabel(item.status)}
+                            </span>
+                          </div>
+                        </div>
+                      )) : (
+                        <EmptyState
+                          title="No hospital links yet"
+                          description="Send a join request from the directory and it will land here with its live approval status."
+                          className="rounded-2xl border-slate-200 bg-slate-50 p-5 text-left shadow-none dark:bg-slate-800/40"
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <h3 className="text-lg font-bold text-primary dark:text-blue-400">Scheduling rule</h3>
+                    <p className="mt-3 text-sm leading-7 text-slate-500 dark:text-slate-400">
+                      Doctors now need at least one approved hospital before publishing live availability. That kills the orphan-slot nonsense.
+                    </p>
+                    <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+                      Exact per-slot hospital selection still depends on the current slot schema. Hospital access is enforced now, but slot-to-hospital binding is still on the legacy contract.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           {page === "settings" ? (
             <section className="mx-auto max-w-3xl animate-fadeIn">
               <h2 className="mb-8 text-3xl font-extrabold text-blue-900 dark:text-blue-400">Doctor Profile & Settings</h2>
               <div className="space-y-8 rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Professional Identity</h3><div className="grid grid-cols-1 gap-5 md:grid-cols-2"><div><label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Full Name & Title</label><input type="text" value={profileName} onChange={(event) => setProfileName(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" /></div><div><label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">SLMC Reg Number</label><input type="text" value={profileSlmcNumber} onChange={(event) => setProfileSlmcNumber(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" /></div><div className="md:col-span-2"><label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Specialization</label><input type="text" value={profileSpecialization} onChange={(event) => setProfileSpecialization(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" /></div></div></div>
-                <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Hospital Affiliations</h3><div className="space-y-3">{dashboard?.affiliations.length ? dashboard.affiliations.map((item) => (
-                  <div key={item.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="font-bold dark:text-slate-200">{item.organisation.name}</p>
-                        <p className="text-xs text-slate-500">{item.organisation.type ?? "Organisation type unavailable"}</p>
-                      </div>
-                      <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${affiliationTone(item.status)}`}>{formatStatusLabel(item.status)}</span>
-                    </div>
-                  </div>
-                )) : <EmptyState title="No affiliations yet" description="Once a hospital approves your affiliation, scheduling and active patient context will appear here." className="rounded-2xl border-slate-200 bg-slate-50 p-4 text-left shadow-none dark:bg-slate-800/40" />}
-                <AlertBanner tone="info" message="Invitation acceptance and doctor-side revoke actions will appear here once the frontend receives a matching backend contract." /></div></div>
+                <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Hospital Access</h3><div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"><p className="text-sm font-semibold dark:text-slate-200">Use the dedicated Hospital Access tab</p><p className="mt-1 text-xs text-slate-500">Join requests and approval tracking moved out of settings so this screen stops behaving like a junk drawer.</p><button type="button" onClick={() => setPage("affiliations")} className="mt-4 rounded-xl bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-white">Open Hospital Access</button></div></div>
                 <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Credential Document</h3><div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400"><div className="flex items-start gap-3"><Upload size={16} className="mt-0.5" /><div><p className="font-semibold text-slate-700 dark:text-slate-200">Credential replacement is unavailable in this workspace</p><p className="mt-1 text-xs">Use the onboarding flow for credential submission until post-registration upload support is available.</p></div></div></div></div>
                 <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">System Preferences</h3><div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50"><div><p className="text-sm font-bold dark:text-slate-200">Dark Mode Interface</p><p className="text-xs text-slate-500">Same shared theme as the rest of the portal.</p></div><button type="button" onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white">Toggle Theme</button></div></div>
                 <div className="border-t border-slate-100 pt-6 text-right dark:border-slate-800"><button type="button" onClick={() => void saveProfile()} disabled={savingProfile} className="rounded-xl bg-green-600 px-8 py-3 font-bold text-white shadow-lg shadow-green-600/20 disabled:cursor-not-allowed disabled:opacity-60">{savingProfile ? "Saving..." : "Save Configuration"}</button></div>

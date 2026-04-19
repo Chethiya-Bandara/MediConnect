@@ -2,19 +2,17 @@ import json
 import os
 from datetime import datetime
 from typing import Literal, Optional
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 import uuid
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile, Depends
 from app.middleware.file_validator import validate_upload_file, sanitize_filename
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.config.supabase import supabase, supabase_admin
-from app.middleware.role_checker import RoleChecker, get_current_user
+from app.config.supabase import execute_with_retry, supabase, supabase_admin
 from app.middleware.consent_guard import check_consent, auto_revoke_consent
 from app.middleware.ai_anonymiser import anonymise_and_check
 from app.middleware.ai_disclaimer import build_safe_response
+from app.utils.gemini_client import call_gemini_assistant
 
 router = APIRouter(prefix="/doctor/dashboard", tags=["doctor-dashboard"])
 
@@ -126,6 +124,10 @@ class AffiliationRequest(BaseModel):
     hospital_id: int
 
 
+class AffiliationRevokeRequest(BaseModel):
+    affiliation_id: int
+
+
 def _bearer_token(authorization: Optional[str]) -> str:
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing token")
@@ -151,31 +153,47 @@ def _require_doctor_context(authorization: Optional[str]):
     user_id = auth_user.user.id
 
     try:
-        db_user = (
-            supabase_admin.table("users")
-            .select("*")
-            .eq("id", user_id)
-            .single()
-            .execute()
-            .data
+        db_user_rows = execute_with_retry(
+            lambda: (
+                supabase_admin.table("users")
+                .select("*")
+                .eq("id", user_id)
+                .execute()
+                .data
+            ),
+            default=[],
         )
     except Exception as exc:
-        raise HTTPException(status_code=404, detail="User profile not found") from exc
+        raise HTTPException(
+            status_code=503,
+            detail="User profile could not be loaded right now. Please retry.",
+        ) from exc
+
+    db_user = db_user_rows[0] if db_user_rows else None
 
     if not db_user or (db_user.get("role") or "").lower() != "doctor":
         raise HTTPException(status_code=403, detail="Doctor access required")
 
     try:
-        doctor = (
-            supabase_admin.table("doctors")
-            .select("*")
-            .eq("user_id", user_id)
-            .single()
-            .execute()
-            .data
+        doctor_rows = execute_with_retry(
+            lambda: (
+                supabase_admin.table("doctors")
+                .select("*")
+                .eq("user_id", user_id)
+                .execute()
+                .data
+            ),
+            default=[],
         )
     except Exception as exc:
-        raise HTTPException(status_code=404, detail="Doctor profile not found") from exc
+        raise HTTPException(
+            status_code=503,
+            detail="Doctor profile could not be loaded right now. Please retry.",
+        ) from exc
+
+    doctor = doctor_rows[0] if doctor_rows else None
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor profile not found")
 
     return {
         "token": token,
@@ -190,13 +208,27 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+        return parsed
     except ValueError:
         return None
 
 
 def _title_status(value: Optional[str]) -> str:
     return (value or "unknown").replace("_", " ").title()
+
+
+def _build_prescription_instructions(
+    duration: Optional[str], encounter_type: Optional[str]
+) -> str:
+    parts = []
+    if duration:
+        parts.append(f"Duration: {duration}")
+    if encounter_type:
+        parts.append(f"Encounter type: {encounter_type}")
+    return " | ".join(parts)
 
 
 def _log_audit_action(user_id: str, action: str, entity: str, entity_id: int):
@@ -216,13 +248,16 @@ def _user_map(user_ids: set[str]):
     if not user_ids:
         return {}
 
-    rows = (
-        supabase_admin.table("users")
-        .select("*")
-        .in_("id", list(user_ids))
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("users")
+            .select("*")
+            .in_("id", list(user_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
     return {row["id"]: row for row in rows}
 
@@ -231,13 +266,16 @@ def _patient_map(patient_ids: set[int]):
     if not patient_ids:
         return {}
 
-    rows = (
-        supabase_admin.table("patients")
-        .select("*")
-        .in_("id", list(patient_ids))
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("patients")
+            .select("*")
+            .in_("id", list(patient_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
     user_lookup = _user_map({row["user_id"] for row in rows if row.get("user_id")})
 
@@ -261,13 +299,16 @@ def _doctor_map(doctor_ids: set[int]):
     if not doctor_ids:
         return {}
 
-    rows = (
-        supabase_admin.table("doctors")
-        .select("*")
-        .in_("id", list(doctor_ids))
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("doctors")
+            .select("*")
+            .in_("id", list(doctor_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
     user_lookup = _user_map({row["user_id"] for row in rows if row.get("user_id")})
 
@@ -288,30 +329,111 @@ def _organisation_map(organisation_ids: set[int]):
     if not organisation_ids:
         return {}
 
-    rows = (
-        supabase_admin.table("organisations")
-        .select("*")
-        .in_("id", list(organisation_ids))
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("organisations")
+            .select("*")
+            .in_("id", list(organisation_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
     return {row["id"]: row for row in rows}
+
+
+def _hospital_map(hospital_ids: set[int]):
+    if not hospital_ids:
+        return {}
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("hospitals")
+            .select("*")
+            .in_("id", list(hospital_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    return {row["id"]: row for row in rows}
+
+
+def _resolve_hospital_record(hospital_id_or_org_id: int):
+    direct = execute_with_retry(
+        lambda: (
+            supabase_admin.table("hospitals")
+            .select("*")
+            .eq("id", hospital_id_or_org_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if direct:
+        return direct[0]
+
+    via_org = execute_with_retry(
+        lambda: (
+            supabase_admin.table("hospitals")
+            .select("*")
+            .eq("organisation_id", hospital_id_or_org_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if via_org:
+        return via_org[0]
+
+    return None
+
+
+def _doctor_affiliation_rows(doctor_id: int):
+    return execute_with_retry(
+        lambda: (
+            supabase_admin.table("doctor_affiliations")
+            .select("*")
+            .eq("doctor_id", doctor_id)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+
+def _approved_doctor_affiliations(doctor_id: int):
+    return [
+        row
+        for row in _doctor_affiliation_rows(doctor_id)
+        if (row.get("status") or "").lower() in {"approved", "active"}
+    ]
 
 
 def _consent_state_map(appointment_ids: set[int]):
     if not appointment_ids:
         return {}
 
-    rows = (
-        supabase_admin.table("audit_logs")
-        .select("*")
-        .eq("entity", "appointment_consent")
-        .in_("entity_id", list(appointment_ids))
-        .order("timestamp", desc=True)
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("audit_logs")
+            .select("*")
+            .eq("entity", "appointment_consent")
+            .in_("entity_id", list(appointment_ids))
+            .order("timestamp", desc=True)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
 
     consent_lookup = {}
@@ -559,14 +681,7 @@ def _build_dashboard_payload(context):
         .data
         or []
     )
-    affiliations = (
-        supabase_admin.table("doctor_affiliations")
-        .select("*")
-        .eq("doctor_id", doctor_id)
-        .execute()
-        .data
-        or []
-    )
+    affiliations = _doctor_affiliation_rows(doctor_id)
     encounters = (
         supabase_admin.table("encounters")
         .select("*")
@@ -578,9 +693,14 @@ def _build_dashboard_payload(context):
     )
 
     patient_lookup = _patient_map({row["patient_id"] for row in appointments if row.get("patient_id")})
+    hospital_lookup = _hospital_map({row["hospital_id"] for row in affiliations if row.get("hospital_id")})
     organisation_lookup = _organisation_map(
         {row["organisation_id"] for row in appointments if row.get("organisation_id")}
-        | {row["organisation_id"] for row in affiliations if row.get("organisation_id")}
+        | {
+            row["organisation_id"]
+            for row in hospital_lookup.values()
+            if row.get("organisation_id")
+        }
     )
     consent_lookup = _consent_state_map({row["id"] for row in appointments})
 
@@ -624,14 +744,16 @@ def _build_dashboard_payload(context):
 
     affiliation_items = []
     for row in affiliations:
-        organisation = organisation_lookup.get(row.get("organisation_id"), {})
+        hospital = hospital_lookup.get(row.get("hospital_id"), {})
+        organisation = organisation_lookup.get(hospital.get("organisation_id"), {})
         affiliation_items.append(
             {
                 "id": row["id"],
                 "status": _title_status(row.get("status")),
+                "created_at": row.get("created_at"),
                 "organisation": {
-                    "id": row.get("organisation_id"),
-                    "name": organisation.get("name", f"Organisation #{row.get('organisation_id')}"),
+                    "id": hospital.get("organisation_id"),
+                    "name": organisation.get("name", f"Hospital #{row.get('hospital_id')}"),
                     "type": organisation.get("type"),
                 },
             }
@@ -664,7 +786,11 @@ def _build_dashboard_payload(context):
             "pending_reports": pending_reports,
             "recorded_encounters": len(encounters),
             "active_affiliations": len(
-                [row for row in affiliations if (row.get("status") or "").lower() != "inactive"]
+                [
+                    row
+                    for row in affiliations
+                    if (row.get("status") or "").lower() in {"approved", "active"}
+                ]
             ),
         },
         "active_patient": active_patient,
@@ -673,67 +799,16 @@ def _build_dashboard_payload(context):
     }
 
 
-def _extract_edge_answer(payload):
-    if isinstance(payload, str):
-        return payload.strip() or None
-
-    if isinstance(payload, dict):
-        for key in ("answer", "response", "message", "text"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-
-        candidates = payload.get("candidates")
-        if isinstance(candidates, list):
-            for item in candidates:
-                if isinstance(item, dict):
-                    content = item.get("content")
-                    if isinstance(content, str) and content.strip():
-                        return content.strip()
-
-    return None
-
-
-def _call_gemini_edge(message: str, history: list[AssistantHistoryMessage], snapshot: dict):
-    edge_url = os.getenv("GEMINI_EDGE_FUNCTION_URL")
-    if not edge_url:
-        return None
-
-    token = os.getenv("GEMINI_EDGE_FUNCTION_TOKEN") or os.getenv("SUPABASE_SERVICE_KEY")
-   # ── Anonymise snapshot before sending to Gemini (Bihanga B-6.1.1) ──
+def _call_gemini_ai(message: str, history: list[AssistantHistoryMessage], snapshot: dict):
     anon_snapshot = anonymise_and_check(snapshot, context="doctor")
-
-    payload = {
-        "message": message,
-        "history": [{"role": item.role, "text": item.text} for item in history[-12:]],
-        "doctor_context": anon_snapshot,
-        "patient_context": anon_snapshot.get("active_patient"),
-    }
-    encoded = json.dumps(payload).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-        headers["apikey"] = token
-
-    request = urllib_request.Request(edge_url, data=encoded, headers=headers, method="POST")
-
-    try:
-        with urllib_request.urlopen(request, timeout=30) as response:
-            raw = response.read().decode("utf-8")
-    except urllib_error.HTTPError:
-        return None
-    except urllib_error.URLError:
-        return None
-
-    if not raw.strip():
-        return None
-
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return raw.strip()
-
-    return _extract_edge_answer(parsed)
+    return call_gemini_assistant(
+        {
+            "message": message,
+            "history": [{"role": item.role, "text": item.text} for item in history[-12:]],
+            "doctor_context": anon_snapshot,
+            "patient_context": anon_snapshot.get("active_patient"),
+        }
+    )
 
 
 def _doctor_assistant_fallback(message: str, snapshot: dict) -> str:
@@ -969,11 +1044,9 @@ def submit_encounter(
                         "prescription_id": prescription["id"],
                         "medicine_name": item.medicine_name,
                         "dosage": item.dosage,
-                        "quantity": item.duration or "As directed",
-                        "instructions": (
-                            f"Encounter type: {payload.encounter_type}"
-                            if payload.encounter_type
-                            else ""
+                        "instructions": _build_prescription_instructions(
+                            item.duration,
+                            payload.encounter_type,
                         ),
                     }
                     for item in payload.prescription_items
@@ -1029,7 +1102,7 @@ def doctor_assistant_respond(
             if matching:
                 snapshot["active_patient"] = _build_active_patient_bundle(matching, context["doctor"]["id"])
 
-    edge_answer = _call_gemini_edge(payload.message, payload.history, snapshot)
+    edge_answer, gemini_issue = _call_gemini_ai(payload.message, payload.history, snapshot)
     if edge_answer:
         # ── Attach disclaimer (Bihanga B-6.2.1) ──────────────────
         return build_safe_response(
@@ -1038,8 +1111,16 @@ def doctor_assistant_respond(
             role   = "doctor"
         )
 
+    fallback_answer = _doctor_assistant_fallback(payload.message, snapshot)
+    if gemini_issue:
+        fallback_answer = (
+            "Live AI answer is unavailable right now. "
+            "I am answering from saved dashboard data only.\n\n"
+            f"{fallback_answer}"
+        )
+
     return build_safe_response(
-        answer = _doctor_assistant_fallback(payload.message, snapshot),
+        answer = fallback_answer,
         source = "doctor_fallback",
         role   = "doctor"
     )
@@ -1051,6 +1132,12 @@ def create_availability_slot(
 ):
     context = _require_doctor_context(authorization)
     doctor_id = context["doctor"]["id"]
+
+    if not _approved_doctor_affiliations(doctor_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Join an approved hospital before publishing availability slots",
+        )
 
     start = payload.start_time
     end = payload.end_time
@@ -1283,22 +1370,160 @@ def get_patient_history(
     }
 
 @router.post("/affiliation/request")
-def request_affiliation(data: AffiliationRequest, user=Depends(get_current_user)):
-    supabase_admin.table("doctor_affiliations").insert({
-        "doctor_id": user.id,
-        "hospital_id": data.hospital_id,
-        "status": "pending"
-    }).execute()
-    return {"message": "Request sent"}
+def request_affiliation(
+    data: AffiliationRequest,
+    authorization: Optional[str] = Header(None),
+):
+    context = _require_doctor_context(authorization)
+    doctor_id = context["doctor"]["id"]
+
+    hospital_record = _resolve_hospital_record(data.hospital_id)
+    if not hospital_record:
+        raise HTTPException(status_code=404, detail="Hospital not found")
+
+    hospital_rows = (
+        supabase_admin.table("organisations")
+        .select("id, name, type, status")
+        .eq("id", hospital_record["organisation_id"])
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not hospital_rows:
+        raise HTTPException(status_code=404, detail="Hospital organisation not found")
+    hospital = hospital_rows[0]
+
+    if (hospital.get("type") or "").lower() != "hospital":
+        raise HTTPException(status_code=400, detail="Selected organisation is not a hospital")
+
+    if (hospital.get("status") or "").lower() != "approved":
+        raise HTTPException(status_code=400, detail="Hospital is not approved for doctor affiliation yet")
+
+    existing = (
+        supabase_admin.table("doctor_affiliations")
+        .select("*")
+        .eq("doctor_id", doctor_id)
+        .eq("hospital_id", hospital_record["id"])
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if existing:
+        current = existing[0]
+        current_status = (current.get("status") or "").lower()
+        if current_status in {"pending", "approved", "active"}:
+            raise HTTPException(
+                status_code=409,
+                detail="You already have an active or pending request for this hospital",
+            )
+
+        supabase_admin.table("doctor_affiliations").update(
+            {"status": "pending"}
+        ).eq("id", current["id"]).execute()
+        affiliation_id = current["id"]
+    else:
+        created = (
+            supabase_admin.table("doctor_affiliations")
+            .insert(
+                {
+                    "doctor_id": doctor_id,
+                    "hospital_id": hospital_record["id"],
+                    "status": "pending",
+                }
+            )
+            .execute()
+            .data
+            or []
+        )
+        if not created:
+            raise HTTPException(status_code=500, detail="Affiliation request could not be created")
+        affiliation_id = created[0]["id"]
+
+    _log_audit_action(context["user_id"], "AFFILIATION_REQUESTED", "doctor_affiliations", affiliation_id)
+    return {"message": "Hospital join request sent", "affiliation_id": affiliation_id}
+
+@router.get("/affiliations/hospitals")
+def list_hospital_affiliation_options(authorization: Optional[str] = Header(None)):
+    context = _require_doctor_context(authorization)
+    doctor_id = context["doctor"]["id"]
+
+    hospitals = (
+        supabase_admin.table("hospitals")
+        .select("*")
+        .order("id")
+        .execute()
+        .data
+        or []
+    )
+    affiliations = _doctor_affiliation_rows(doctor_id)
+    organisation_lookup = _organisation_map(
+        {row["organisation_id"] for row in hospitals if row.get("organisation_id")}
+    )
+
+    latest_by_hospital = {}
+    for row in affiliations:
+        hospital_id = row.get("hospital_id")
+        if hospital_id and hospital_id not in latest_by_hospital:
+            latest_by_hospital[hospital_id] = row
+
+    items = []
+    for hospital in hospitals:
+        organisation = organisation_lookup.get(hospital.get("organisation_id"), {})
+        current = latest_by_hospital.get(hospital["id"])
+        current_status = _title_status(current.get("status")) if current else None
+        current_status_normalized = (current.get("status") or "").lower() if current else ""
+        items.append(
+            {
+                "id": hospital["id"],
+                "name": organisation.get("name", f"Hospital #{hospital['id']}"),
+                "type": organisation.get("type"),
+                "status": organisation.get("status"),
+                "current_affiliation_id": current.get("id") if current else None,
+                "current_status": current_status,
+                "can_request": current is None or current_status_normalized in {"rejected", "revoked"},
+            }
+        )
+
+    return {"hospitals": items}
+
 
 @router.put("/affiliation/revoke")
-def revoke_affiliation(user=Depends(get_current_user)):
-    supabase_admin.table("doctor_affiliations") \
-        .update({"status": "revoked"}) \
-        .eq("doctor_id", user.id) \
-        .execute()
+def revoke_affiliation(
+    payload: AffiliationRevokeRequest,
+    authorization: Optional[str] = Header(None),
+):
+    context = _require_doctor_context(authorization)
+    doctor_id = context["doctor"]["id"]
 
-    return {"message": "Affiliation revoked"}
+    existing = (
+        supabase_admin.table("doctor_affiliations")
+        .select("*")
+        .eq("id", payload.affiliation_id)
+        .eq("doctor_id", doctor_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Affiliation not found for this doctor")
+
+    current = existing[0]
+    current_status = (current.get("status") or "").lower()
+    if current_status == "revoked":
+        return {"message": "Affiliation already revoked", "affiliation_id": current["id"]}
+
+    supabase_admin.table("doctor_affiliations").update({"status": "revoked"}).eq(
+        "id", current["id"]
+    ).execute()
+
+    _log_audit_action(context["user_id"], "AFFILIATION_REVOKED", "doctor_affiliations", current["id"])
+
+    return {"message": "Affiliation revoked", "affiliation_id": current["id"]}
 
 @router.post("/upload-attachment")
 async def upload(file: UploadFile = File(...)):

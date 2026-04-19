@@ -23,6 +23,9 @@ export const endpoints = {
     assistant: "/doctor/dashboard/assistant/respond",
     availability: "/doctor/dashboard/availability",
     inviteAcceptBase: "/doctor/dashboard/invite/accept",
+    affiliationHospitals: "/doctor/dashboard/affiliations/hospitals",
+    affiliationRequest: "/doctor/dashboard/affiliation/request",
+    affiliationRevoke: "/doctor/dashboard/affiliation/revoke",
   },
   pharmacist: {
     prescriptions: "/pharmacist/dashboard/prescriptions",
@@ -42,6 +45,7 @@ export const endpoints = {
   },
   healthMinistryAdmin: {
     dashboard: "/moh-admin/dashboard",
+    organisationsBase: "/moh-admin/organisations",
     approveOrganization: "/moh-admin/organizations/approve",
     approveDoctor: "/moh-admin/doctors/approve",
     suspend: "/moh-admin/suspend",

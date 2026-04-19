@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   getCurrentUser,
@@ -14,6 +14,7 @@ import type {
   UserRole,
 } from "../../types/auth";
 import {
+  getStoredToken,
   getStoredJson,
   removeStoredToken,
   removeStoredValue,
@@ -48,6 +49,22 @@ function normalizeRole(role: unknown): UserRole {
     : "PATIENT";
 }
 
+function shouldClearSession(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const normalized = error.message.trim().toLowerCase();
+  return [
+    "missing authorization token. please log in.",
+    "missing token",
+    "invalid token",
+    "invalid or expired token. please log in again.",
+    "user profile not found",
+    "user profile not found.",
+  ].includes(normalized);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(() => {
     const stored = getStoredJson<AuthUser>("user");
@@ -60,6 +77,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: normalizeRole(stored.role),
     };
   });
+
+  useEffect(() => {
+    const token = getStoredToken();
+    if (!token) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const syncUser = async () => {
+      try {
+        const userData = await getCurrentUser(token);
+        if (isCancelled) {
+          return;
+        }
+
+        const nextUser: AuthUser = {
+          id: userData.id,
+          name: userData.name || userData.email || "User",
+          email: userData.email,
+          role: normalizeRole(userData.role),
+          organisationId: userData.organisation_id ?? null,
+          adminRole: userData.admin_role ?? null,
+          doctorId: userData.doctor_id ?? null,
+          patientId: userData.patient_id ?? null,
+          dhid: userData.dhid ?? null,
+        };
+
+        setUser(nextUser);
+        setStoredJson("user", nextUser);
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        if (shouldClearSession(error)) {
+          setUser(null);
+          removeStoredToken();
+          removeStoredValue("user");
+        }
+      }
+    };
+
+    void syncUser();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   const login = async (
     payload: LoginFormValues,

@@ -46,6 +46,16 @@ export interface PendingOrganisationItem {
   createdAt: string | null;
 }
 
+export interface ManagedOrganisationItem {
+  id: string;
+  name: string | null;
+  type: string | null;
+  status: string | null;
+  createdAt: string | null;
+  linkedTable: string | null;
+  linkedRecordId: number | null;
+}
+
 export interface PendingDoctorItem {
   doctorId: string;
   userId: string | null;

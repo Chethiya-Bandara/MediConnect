@@ -71,7 +71,9 @@ const navItems = [
 ] as const satisfies Array<{ id: Page; label: string; icon: typeof Activity }>;
 
 const initialForm = {
-  optionKey: "",
+  organisationId: "",
+  doctorId: "",
+  appointmentDate: "",
   slotId: "",
   startTime: "",
   endTime: "",
@@ -132,6 +134,52 @@ function formatLkr(value: number) {
   }).format(value);
 }
 
+function toDateInputValue(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toDateTimeInputValue(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function isSessionProfileError(message: string) {
+  const normalized = message.trim().toLowerCase();
+  return [
+    "user profile not found",
+    "patient profile not found",
+    "invalid token",
+    "missing login token",
+    "patient access required",
+  ].includes(normalized);
+}
+
 export function PatientDashboardPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -185,13 +233,73 @@ export function PatientDashboardPage() {
       )}`
     : "";
 
-  const selectedOption = useMemo(
-    () => bookingOptions.find((item) => `${item.doctor_id}:${item.organisation_id}` === appointmentForm.optionKey) ?? null,
-    [appointmentForm.optionKey, bookingOptions],
-  );
+  const organisationOptions = useMemo(() => {
+    const uniqueOrganisations = new Map<number, string>();
+
+    bookingOptions.forEach((item) => {
+      uniqueOrganisations.set(item.organisation_id, item.organisation_name);
+    });
+
+    return Array.from(uniqueOrganisations, ([id, name]) => ({ id, name })).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  }, [bookingOptions]);
+
+  const doctorOptions = useMemo(() => {
+    if (!appointmentForm.organisationId) {
+      return [];
+    }
+
+    const selectedOrganisationId = Number(appointmentForm.organisationId);
+    const uniqueDoctors = new Map<number, { id: number; name: string; specialization: string | null }>();
+
+    bookingOptions
+      .filter((item) => item.organisation_id === selectedOrganisationId)
+      .forEach((item) => {
+        uniqueDoctors.set(item.doctor_id, {
+          id: item.doctor_id,
+          name: item.doctor_name,
+          specialization: item.specialization,
+        });
+      });
+
+    return Array.from(uniqueDoctors.values()).sort((left, right) => left.name.localeCompare(right.name));
+  }, [appointmentForm.organisationId, bookingOptions]);
+
+  const selectedOption = useMemo(() => {
+    if (!appointmentForm.organisationId || !appointmentForm.doctorId) {
+      return null;
+    }
+
+    return (
+      bookingOptions.find(
+        (item) =>
+          item.organisation_id === Number(appointmentForm.organisationId)
+          && item.doctor_id === Number(appointmentForm.doctorId),
+      ) ?? null
+    );
+  }, [appointmentForm.doctorId, appointmentForm.organisationId, bookingOptions]);
+
+  const visibleSlots = useMemo(() => {
+    if (!appointmentForm.organisationId) {
+      return [];
+    }
+
+    return availableSlots.filter((slot) => {
+      const matchesOrganisation =
+        slot.organisation_id == null
+        || slot.organisation_id === Number(appointmentForm.organisationId);
+      const matchesDate =
+        !appointmentForm.appointmentDate
+        || toDateInputValue(slot.start_time) === appointmentForm.appointmentDate;
+
+      return matchesOrganisation && matchesDate;
+    });
+  }, [appointmentForm.appointmentDate, appointmentForm.organisationId, availableSlots]);
+
   const selectedSlot = useMemo(
-    () => availableSlots.find((slot) => String(slot.id) === appointmentForm.slotId) ?? null,
-    [appointmentForm.slotId, availableSlots],
+    () => visibleSlots.find((slot) => String(slot.id) === appointmentForm.slotId) ?? null,
+    [appointmentForm.slotId, visibleSlots],
   );
 
   const showToast = (
@@ -227,7 +335,13 @@ export function PatientDashboardPage() {
       setPharmacyItems(pharmacyData);
       setDispensingSummary(dispensingData);
     } catch (error) {
-      setDashboardError(error instanceof Error ? error.message : "Dashboard data could not be loaded. Refresh the page to try again.");
+      if (error instanceof Error && isSessionProfileError(error.message)) {
+        setDashboardError(
+          "Your patient session needs a refresh. Sign out and log in again if this keeps happening.",
+        );
+      } else {
+        setDashboardError(error instanceof Error ? error.message : "Dashboard data could not be loaded. Refresh the page to try again.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -327,7 +441,7 @@ export function PatientDashboardPage() {
   }, [pharmacyQuery]);
 
   useEffect(() => {
-    if (editingAppointment || !selectedOption) {
+    if (editingAppointment || !appointmentForm.doctorId) {
       setAvailableSlots([]);
       setSlotError(null);
       return;
@@ -338,11 +452,8 @@ export function PatientDashboardPage() {
       setSlotError(null);
 
       try {
-        const slots = await getAvailableSlots(selectedOption.doctor_id);
-        const scopedSlots = slots.filter((slot) =>
-          slot.organisation_id === null || slot.organisation_id === selectedOption.organisation_id,
-        );
-        setAvailableSlots(scopedSlots);
+        const slots = await getAvailableSlots(Number(appointmentForm.doctorId));
+        setAvailableSlots(slots);
       } catch (error) {
         setAvailableSlots([]);
         setSlotError(
@@ -356,14 +467,14 @@ export function PatientDashboardPage() {
     };
 
     void loadSlots();
-  }, [editingAppointment, selectedOption]);
+  }, [appointmentForm.doctorId, editingAppointment]);
 
   useEffect(() => {
     if (!editingAppointment && selectedSlot) {
       setAppointmentForm((current) => ({
         ...current,
-        startTime: selectedSlot.start_time.slice(0, 16),
-        endTime: selectedSlot.end_time.slice(0, 16),
+        startTime: toDateTimeInputValue(selectedSlot.start_time),
+        endTime: toDateTimeInputValue(selectedSlot.end_time),
       }));
     }
   }, [editingAppointment, selectedSlot]);
@@ -443,10 +554,12 @@ export function PatientDashboardPage() {
   const openRescheduleModal = (appointment: DashboardAppointment) => {
     setEditingAppointment(appointment);
     setAppointmentForm({
-      optionKey: `${appointment.doctor.id}:${appointment.organisation.id}`,
+      organisationId: String(appointment.organisation.id),
+      doctorId: String(appointment.doctor.id),
+      appointmentDate: toDateInputValue(appointment.start_time),
       slotId: "",
-      startTime: appointment.start_time.slice(0, 16),
-      endTime: appointment.end_time.slice(0, 16),
+      startTime: toDateTimeInputValue(appointment.start_time),
+      endTime: toDateTimeInputValue(appointment.end_time),
     });
     setAvailableSlots([]);
     setSlotError(null);
@@ -454,8 +567,18 @@ export function PatientDashboardPage() {
   };
 
   const submitAppointment = async () => {
-    if (!appointmentForm.optionKey) {
-      showToast("Select a doctor and organisation first.", "error");
+    if (!editingAppointment && !appointmentForm.organisationId) {
+      showToast("Select an organisation first.", "error");
+      return;
+    }
+
+    if (!editingAppointment && !appointmentForm.doctorId) {
+      showToast("Select a doctor first.", "error");
+      return;
+    }
+
+    if (!editingAppointment && !appointmentForm.appointmentDate) {
+      showToast("Pick a date to view available slots.", "error");
       return;
     }
 
@@ -1193,14 +1316,14 @@ export function PatientDashboardPage() {
 
       {modal === "appointment" ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={(event) => event.target === event.currentTarget && setModal(null)}>
-          <div className="w-full max-w-lg rounded-[2rem] bg-white p-8 shadow-2xl dark:bg-slate-900">
-            <div className="mb-6 flex items-start justify-between gap-4">
+          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-8 pb-6 pt-8 dark:border-slate-800">
               <div>
                 <h3 className="text-2xl font-bold">{editingAppointment ? "Reschedule Appointment" : "Book Appointment"}</h3>
                 <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                   {editingAppointment
                     ? "Rescheduling currently updates the appointment window directly. Use this only after the clinic has already confirmed the new time."
-                    : "Booking uses live availability slots from the backend. If no slots appear, this doctor has not published a bookable window yet."}
+                    : "Pick the organisation first, then the doctor, then the date. Matching live slots will appear below in a scrollable lane."}
                 </p>
               </div>
               <button type="button" onClick={() => setModal(null)} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
@@ -1208,99 +1331,188 @@ export function PatientDashboardPage() {
               </button>
             </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Doctor and Organisation</label>
-                  <select value={appointmentForm.optionKey} onChange={(event) => setAppointmentForm((current) => ({ ...current, optionKey: event.target.value, slotId: "", startTime: "", endTime: "" }))} disabled={editingAppointment !== null} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white">
-                    <option value="">Select an available slot owner</option>
-                    {bookingOptions.map((item) => (
-                      <option key={`${item.doctor_id}:${item.organisation_id}`} value={`${item.doctor_id}:${item.organisation_id}`}>
-                        {item.doctor_name} • {item.organisation_name}
-                      </option>
-                  ))}
-                </select>
-              </div>
-
-              {selectedOption ? <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">{selectedOption.specialization || "Specialization not set"} • {selectedOption.organisation_name}</div> : null}
-
-              {editingAppointment ? (
-                <>
-                  <AlertBanner
-                    tone="info"
-                    message="Slot reassignment is not available from the current backend contract, so this form only updates the requested appointment window."
-                  />
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Start Time</label>
-                      <input type="datetime-local" value={appointmentForm.startTime} onChange={(event) => setAppointmentForm((current) => ({ ...current, startTime: event.target.value }))} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">End Time</label>
-                      <input type="datetime-local" value={appointmentForm.endTime} onChange={(event) => setAppointmentForm((current) => ({ ...current, endTime: event.target.value }))} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="space-y-4">
-                  <div>
-                    <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Available Slots</label>
-                    {isSlotsLoading ? (
-                      <LoadingState message="Loading live slots..." />
-                    ) : slotError ? (
-                      <AlertBanner tone="error" message={slotError} />
-                    ) : selectedOption && availableSlots.length === 0 ? (
-                      <AlertBanner
-                        tone="info"
-                        message="No open slots are published for this doctor right now. Booking will be available once the hospital releases a live slot."
-                      />
-                    ) : (
-                      <div className="grid gap-3">
-                        {availableSlots.map((slot) => {
-                          const active = appointmentForm.slotId === String(slot.id);
-                          return (
-                            <button
-                              key={slot.id}
-                              type="button"
-                              onClick={() =>
-                                setAppointmentForm((current) => ({
-                                  ...current,
-                                  slotId: String(slot.id),
-                                  startTime: slot.start_time.slice(0, 16),
-                                  endTime: slot.end_time.slice(0, 16),
-                                }))
-                              }
-                              className={`rounded-xl border px-4 py-4 text-left transition ${
-                                active
-                                  ? "border-primary bg-blue-50 text-blue-900 dark:border-blue-500 dark:bg-blue-950/30 dark:text-blue-100"
-                                  : "border-slate-200 bg-white hover:border-primary/50 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-slate-800"
-                              }`}
-                            >
-                              <p className="text-sm font-bold">{formatDateTime(slot.start_time)}</p>
-                              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ends {formatDateTime(slot.end_time)}</p>
-                            </button>
-                          );
-                        })}
+            <div className="flex-1 overflow-y-auto px-8 py-6">
+              <div className="space-y-5">
+                {editingAppointment ? (
+                  <>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Organisation</label>
+                        <input type="text" value={selectedOption?.organisation_name || editingAppointment.organisation.name} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
                       </div>
-                    )}
-                  </div>
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Doctor</label>
+                        <input type="text" value={selectedOption?.doctor_name || editingAppointment.doctor.name} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Date</label>
+                        <input type="date" value={appointmentForm.appointmentDate} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                      </div>
+                    </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected Start Time</label>
-                      <input type="datetime-local" value={appointmentForm.startTime} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                    <AlertBanner
+                      tone="info"
+                      message="Slot reassignment is not available from the current backend contract, so this form only updates the requested appointment window."
+                    />
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Start Time</label>
+                        <input type="datetime-local" value={appointmentForm.startTime} onChange={(event) => setAppointmentForm((current) => ({ ...current, startTime: event.target.value }))} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">End Time</label>
+                        <input type="datetime-local" value={appointmentForm.endTime} onChange={(event) => setAppointmentForm((current) => ({ ...current, endTime: event.target.value }))} className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                      </div>
                     </div>
-                    <div>
-                      <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected End Time</label>
-                      <input type="datetime-local" value={appointmentForm.endTime} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                  </>
+                ) : (
+                  <>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Organisation</label>
+                        <select
+                          value={appointmentForm.organisationId}
+                          onChange={(event) =>
+                            setAppointmentForm({
+                              organisationId: event.target.value,
+                              doctorId: "",
+                              appointmentDate: "",
+                              slotId: "",
+                              startTime: "",
+                              endTime: "",
+                            })
+                          }
+                          className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                        >
+                          <option value="">Select organisation</option>
+                          {organisationOptions.map((item) => (
+                            <option key={item.id} value={String(item.id)}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Doctor</label>
+                        <select
+                          value={appointmentForm.doctorId}
+                          onChange={(event) =>
+                            setAppointmentForm((current) => ({
+                              ...current,
+                              doctorId: event.target.value,
+                              appointmentDate: "",
+                              slotId: "",
+                              startTime: "",
+                              endTime: "",
+                            }))
+                          }
+                          disabled={!appointmentForm.organisationId}
+                          className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                        >
+                          <option value="">Select doctor</option>
+                          {doctorOptions.map((item) => (
+                            <option key={item.id} value={String(item.id)}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Date</label>
+                        <input
+                          type="date"
+                          value={appointmentForm.appointmentDate}
+                          onChange={(event) =>
+                            setAppointmentForm((current) => ({
+                              ...current,
+                              appointmentDate: event.target.value,
+                              slotId: "",
+                              startTime: "",
+                              endTime: "",
+                            }))
+                          }
+                          disabled={!appointmentForm.doctorId}
+                          className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                        />
+                      </div>
                     </div>
-                  </div>
-                </div>
-              )}
+
+                    {selectedOption ? (
+                      <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">
+                        {selectedOption.doctor_name} • {selectedOption.specialization || "Specialization not set"} • {selectedOption.organisation_name}
+                      </div>
+                    ) : null}
+
+                    <div>
+                      <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Available Slots</label>
+                      {!appointmentForm.organisationId ? (
+                        <AlertBanner tone="info" message="Select an organisation to narrow down the doctors." />
+                      ) : !appointmentForm.doctorId ? (
+                        <AlertBanner tone="info" message="Select a doctor to load that doctor's live availability." />
+                      ) : !appointmentForm.appointmentDate ? (
+                        <AlertBanner tone="info" message="Pick a date and the matching slots will appear here." />
+                      ) : isSlotsLoading ? (
+                        <LoadingState message="Loading live slots..." />
+                      ) : slotError ? (
+                        <AlertBanner tone="error" message={slotError} />
+                      ) : visibleSlots.length === 0 ? (
+                        <AlertBanner
+                          tone="info"
+                          message="No open slots are published for this doctor on the selected date. Try another date or doctor."
+                        />
+                      ) : (
+                        <div className="max-h-72 overflow-y-auto pr-2">
+                          <div className="grid gap-3">
+                            {visibleSlots.map((slot) => {
+                              const active = appointmentForm.slotId === String(slot.id);
+                              return (
+                                <button
+                                  key={slot.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setAppointmentForm((current) => ({
+                                      ...current,
+                                      slotId: String(slot.id),
+                                      startTime: toDateTimeInputValue(slot.start_time),
+                                      endTime: toDateTimeInputValue(slot.end_time),
+                                    }))
+                                  }
+                                  className={`rounded-xl border px-4 py-4 text-left transition ${
+                                    active
+                                      ? "border-primary bg-blue-50 text-blue-900 dark:border-blue-500 dark:bg-blue-950/30 dark:text-blue-100"
+                                      : "border-slate-200 bg-white hover:border-primary/50 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-slate-800"
+                                  }`}
+                                >
+                                  <p className="text-sm font-bold">{formatDateTime(slot.start_time)}</p>
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ends {formatDateTime(slot.end_time)}</p>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected Start Time</label>
+                        <input type="datetime-local" value={appointmentForm.startTime} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected End Time</label>
+                        <input type="datetime-local" value={appointmentForm.endTime} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
-            <div className="mt-6 flex gap-3">
+            <div className="flex gap-3 border-t border-slate-100 px-8 py-6 dark:border-slate-800">
               <button type="button" onClick={() => setModal(null)} className="flex-1 rounded-xl bg-slate-100 py-3 font-bold dark:bg-slate-800">Close</button>
-              <button type="button" onClick={() => void submitAppointment()} disabled={isSubmitting || (!editingAppointment && (!selectedOption || !appointmentForm.slotId || isSlotsLoading))} className="flex-1 rounded-xl bg-primary py-3 font-bold text-white disabled:opacity-60 dark:bg-blue-600">
+              <button type="button" onClick={() => void submitAppointment()} disabled={isSubmitting || (!editingAppointment && (!selectedOption || !appointmentForm.appointmentDate || !appointmentForm.slotId || isSlotsLoading))} className="flex-1 rounded-xl bg-primary py-3 font-bold text-white disabled:opacity-60 dark:bg-blue-600">
                 {isSubmitting ? "Saving..." : editingAppointment ? "Save Changes" : "Book Now"}
               </button>
             </div>

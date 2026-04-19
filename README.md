@@ -115,6 +115,9 @@ cp .env.example .env
 
 # Run the backend server
 python -m uvicorn main:app --reload
+
+# Or use the helper runner that is pinned to port 8000
+python run_dev.py
 ```
 Backend runs at: `http://127.0.0.1:8000`
 API docs available at: `http://127.0.0.1:8000/docs`

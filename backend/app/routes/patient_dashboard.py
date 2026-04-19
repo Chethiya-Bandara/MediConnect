@@ -1,16 +1,17 @@
 import json
 import os
+import re
 from datetime import datetime
 from typing import Literal, Optional
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.config.supabase import supabase, supabase_admin
-from app.middleware.role_checker import RoleChecker
+from app.config.supabase import execute_with_retry, supabase, supabase_admin
+from app.middleware.ai_anonymiser import anonymise_and_check
+from app.middleware.role_checker import RoleChecker, build_user_context
 from app.utils.helpers import validate_dhid, mask_nic, sanitize_search_query
+from app.utils.gemini_client import call_gemini_assistant
 from app.middleware.ai_disclaimer import build_safe_response
 
 router = APIRouter(prefix="/patient/dashboard", tags=["patient-dashboard"])
@@ -118,37 +119,39 @@ def _require_patient_context(authorization: Optional[str]):
 
     user_id = auth_user.user.id
 
-    try:
-        db_user = (
-            supabase_admin.table("users")
-            .select("*")
-            .eq("id", user_id)
-            .single()
-            .execute()
-            .data
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=404, detail="User profile not found") from exc
-
-    if not db_user or db_user.get("role") != "patient":
+    user_context = build_user_context(user_id, token=token, auth_user=auth_user.user)
+    if user_context.get("role") != "patient":
         raise HTTPException(status_code=403, detail="Patient access required")
 
     try:
-        patient = (
-            supabase_admin.table("patients")
-            .select("*")
-            .eq("user_id", user_id)
-            .single()
-            .execute()
-            .data
+        patient_rows = execute_with_retry(
+            lambda: (
+                supabase_admin.table("patients")
+                .select("*")
+                .eq("user_id", user_id)
+                .execute()
+                .data
+            ),
+            default=[],
         )
     except Exception as exc:
-        raise HTTPException(status_code=404, detail="Patient profile not found") from exc
+        raise HTTPException(
+            status_code=503,
+            detail="Patient profile could not be loaded right now. Please retry.",
+        ) from exc
+
+    patient = patient_rows[0] if patient_rows else None
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient profile not found")
 
     return {
-        "token": token,
-        "user_id": user_id,
-        "user": db_user,
+        **user_context,
+        "user": {
+            "id": user_context["id"],
+            "email": user_context.get("email"),
+            "role": user_context.get("role"),
+            "name": user_context.get("name"),
+        },
         "patient": patient,
     }
 
@@ -161,13 +164,16 @@ def _user_map(user_ids: set[str]):
     if not user_ids:
         return {}
 
-    rows = (
-        supabase_admin.table("users")
-        .select("*")
-        .in_("id", list(user_ids))
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("users")
+            .select("*")
+            .in_("id", list(user_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
     return {row["id"]: row for row in rows}
 
@@ -176,13 +182,16 @@ def _doctor_map(doctor_ids: set[int]):
     if not doctor_ids:
         return {}
 
-    rows = (
-        supabase_admin.table("doctors")
-        .select("*")
-        .in_("id", list(doctor_ids))
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("doctors")
+            .select("*")
+            .in_("id", list(doctor_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
     user_lookup = _user_map({row["user_id"] for row in rows if row.get("user_id")})
 
@@ -206,15 +215,81 @@ def _organisation_map(organisation_ids: set[int]):
     if not organisation_ids:
         return {}
 
-    rows = (
-        supabase_admin.table("organisations")
-        .select("*")
-        .in_("id", list(organisation_ids))
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("organisations")
+            .select("*")
+            .in_("id", list(organisation_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
     return {row["id"]: row for row in rows}
+
+
+def _hospital_map(hospital_ids: set[int]):
+    if not hospital_ids:
+        return {}
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("hospitals")
+            .select("*")
+            .in_("id", list(hospital_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    return {row["id"]: row for row in rows}
+
+
+def _approved_affiliations_by_doctor():
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("doctor_affiliations")
+            .select("*")
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    approved_by_doctor = {}
+    for row in rows:
+        if (row.get("status") or "").lower() not in {"approved", "active"}:
+            continue
+        doctor_id = row.get("doctor_id")
+        hospital_id = row.get("hospital_id")
+        if not doctor_id or not hospital_id:
+            continue
+        approved_by_doctor.setdefault(doctor_id, []).append(row)
+    return approved_by_doctor
+
+
+def _resolve_slot_organisation_id(
+    slot: dict,
+    approved_affiliations_by_doctor: dict[int, list[dict]],
+    hospital_lookup: dict[int, dict],
+):
+    organisation_id = slot.get("organisation_id")
+    if organisation_id:
+        return organisation_id
+
+    doctor_id = slot.get("doctor_id")
+    if not doctor_id:
+        return None
+
+    approved = approved_affiliations_by_doctor.get(doctor_id, [])
+    if len(approved) == 1:
+        hospital = hospital_lookup.get(approved[0].get("hospital_id"))
+        if hospital:
+            return hospital.get("organisation_id")
+
+    return None
 
 
 def _format_appointment(row, doctor_lookup, organisation_lookup):
@@ -302,7 +377,10 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+        return parsed
     except ValueError:
         return None
 
@@ -312,6 +390,19 @@ def _assistant_datetime_label(value: Optional[str]) -> str:
     if not parsed:
         return "an unscheduled time"
     return parsed.astimezone().strftime("%b %d, %Y at %I:%M %p")
+
+
+def _prescription_quantity_label(item: dict) -> Optional[str]:
+    quantity = item.get("quantity")
+    if quantity not in (None, ""):
+        return str(quantity)
+
+    instructions = item.get("instructions") or ""
+    match = re.search(r"Duration:\s*([^|]+)", instructions, re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+
+    return None
 
 
 def _log_audit_action(user_id: str, action: str, entity: str, entity_id: int):
@@ -331,15 +422,18 @@ def _consent_state_map(appointment_ids: set[int]):
     if not appointment_ids:
         return {}
 
-    rows = (
-        supabase_admin.table("audit_logs")
-        .select("*")
-        .eq("entity", "appointment_consent")
-        .in_("entity_id", list(appointment_ids))
-        .order("timestamp", desc=True)
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("audit_logs")
+            .select("*")
+            .eq("entity", "appointment_consent")
+            .in_("entity_id", list(appointment_ids))
+            .order("timestamp", desc=True)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
 
     consent_lookup = {}
@@ -396,6 +490,51 @@ def _build_assistant_snapshot(patient: dict, user: dict):
     }
     organisation_lookup = _organisation_map(organisation_ids)
 
+    approved_affiliations_by_doctor = _approved_affiliations_by_doctor()
+    active_affiliations = [
+        row
+        for items in approved_affiliations_by_doctor.values()
+        for row in items
+    ]
+    booking_doctor_ids = {row["doctor_id"] for row in active_affiliations if row.get("doctor_id")}
+    booking_hospital_lookup = _hospital_map(
+        {row["hospital_id"] for row in active_affiliations if row.get("hospital_id")}
+    )
+    booking_org_ids = {
+        row["organisation_id"] for row in booking_hospital_lookup.values() if row.get("organisation_id")
+    }
+    booking_doctor_lookup = _doctor_map(booking_doctor_ids)
+    booking_org_lookup = _organisation_map(booking_org_ids)
+
+    booking_options = [
+        {
+            "doctor_id": row["doctor_id"],
+            "organisation_id": booking_hospital_lookup.get(row["hospital_id"], {}).get("organisation_id"),
+            "doctor_name": booking_doctor_lookup.get(row["doctor_id"], {}).get(
+                "display_name", f"Doctor #{row['doctor_id']}"
+            ),
+            "specialization": booking_doctor_lookup.get(row["doctor_id"], {}).get(
+                "specialization"
+            ),
+            "organisation_name": booking_org_lookup.get(
+                booking_hospital_lookup.get(row["hospital_id"], {}).get("organisation_id"), {}
+            ).get("name", f"Hospital #{row['hospital_id']}"),
+        }
+        for row in active_affiliations
+        if booking_hospital_lookup.get(row["hospital_id"], {}).get("organisation_id")
+    ]
+
+    availability_rows = (
+        supabase_admin.table("availability_slots")
+        .select("*")
+        .eq("is_booked", False)
+        .in_("doctor_id", list(booking_doctor_ids))
+        .order("start_time")
+        .execute()
+        .data
+        or []
+    ) if booking_doctor_ids else []
+
     prescription_ids = [row["id"] for row in prescriptions]
     prescription_items = (
         supabase_admin.table("prescription_items")
@@ -427,7 +566,7 @@ def _build_assistant_snapshot(patient: dict, user: dict):
         {
             "medicine_name": item.get("medicine_name"),
             "dosage": item.get("dosage"),
-            "quantity": item.get("quantity"),
+            "quantity": _prescription_quantity_label(item),
             "instructions": item.get("instructions"),
         }
         for item in items_by_prescription.get(latest_prescription["id"], [])
@@ -440,6 +579,43 @@ def _build_assistant_snapshot(patient: dict, user: dict):
         else {}
     )
     latest_doctor = doctor_lookup.get(latest_record["doctor_id"], {}) if latest_record else {}
+    available_doctors = []
+    seen_doctors = set()
+    for slot in availability_rows:
+        doctor_id = slot.get("doctor_id")
+        if not doctor_id or doctor_id in seen_doctors:
+            continue
+
+        start_time = _parse_iso_datetime(slot.get("start_time"))
+        end_time = _parse_iso_datetime(slot.get("end_time"))
+        if not start_time or not end_time or end_time < now:
+            continue
+
+        seen_doctors.add(doctor_id)
+        doctor = booking_doctor_lookup.get(doctor_id, {})
+        resolved_organisation_id = _resolve_slot_organisation_id(
+            slot,
+            approved_affiliations_by_doctor,
+            booking_hospital_lookup,
+        )
+        organisation = booking_org_lookup.get(resolved_organisation_id, {})
+        available_doctors.append(
+            {
+                "doctor_id": doctor_id,
+                "doctor_name": doctor.get("display_name", f"Doctor #{doctor_id}"),
+                "specialization": doctor.get("specialization"),
+                "organisation_name": organisation.get(
+                    "name",
+                    (
+                        f"Organisation #{resolved_organisation_id}"
+                        if resolved_organisation_id
+                        else "Hospital assignment pending"
+                    ),
+                ),
+                "start_time": slot.get("start_time"),
+                "end_time": slot.get("end_time"),
+            }
+        )
 
     return {
         "user": {
@@ -457,6 +633,8 @@ def _build_assistant_snapshot(patient: dict, user: dict):
             "encounters": len(encounters),
             "prescriptions": len(prescriptions),
         },
+        "booking_options": booking_options[:12],
+        "available_doctors": available_doctors[:8],
         "next_appointment": {
             "doctor_name": next_doctor.get("display_name"),
             "doctor_specialization": next_doctor.get("specialization"),
@@ -480,85 +658,15 @@ def _build_assistant_snapshot(patient: dict, user: dict):
     }
 
 
-def _extract_edge_answer(payload) -> Optional[str]:
-    if isinstance(payload, str):
-        cleaned = payload.strip()
-        return cleaned or None
-
-    if isinstance(payload, list):
-        for item in payload:
-            answer = _extract_edge_answer(item)
-            if answer:
-                return answer
-        return None
-
-    if not isinstance(payload, dict):
-        return None
-
-    for key in ("answer", "response", "reply", "text", "message"):
-        answer = payload.get(key)
-        if isinstance(answer, str) and answer.strip():
-            return answer.strip()
-
-    content = payload.get("content")
-    if isinstance(content, dict):
-        for key in ("answer", "response", "text"):
-            answer = content.get(key)
-            if isinstance(answer, str) and answer.strip():
-                return answer.strip()
-
-    candidates = payload.get("candidates")
-    if isinstance(candidates, list):
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                continue
-            candidate_content = candidate.get("content", {})
-            parts = candidate_content.get("parts", []) if isinstance(candidate_content, dict) else []
-            for part in parts:
-                if isinstance(part, dict):
-                    text = part.get("text")
-                    if isinstance(text, str) and text.strip():
-                        return text.strip()
-
-    return None
-
-
-def _call_gemini_edge(message: str, history: list[AssistantHistoryMessage], snapshot: dict):
-    edge_url = os.getenv("GEMINI_EDGE_FUNCTION_URL")
-    if not edge_url:
-        return None
-
-    token = os.getenv("GEMINI_EDGE_FUNCTION_TOKEN") or os.getenv("SUPABASE_SERVICE_KEY")
-    payload = {
-        "message": message,
-        "history": [{"role": item.role, "text": item.text} for item in history[-12:]],
-        "patient_context": snapshot,
-    }
-    encoded = json.dumps(payload).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-        headers["apikey"] = token
-
-    request = urllib_request.Request(edge_url, data=encoded, headers=headers, method="POST")
-
-    try:
-        with urllib_request.urlopen(request, timeout=30) as response:
-            raw = response.read().decode("utf-8")
-    except urllib_error.HTTPError as exc:
-        return None
-    except urllib_error.URLError:
-        return None
-
-    if not raw.strip():
-        return None
-
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return raw.strip()
-
-    return _extract_edge_answer(parsed)
+def _call_gemini_ai(message: str, history: list[AssistantHistoryMessage], snapshot: dict):
+    safe_snapshot = anonymise_and_check(snapshot, context="patient")
+    return call_gemini_assistant(
+        {
+            "message": message,
+            "history": [{"role": item.role, "text": item.text} for item in history[-12:]],
+            "patient_context": safe_snapshot,
+        }
+    )
 
 
 def _fallback_assistant_answer(message: str, snapshot: dict) -> str:
@@ -567,6 +675,91 @@ def _fallback_assistant_answer(message: str, snapshot: dict) -> str:
     next_appointment = snapshot.get("next_appointment")
     latest_prescription = snapshot.get("latest_prescription")
     patient = snapshot.get("patient", {})
+    available_doctors = snapshot.get("available_doctors", [])
+    booking_options = snapshot.get("booking_options", [])
+
+    if any(
+        token in normalized
+        for token in (
+            "bada",
+            "stomach",
+            "belly",
+            "pain",
+            "ache",
+            "fever",
+            "headache",
+            "cough",
+            "symptom",
+            "specialist",
+            "specialty",
+            "speciality",
+            "meet wenna",
+            "kawda meet",
+            "which doctor",
+            "who should i see",
+        )
+    ):
+        specializations = [
+            item.get("specialization")
+            for item in booking_options
+            if item.get("specialization")
+        ]
+        lower_specializations = {item.lower(): item for item in specializations}
+
+        if any(token in normalized for token in ("bada", "stomach", "belly", "abdomen")):
+            preferred = (
+                lower_specializations.get("general medicine")
+                or lower_specializations.get("internal medicine")
+                or lower_specializations.get("general practitioner")
+            )
+            if preferred:
+                return (
+                    f"For stomach or abdominal discomfort, a good first stop is {preferred}. "
+                    "If the pain is severe, constant, or comes with vomiting, bleeding, fainting, or trouble breathing, seek urgent care immediately."
+                )
+            return (
+                "For stomach or abdominal discomfort, start with a general doctor or physician if one is available. "
+                "If the pain is severe, constant, or comes with vomiting, bleeding, fainting, or trouble breathing, seek urgent care immediately."
+            )
+
+        if specializations:
+            return (
+                "The best doctor depends on the symptom pattern, but from the current booking list these specialties exist: "
+                f"{', '.join(sorted(set(specializations))[:6])}."
+            )
+
+        return (
+            "The best doctor depends on the symptoms, but I cannot see a specialist list in the saved booking data right now."
+        )
+
+    if any(token in normalized for token in ("doctor", "doctors", "specialist", "specialty", "speciality", "available")):
+        if available_doctors:
+            doctor_summary = "; ".join(
+                f"{item.get('doctor_name')} ({item.get('specialization') or 'General'}) at "
+                f"{item.get('organisation_name')} - next slot {_assistant_datetime_label(item.get('start_time'))}"
+                for item in available_doctors[:3]
+            )
+            return (
+                f"I found {len(available_doctors)} doctor(s) with open slots in the saved availability data. "
+                f"Closest options: {doctor_summary}."
+            )
+
+        if booking_options:
+            specialties = sorted(
+                {
+                    item.get("specialization")
+                    for item in booking_options
+                    if item.get("specialization")
+                }
+            )
+            if specialties:
+                return (
+                    "I cannot see a live free slot right now, but the current booking list includes these specialties: "
+                    f"{', '.join(specialties[:6])}."
+                )
+            return "I can see active doctor booking links, but no free slot is visible right now."
+
+        return "I cannot see any active doctor availability in the saved booking data right now."
 
     if any(token in normalized for token in ("diagnosis", "record", "last visit", "notes")):
         if not latest_record:
@@ -597,13 +790,35 @@ def _fallback_assistant_answer(message: str, snapshot: dict) -> str:
             return "I could not find prescription medicines on your latest saved record yet."
 
         medicines = ", ".join(
-            f"{item.get('medicine_name')} ({item.get('dosage')}, qty {item.get('quantity')})"
+            " - ".join(
+                part
+                for part in [
+                    item.get("medicine_name"),
+                    (
+                        ", ".join(
+                            piece
+                            for piece in [
+                                item.get("dosage") or "As directed",
+                                _prescription_quantity_label(item),
+                            ]
+                            if piece
+                        )
+                    ),
+                ]
+                if part
+            )
             for item in items
             if item.get("medicine_name")
         )
         return f"Your latest prescription lists: {medicines}."
 
-    if any(token in normalized for token in ("dhid", "digital id", "digital health", "id")):
+    if (
+        "dhid" in normalized
+        or "digital health id" in normalized
+        or "digital id" in normalized
+        or "health id" in normalized
+        or re.search(r"\byour id\b|\bmy id\b|\bhealth id\b", normalized)
+    ):
         dhid = patient.get("dhid")
         if not dhid:
             return "I could not find your Digital Health ID yet."
@@ -620,51 +835,63 @@ def get_overview(authorization: Optional[str] = Header(None)):
     context = _require_patient_context(authorization)
     patient = context["patient"]
 
-    appointments = (
-        supabase_admin.table("appointments")
-        .select("*")
-        .eq("patient_id", patient["id"])
-        .order("start_time")
-        .execute()
-        .data
-        or []
+    appointments = execute_with_retry(
+        lambda: (
+            supabase_admin.table("appointments")
+            .select("*")
+            .eq("patient_id", patient["id"])
+            .order("start_time")
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
-    encounters = (
-        supabase_admin.table("encounters")
-        .select("*")
-        .eq("patient_id", patient["id"])
-        .order("created_at", desc=True)
-        .execute()
-        .data
-        or []
+    encounters = execute_with_retry(
+        lambda: (
+            supabase_admin.table("encounters")
+            .select("*")
+            .eq("patient_id", patient["id"])
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
-    prescriptions = (
-        supabase_admin.table("prescriptions")
-        .select("*")
-        .eq("patient_id", patient["id"])
-        .order("created_at", desc=True)
-        .execute()
-        .data
-        or []
+    prescriptions = execute_with_retry(
+        lambda: (
+            supabase_admin.table("prescriptions")
+            .select("*")
+            .eq("patient_id", patient["id"])
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
-    inventory_rows = (
-        supabase_admin.table("inventory")
-        .select("*", count="exact")
-        .limit(1)
-        .execute()
+    inventory_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("inventory")
+            .select("*", count="exact")
+            .limit(1)
+            .execute()
+        ),
+        default=lambda: type("InventoryResult", (), {"count": 0})(),
     )
 
     doctor_lookup = _doctor_map({row["doctor_id"] for row in appointments})
     organisation_lookup = _organisation_map({row["organisation_id"] for row in appointments})
     consent_lookup = _consent_state_map({row["id"] for row in appointments})
+    now = datetime.now().astimezone()
     upcoming = next(
         (
             row
             for row in appointments
             if row.get("status") != "cancelled"
-            and row.get("start_time")
-            and datetime.fromisoformat(row["start_time"].replace("Z", "+00:00"))
-            >= datetime.now().astimezone()
+            and (start_time := _parse_iso_datetime(row.get("start_time")))
+            and start_time >= now
         ),
         None,
     )
@@ -672,13 +899,16 @@ def get_overview(authorization: Optional[str] = Header(None)):
     recent_encounter = encounters[0] if encounters else None
     recent_appointment_map = {
         row["id"]: row
-        for row in (
-            supabase_admin.table("appointments")
-            .select("*")
-            .in_("id", [recent_encounter["appointment_id"]])
-            .execute()
-            .data
-            or []
+        for row in execute_with_retry(
+            lambda: (
+                supabase_admin.table("appointments")
+                .select("*")
+                .in_("id", [recent_encounter["appointment_id"]])
+                .execute()
+                .data
+                or []
+            ),
+            default=[],
         )
     } if recent_encounter and recent_encounter.get("appointment_id") else {}
 
@@ -700,9 +930,8 @@ def get_overview(authorization: Optional[str] = Header(None)):
                     row
                     for row in appointments
                     if row.get("status") != "cancelled"
-                    and row.get("start_time")
-                    and datetime.fromisoformat(row["start_time"].replace("Z", "+00:00"))
-                    >= datetime.now().astimezone()
+                    and (start_time := _parse_iso_datetime(row.get("start_time")))
+                    and start_time >= now
                 ]
             ),
             "medical_records": len(encounters),
@@ -732,14 +961,17 @@ def list_appointments(authorization: Optional[str] = Header(None)):
     context = _require_patient_context(authorization)
     patient = context["patient"]
 
-    rows = (
-        supabase_admin.table("appointments")
-        .select("*")
-        .eq("patient_id", patient["id"])
-        .order("start_time")
-        .execute()
-        .data
-        or []
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("appointments")
+            .select("*")
+            .eq("patient_id", patient["id"])
+            .order("start_time")
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
     doctor_lookup = _doctor_map({row["doctor_id"] for row in rows})
     organisation_lookup = _organisation_map({row["organisation_id"] for row in rows})
@@ -785,26 +1017,42 @@ def update_profile(
 def get_booking_options(authorization: Optional[str] = Header(None)):
     _require_patient_context(authorization)
 
-    affiliations = (
-        supabase_admin.table("doctor_affiliations")
-        .select("*")
-        .execute()
-        .data
-        or []
+    affiliations = execute_with_retry(
+        lambda: (
+            supabase_admin.table("doctor_affiliations")
+            .select("*")
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
     active_affiliations = [
-        row for row in affiliations if row.get("status", "").lower() != "inactive"
+        row
+        for row in affiliations
+        if row.get("doctor_id")
+        and row.get("hospital_id")
+        and row.get("status", "").lower() in {"approved", "active"}
     ]
+    hospital_lookup = _hospital_map(
+        {row["hospital_id"] for row in active_affiliations}
+    )
     doctor_lookup = _doctor_map({row["doctor_id"] for row in active_affiliations})
     organisation_lookup = _organisation_map(
-        {row["organisation_id"] for row in active_affiliations}
+        {
+            hospital_lookup.get(row["hospital_id"], {}).get("organisation_id")
+            for row in active_affiliations
+            if hospital_lookup.get(row["hospital_id"], {}).get("organisation_id")
+        }
     )
 
     return {
         "items": [
             {
                 "doctor_id": row["doctor_id"],
-                "organisation_id": row["organisation_id"],
+                "organisation_id": hospital_lookup.get(row["hospital_id"], {}).get(
+                    "organisation_id"
+                ),
                 "doctor_name": doctor_lookup.get(row["doctor_id"], {}).get(
                     "display_name", f"Doctor #{row['doctor_id']}"
                 ),
@@ -812,11 +1060,16 @@ def get_booking_options(authorization: Optional[str] = Header(None)):
                     "specialization"
                 ),
                 "organisation_name": organisation_lookup.get(
-                    row["organisation_id"], {}
-                ).get("name", f"Organisation #{row['organisation_id']}"),
+                    hospital_lookup.get(row["hospital_id"], {}).get("organisation_id"),
+                    {},
+                ).get(
+                    "name",
+                    f"Hospital #{row['hospital_id']}",
+                ),
                 "status": _title_status(row.get("status")),
             }
             for row in active_affiliations
+            if hospital_lookup.get(row["hospital_id"], {}).get("organisation_id")
         ]
     }
 
@@ -827,16 +1080,42 @@ def get_available_slots(
 ):
     _require_patient_context(authorization)
 
-    slots = (
-        supabase_admin.table("availability_slots")
-        .select("*")
-        .eq("doctor_id", doctor_id)
-        .eq("is_booked", False)
-        .order("start_time")
-        .execute()
-        .data
-        or []
+    raw_slots = execute_with_retry(
+        lambda: (
+            supabase_admin.table("availability_slots")
+            .select("*")
+            .eq("doctor_id", doctor_id)
+            .eq("is_booked", False)
+            .order("start_time")
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
     )
+
+    approved_affiliations_by_doctor = _approved_affiliations_by_doctor()
+    hospital_lookup = _hospital_map(
+        {
+            row["hospital_id"]
+            for row in approved_affiliations_by_doctor.get(doctor_id, [])
+            if row.get("hospital_id")
+        }
+    )
+
+    slots = []
+    for row in raw_slots:
+        resolved_organisation_id = _resolve_slot_organisation_id(
+            row,
+            approved_affiliations_by_doctor,
+            hospital_lookup,
+        )
+        slots.append(
+            {
+                **row,
+                "organisation_id": resolved_organisation_id,
+            }
+        )
 
     return {"slots": slots}
 
@@ -913,15 +1192,37 @@ def create_appointment(
             }
         )
 
+    approved_affiliations_by_doctor = _approved_affiliations_by_doctor()
+    approved_affiliations = approved_affiliations_by_doctor.get(slot["doctor_id"], [])
+    hospital_lookup = _hospital_map(
+        {row["hospital_id"] for row in approved_affiliations if row.get("hospital_id")}
+    )
+    resolved_organisation_id = _resolve_slot_organisation_id(
+        slot,
+        approved_affiliations_by_doctor,
+        hospital_lookup,
+    )
 
-    # Validate doctor affiliation is approved
-    affiliation = supabase_admin.table("doctor_affiliations") \
-        .select("*") \
-        .eq("doctor_id", slot["doctor_id"]) \
-        .eq("organisation_id", slot.get("organisation_id")) \
-        .execute().data or []
+    if not approved_affiliations:
+        raise HTTPException(400, "Doctor is not approved for any hospital yet")
 
-    if not any(a.get("status") == "approved" for a in affiliation):
+    if not resolved_organisation_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This doctor has multiple hospital affiliations, but the selected slot is not linked "
+                "to one hospital in the current schema. Ask the doctor to keep one active hospital or update the slot model."
+            ),
+        )
+
+    if not any(
+        (
+            hospital_lookup.get(row.get("hospital_id"), {}).get("organisation_id")
+            == resolved_organisation_id
+        )
+        and (row.get("status") or "").lower() in {"approved", "active"}
+        for row in approved_affiliations
+    ):
         raise HTTPException(400, "Doctor not approved for this organisation")
 
     # Create appointment
@@ -930,7 +1231,7 @@ def create_appointment(
         .insert({
             "patient_id": patient["id"],
             "doctor_id": slot["doctor_id"],
-            "organisation_id": slot.get("organisation_id"),
+            "organisation_id": resolved_organisation_id,
             "start_time": slot["start_time"],
             "end_time": slot["end_time"],
             "status": "pending",
@@ -1322,7 +1623,7 @@ def assistant_respond(
     context = _require_patient_context(authorization)
     snapshot = _build_assistant_snapshot(context["patient"], context["user"])
 
-    edge_answer = _call_gemini_edge(payload.message, payload.history, snapshot)
+    edge_answer, gemini_issue = _call_gemini_ai(payload.message, payload.history, snapshot)
     if edge_answer:
         # ── Attach disclaimer (Bihanga B-6.2.1) ──────────────────
         return build_safe_response(
@@ -1331,8 +1632,16 @@ def assistant_respond(
             role   = "patient"
         )
 
+    fallback_answer = _fallback_assistant_answer(payload.message, snapshot)
+    if gemini_issue:
+        fallback_answer = (
+            "Live AI answer is unavailable right now. "
+            "I am answering from saved patient data only.\n\n"
+            f"{fallback_answer}"
+        )
+
     return build_safe_response(
-        answer = _fallback_assistant_answer(payload.message, snapshot),
+        answer = fallback_answer,
         source = "patient_fallback",
         role   = "patient"
     )

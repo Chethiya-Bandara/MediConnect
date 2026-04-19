@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import {
   approveDoctor,
   approveOrganization,
+  createManagedOrganisation,
   generateMonthlyReport,
   getDiseaseIncidence,
   getHealthMinistryDashboard,
+  getManagedOrganisations,
   getTopDiagnoses,
   suspendEntity,
 } from "../api/healthMinistryAdminApi";
@@ -17,6 +19,7 @@ import type {
   HealthMinistryAuditLog,
   HealthMinistryDashboardStats,
   HealthMinistryOverviewStats,
+  ManagedOrganisationItem,
   PendingDoctorItem,
   PendingOrganisationItem,
 } from "../types";
@@ -66,6 +69,7 @@ export function useHealthMinistryAdminDashboard() {
   const [dashboardStats, setDashboardStats] = useState<HealthMinistryDashboardStats>(createEmptyStats);
   const [pendingOrganisations, setPendingOrganisations] = useState<PendingOrganisationItem[]>([]);
   const [pendingDoctors, setPendingDoctors] = useState<PendingDoctorItem[]>([]);
+  const [managedOrganisations, setManagedOrganisations] = useState<ManagedOrganisationItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<HealthMinistryAuditLog[]>([]);
   const [incidence, setIncidence] = useState<DiagnosisMetric[]>([]);
   const [topDiagnoses, setTopDiagnoses] = useState<DiagnosisMetric[]>([]);
@@ -75,11 +79,13 @@ export function useHealthMinistryAdminDashboard() {
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [approvalsMessage, setApprovalsMessage] = useState<string | null>(null);
   const [usersMessage, setUsersMessage] = useState<string | null>(null);
+  const [organisationMessage, setOrganisationMessage] = useState<string | null>(null);
   const [reportMessage, setReportMessage] = useState<string | null>(null);
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
   const [isSubmittingApproval, setIsSubmittingApproval] = useState(false);
   const [isSubmittingUserAction, setIsSubmittingUserAction] = useState(false);
+  const [isCreatingOrganisation, setIsCreatingOrganisation] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   const refreshDashboard = async () => {
@@ -87,16 +93,21 @@ export function useHealthMinistryAdminDashboard() {
     setDashboardError(null);
 
     try {
-      const response = await getHealthMinistryDashboard();
-      setDashboardStats(response.stats);
-      setPendingOrganisations(response.pendingOrganisations);
-      setPendingDoctors(response.pendingDoctors);
-      setAuditLogs(response.auditLogs);
+      const [dashboardResponse, organisationResponse] = await Promise.all([
+        getHealthMinistryDashboard(),
+        getManagedOrganisations(),
+      ]);
+      setDashboardStats(dashboardResponse.stats);
+      setPendingOrganisations(dashboardResponse.pendingOrganisations);
+      setPendingDoctors(dashboardResponse.pendingDoctors);
+      setAuditLogs(dashboardResponse.auditLogs);
+      setManagedOrganisations(organisationResponse);
       return true;
     } catch (error) {
       setDashboardStats(createEmptyStats());
       setPendingOrganisations([]);
       setPendingDoctors([]);
+      setManagedOrganisations([]);
       setAuditLogs([]);
       setDashboardError(
         error instanceof Error
@@ -192,10 +203,15 @@ export function useHealthMinistryAdminDashboard() {
   ) => {
     setIsSubmittingUserAction(true);
     setUsersMessage(null);
+    setOrganisationMessage(null);
 
     try {
       const response = await suspendEntity(targetId, targetType, action);
-      setUsersMessage(response.message ?? `${targetType} updated.`);
+      const message = response.message ?? `${targetType} updated.`;
+      setUsersMessage(message);
+      if (targetType === "ORGANIZATION") {
+        setOrganisationMessage(message);
+      }
       await refreshDashboard();
       return true;
     } catch (error) {
@@ -205,6 +221,29 @@ export function useHealthMinistryAdminDashboard() {
       return false;
     } finally {
       setIsSubmittingUserAction(false);
+    }
+  };
+
+  const submitOrganisationCreate = async (payload: {
+    name: string;
+    type: string;
+    status: string;
+  }) => {
+    setIsCreatingOrganisation(true);
+    setOrganisationMessage(null);
+
+    try {
+      const response = await createManagedOrganisation(payload);
+      setOrganisationMessage(response.message ?? "Organisation created.");
+      await refreshDashboard();
+      return true;
+    } catch (error) {
+      setOrganisationMessage(
+        error instanceof Error ? error.message : "Organisation creation failed.",
+      );
+      return false;
+    } finally {
+      setIsCreatingOrganisation(false);
     }
   };
 
@@ -235,6 +274,7 @@ export function useHealthMinistryAdminDashboard() {
     dashboardStats,
     pendingOrganisations,
     pendingDoctors,
+    managedOrganisations,
     auditLogs,
     incidence,
     topDiagnoses,
@@ -245,11 +285,13 @@ export function useHealthMinistryAdminDashboard() {
     dashboardError,
     approvalsMessage,
     usersMessage,
+    organisationMessage,
     reportMessage,
     isLoadingDashboard,
     isLoadingAnalytics,
     isSubmittingApproval,
     isSubmittingUserAction,
+    isCreatingOrganisation,
     isGeneratingReport,
     setFilters,
     refreshDashboard,
@@ -257,6 +299,7 @@ export function useHealthMinistryAdminDashboard() {
     submitOrganizationApproval,
     submitDoctorApproval,
     submitUserAction,
+    submitOrganisationCreate,
     requestMonthlyReport,
   };
 }

@@ -2,6 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from app.config.supabase import supabase, supabase_admin
+from app.middleware.role_checker import build_user_context
 from app.schemas.auth_schema import (
     LoginRequest,
     PasswordResetRequest,
@@ -176,13 +177,7 @@ def get_current_user(authorization: Optional[str] = Header(None)):
 
         user_id = user_res.user.id
 
-        db_user = supabase_admin.table("users") \
-            .select("*") \
-            .eq("id", user_id) \
-            .single() \
-            .execute()
-
-        return db_user.data
+        return build_user_context(user_id, token=token)
 
     except HTTPException:
         raise

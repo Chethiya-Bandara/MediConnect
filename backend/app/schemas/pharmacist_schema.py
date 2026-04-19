@@ -1,9 +1,11 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 class DispenseItem(BaseModel):
-    id: str
+    id: int | str
     quantity: int
 
 class DispenseRequest(BaseModel):
-    pharmacy_id: str
+    pharmacy_id: Optional[int | str] = None
     items: list[DispenseItem]

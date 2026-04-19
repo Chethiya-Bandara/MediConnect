@@ -103,15 +103,28 @@ export interface DoctorDashboardData {
   };
   active_patient: DoctorActivePatient | null;
   schedule: DoctorScheduleItem[];
-  affiliations: Array<{
-    id: number;
-    status: string;
-    organisation: {
-      id: number | null;
-      name: string;
-      type: string | null;
-    };
-  }>;
+  affiliations: DoctorAffiliation[];
+}
+
+export interface DoctorAffiliation {
+  id: number;
+  status: string;
+  created_at?: string | null;
+  organisation: {
+    id: number | null;
+    name: string;
+    type: string | null;
+  };
+}
+
+export interface DoctorAffiliationHospitalOption {
+  id: number;
+  name: string;
+  type: string | null;
+  status: string | null;
+  current_affiliation_id: number | null;
+  current_status: string | null;
+  can_request: boolean;
 }
 
 export interface DoctorAssistantReply {

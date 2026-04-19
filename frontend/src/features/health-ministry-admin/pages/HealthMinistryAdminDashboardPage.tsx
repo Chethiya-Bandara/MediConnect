@@ -23,15 +23,21 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/context/AuthContext";
 import { useHealthMinistryAdminDashboard } from "../hooks/useHealthMinistryAdminDashboard";
-import type { ApprovalStatus, GovernanceAction, GovernanceTargetType } from "../types";
+import type {
+  ApprovalStatus,
+  GovernanceAction,
+  GovernanceTargetType,
+  ManagedOrganisationItem,
+} from "../types";
 
-type DashboardView = "overview" | "approvals" | "analytics" | "audit";
+type DashboardView = "overview" | "approvals" | "organisations" | "analytics" | "audit";
 type ThemeMode = "light" | "dark";
 type ApprovalEntityFilter = "all" | "organisations" | "doctors";
 
 const views = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "approvals", label: "Approvals", icon: UserRoundCheck },
+  { id: "organisations", label: "Organisation Registry", icon: Building2 },
   { id: "analytics", label: "Analytics & Reports", icon: BarChart3 },
   { id: "audit", label: "Audit Logs", icon: ClipboardList },
 ] satisfies Array<{
@@ -173,6 +179,10 @@ export function HealthMinistryAdminDashboardPage() {
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [organizationId, setOrganizationId] = useState("");
   const [doctorId, setDoctorId] = useState("");
+  const [organisationSearch, setOrganisationSearch] = useState("");
+  const [newOrganisationName, setNewOrganisationName] = useState("");
+  const [newOrganisationType, setNewOrganisationType] = useState("hospital");
+  const [newOrganisationStatus, setNewOrganisationStatus] = useState("active");
   const [governanceTargetId, setGovernanceTargetId] = useState("");
   const [governanceTargetType, setGovernanceTargetType] =
     useState<GovernanceTargetType>("ORGANIZATION");
@@ -190,6 +200,9 @@ export function HealthMinistryAdminDashboardPage() {
 
   const deferredAuditSearch = useDeferredValue(auditSearch.trim().toLowerCase());
   const deferredApprovalSearch = useDeferredValue(approvalsSearch.trim().toLowerCase());
+  const deferredOrganisationSearch = useDeferredValue(
+    organisationSearch.trim().toLowerCase(),
+  );
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("health-ministry-theme");
@@ -293,6 +306,43 @@ export function HealthMinistryAdminDashboardPage() {
     });
   }, [approvalEntityFilter, dashboard.pendingDoctors, deferredApprovalSearch]);
 
+  const filteredManagedOrganisations = useMemo(() => {
+    return dashboard.managedOrganisations.filter((row) => {
+      const haystack = [
+        row.name,
+        row.id,
+        row.type,
+        row.status,
+        row.linkedTable,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return !deferredOrganisationSearch || haystack.includes(deferredOrganisationSearch);
+    });
+  }, [dashboard.managedOrganisations, deferredOrganisationSearch]);
+
+  const organisationRegistryStats = useMemo(() => {
+    const counts = {
+      active: 0,
+      pending: 0,
+      suspended: 0,
+    };
+
+    for (const row of dashboard.managedOrganisations) {
+      const normalized = (row.status ?? "").toLowerCase();
+      if (normalized === "suspended") {
+        counts.suspended += 1;
+      } else if (normalized === "pending") {
+        counts.pending += 1;
+      } else if (normalized === "active" || normalized === "approved") {
+        counts.active += 1;
+      }
+    }
+
+    return counts;
+  }, [dashboard.managedOrganisations]);
+
   const auditRoleOptions = useMemo(
     () => Array.from(new Set(dashboard.auditLogs.map((row) => row.actorRole ?? "Unknown"))).sort(),
     [dashboard.auditLogs],
@@ -355,6 +405,34 @@ export function HealthMinistryAdminDashboardPage() {
       governanceTargetType,
       governanceAction,
     );
+  };
+
+  const handleOrganisationCreate = async () => {
+    const trimmedName = newOrganisationName.trim();
+    if (!trimmedName) return;
+
+    const created = await dashboard.submitOrganisationCreate({
+      name: trimmedName,
+      type: newOrganisationType,
+      status: newOrganisationStatus,
+    });
+
+    if (created) {
+      setNewOrganisationName("");
+      setNewOrganisationType("hospital");
+      setNewOrganisationStatus("active");
+    }
+  };
+
+  const handleOrganisationStatusToggle = async (row: ManagedOrganisationItem) => {
+    const nextAction: GovernanceAction =
+      (row.status ?? "").toLowerCase() === "suspended" ? "ACTIVATE" : "SUSPEND";
+    const label = nextAction === "ACTIVATE" ? "set active" : "suspend";
+    const confirmed = window.confirm(
+      `${label} ${row.name ?? `organisation ${row.id}`}?`,
+    );
+    if (!confirmed) return;
+    await dashboard.submitUserAction(row.id, "ORGANIZATION", nextAction);
   };
 
   const exportAuditLogs = () => {
@@ -934,6 +1012,237 @@ export function HealthMinistryAdminDashboardPage() {
                   {dashboard.approvalsMessage}
                 </div>
               ) : null}
+            </section>
+          ) : null}
+
+          {view === "organisations" ? (
+            <section className="space-y-8">
+              <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h1 className="font-headline text-3xl font-extrabold tracking-tight">
+                    Organisation Registry
+                  </h1>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    Create organisations centrally and flip them between active and suspended without wrecking the rest of the ecosystem.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void dashboard.refreshDashboard()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:opacity-90 dark:bg-slate-700"
+                >
+                  <RefreshCcw size={16} />
+                  Refresh Registry
+                </button>
+              </header>
+
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Total organisations
+                  </p>
+                  <p className="mt-3 text-3xl font-extrabold">
+                    {dashboard.managedOrganisations.length.toLocaleString("en-LK")}
+                  </p>
+                </div>
+                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Active or approved
+                  </p>
+                  <p className="mt-3 text-3xl font-extrabold">
+                    {organisationRegistryStats.active.toLocaleString("en-LK")}
+                  </p>
+                </div>
+                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Pending
+                  </p>
+                  <p className="mt-3 text-3xl font-extrabold">
+                    {organisationRegistryStats.pending.toLocaleString("en-LK")}
+                  </p>
+                </div>
+                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Suspended
+                  </p>
+                  <p className="mt-3 text-3xl font-extrabold">
+                    {organisationRegistryStats.suspended.toLocaleString("en-LK")}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-8 xl:grid-cols-[0.95fr,1.35fr]">
+                <section className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-headline text-lg font-bold">Create Organisation</h2>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                        Hospitals and pharmacies get their linked facility rows automatically. Everything else stays as a clean organisation record.
+                      </p>
+                    </div>
+                    <Building2 className="text-blue-700 dark:text-blue-400" size={20} />
+                  </div>
+
+                  <div className="mt-6 space-y-4">
+                    <label className="space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Organisation name
+                      </span>
+                      <input
+                        value={newOrganisationName}
+                        onChange={(event) => setNewOrganisationName(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                        placeholder="Test Hospital 3"
+                        type="text"
+                      />
+                    </label>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-2">
+                        <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Type
+                        </span>
+                        <select
+                          value={newOrganisationType}
+                          onChange={(event) => setNewOrganisationType(event.target.value)}
+                          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                        >
+                          <option value="hospital">Hospital</option>
+                          <option value="pharmacy">Pharmacy</option>
+                        </select>
+                      </label>
+
+                      <label className="space-y-2">
+                        <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Initial status
+                        </span>
+                        <select
+                          value={newOrganisationStatus}
+                          onChange={(event) => setNewOrganisationStatus(event.target.value)}
+                          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                        >
+                          <option value="active">Active</option>
+                          <option value="approved">Approved</option>
+                          <option value="pending">Pending</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleOrganisationCreate()}
+                      disabled={dashboard.isCreatingOrganisation || !newOrganisationName.trim()}
+                      className="w-full rounded-2xl bg-blue-700 px-5 py-4 text-sm font-bold text-white shadow-md shadow-blue-900/15 transition-opacity hover:opacity-90 disabled:opacity-60 dark:bg-blue-600"
+                    >
+                      {dashboard.isCreatingOrganisation ? "Creating..." : "Create Organisation"}
+                    </button>
+                  </div>
+
+                  {dashboard.organisationMessage ? (
+                    <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.organisationMessage)}`}>
+                      {dashboard.organisationMessage}
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h2 className="font-headline text-lg font-bold">Live Organisation Registry</h2>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                        Search the current organisation records and toggle active or suspended state per row.
+                      </p>
+                    </div>
+                    <div className="relative w-full max-w-sm">
+                      <input
+                        type="text"
+                        value={organisationSearch}
+                        onChange={(event) => setOrganisationSearch(event.target.value)}
+                        placeholder="Search name, type, id, status"
+                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 pr-11 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                      />
+                      <Search className="absolute right-4 top-3.5 text-slate-400 dark:text-slate-500" size={18} />
+                    </div>
+                  </div>
+
+                  <div className="mt-6 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">Organisation</th>
+                          <th className="px-4 py-3 font-semibold">Type</th>
+                          <th className="px-4 py-3 font-semibold">Status</th>
+                          <th className="px-4 py-3 font-semibold">Linked facility</th>
+                          <th className="px-4 py-3 font-semibold">Created</th>
+                          <th className="px-4 py-3 text-right font-semibold">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {filteredManagedOrganisations.length > 0 ? (
+                          filteredManagedOrganisations.map((row) => {
+                            const statusLower = (row.status ?? "").toLowerCase();
+                            const actionLabel =
+                              statusLower === "suspended" ? "Set Active" : "Suspend";
+                            const actionClassName =
+                              statusLower === "suspended"
+                                ? "text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                                : "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20";
+
+                            return (
+                              <tr key={row.id}>
+                                <td className="px-4 py-4">
+                                  <div className="font-semibold">
+                                    {row.name ?? `Organisation ${row.id}`}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    ID: {row.id}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-4">
+                                  <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                                    {row.type ?? "unknown"}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                                  {formatStatusLabel(row.status)}
+                                </td>
+                                <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                                  {row.linkedTable
+                                    ? `${formatStatusLabel(row.linkedTable)} #${row.linkedRecordId ?? "?"}`
+                                    : "Organisation only"}
+                                </td>
+                                <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                                  {formatDisplayDate(row.createdAt)}
+                                </td>
+                                <td className="px-4 py-4">
+                                  <div className="flex justify-end">
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleOrganisationStatusToggle(row)}
+                                      disabled={dashboard.isSubmittingUserAction}
+                                      className={`rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${actionClassName}`}
+                                    >
+                                      {actionLabel}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+                              {dashboard.isLoadingDashboard
+                                ? "Refreshing organisation registry..."
+                                : "No organisations matched the current search."}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
             </section>
           ) : null}
 
