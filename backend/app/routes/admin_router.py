@@ -353,3 +353,180 @@ def get_doctor_patients_masked_nics(doctor_id: int):
         ],
         "note": "All NICs are masked. Raw values are never returned."
     }
+
+# ── Audit Log Export Security (Bihanga B-6.2.2) ───────────────────────────────
+# Audit logs are highly sensitive — restricted to Health Ministry Admins only.
+# All access to audit logs is itself logged for accountability.
+
+from datetime import datetime as _dt
+from typing import Optional as _Optional
+from fastapi import Query as _Query
+
+
+@router.get(
+    "/audit-logs",
+    dependencies=[Depends(HealthMinistryOnly)]
+)
+def get_audit_logs(
+    current_user: dict = Depends(HealthMinistryOnly),
+    action:       str  = _Query(default=None, description="Filter by action e.g. CONSENT_GRANTED"),
+    entity:       str  = _Query(default=None, description="Filter by entity e.g. appointments"),
+    user_id:      str  = _Query(default=None, description="Filter by user ID"),
+    from_date:    str  = _Query(default=None, description="Start date ISO format e.g. 2026-01-01"),
+    to_date:      str  = _Query(default=None, description="End date ISO format e.g. 2026-12-31"),
+    limit:        int  = _Query(default=50, le=200, description="Max results (200 max)"),
+    offset:       int  = _Query(default=0, description="Pagination offset"),
+):
+    """
+    Returns paginated audit logs.
+    Health Ministry Admins only — any other role gets 403.
+    Access to this endpoint is itself logged for accountability.
+    """
+
+    # ── Build query with filters ──────────────────────────────────
+    try:
+        query = (
+            supabase_admin.table("audit_logs")
+            .select("*")
+            .order("timestamp", desc=True)
+        )
+
+        if action:
+            query = query.eq("action", action.upper())
+
+        if entity:
+            query = query.eq("entity", entity.lower())
+
+        if user_id:
+            query = query.eq("user_id", user_id)
+
+        if from_date:
+            query = query.gte("timestamp", from_date)
+
+        if to_date:
+            query = query.lte("timestamp", to_date)
+
+        logs = query.range(offset, offset + limit - 1).execute().data or []
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not fetch audit logs"
+        )
+
+    # ── Log this access (audit the auditors) ─────────────────────
+    try:
+        supabase_admin.table("audit_logs").insert({
+            "action":    "AUDIT_LOG_ACCESSED",
+            "entity":    "audit_logs",
+            "entity_id": 0,
+            "user_id":   current_user["user_id"],
+            "timestamp": _dt.now().astimezone().isoformat(),
+        }).execute()
+    except Exception:
+        pass
+
+    return {
+        "count":   len(logs),
+        "offset":  offset,
+        "limit":   limit,
+        "filters": {
+            "action":    action,
+            "entity":    entity,
+            "user_id":   user_id,
+            "from_date": from_date,
+            "to_date":   to_date,
+        },
+        "logs": logs,
+    }
+
+
+@router.get(
+    "/audit-logs/export",
+    dependencies=[Depends(HealthMinistryOnly)]
+)
+def export_audit_logs(
+    current_user: dict = Depends(HealthMinistryOnly),
+    from_date:    str  = _Query(..., description="Start date ISO format e.g. 2026-01-01"),
+    to_date:      str  = _Query(..., description="End date ISO format e.g. 2026-12-31"),
+    entity:       str  = _Query(default=None, description="Filter by entity type"),
+):
+    """
+    Exports audit logs for a date range.
+    Health Ministry Admins only.
+    Maximum 30-day range per export to prevent bulk data extraction.
+    """
+    # ── Validate date range ───────────────────────────────────────
+    try:
+        start = _dt.fromisoformat(from_date)
+        end   = _dt.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid date format. Use ISO format e.g. 2026-01-01"
+        )
+
+    # ── Enforce 30-day maximum range ──────────────────────────────
+    delta_days = (end - start).days
+    if delta_days < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="to_date must be after from_date"
+        )
+
+    if delta_days > 30:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Export range cannot exceed 30 days. "
+                f"Requested range: {delta_days} days. "
+                f"Please split into smaller exports."
+            )
+        )
+
+    # ── Fetch logs ────────────────────────────────────────────────
+    try:
+        query = (
+            supabase_admin.table("audit_logs")
+            .select("*")
+            .gte("timestamp", from_date)
+            .lte("timestamp", to_date)
+            .order("timestamp", desc=True)
+            .limit(10000)
+        )
+
+        if entity:
+            query = query.eq("entity", entity.lower())
+
+        logs = query.execute().data or []
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not export audit logs"
+        )
+
+    # ── Log this export ───────────────────────────────────────────
+    try:
+        supabase_admin.table("audit_logs").insert({
+            "action":    "AUDIT_LOG_EXPORTED",
+            "entity":    "audit_logs",
+            "entity_id": 0,
+            "user_id":   current_user["user_id"],
+            "timestamp": _dt.now().astimezone().isoformat(),
+            "notes":     f"Export range: {from_date} to {to_date}, {len(logs)} records"
+        }).execute()
+    except Exception:
+        pass
+
+    return {
+        "export_range": {
+            "from": from_date,
+            "to":   to_date,
+            "days": delta_days,
+        },
+        "total_records": len(logs),
+        "exported_by":   current_user["user_id"],
+        "exported_at":   _dt.now().astimezone().isoformat(),
+        "logs":          logs,
+    }
