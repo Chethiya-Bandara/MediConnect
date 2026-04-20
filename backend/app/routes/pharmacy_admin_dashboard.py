@@ -6,6 +6,13 @@ from app.middleware.role_checker import RoleChecker
 
 router = APIRouter(prefix="/pharmacy-admin", tags=["pharmacy-admin-dashboard"])
 
+@router.get("/dashboard/{pharmacy_id}")
+def dashboard(pharmacy_id: str):
+    return {
+        "message": "Dashboard placeholder",
+        "pharmacy_id": pharmacy_id
+    }
+
 # Add medicine
 @router.post("/inventory")
 def add_medicine(data: CreateMedicineRequest):
@@ -42,7 +49,7 @@ def update_inventory(data: UpdateInventoryRequest):
 
 # View inventory
 @router.get("/inventory/{pharmacy_id}")
-def get_inventory(pharmacy_id: str, user=Depends(RoleChecker("pharmacy_admin"))):
+def get_inventory(pharmacy_id: str, user=Depends(RoleChecker(["pharmacy_admin"]))):
 
     res = supabase_admin.table("inventory") \
         .select("*") \

@@ -88,11 +88,11 @@ def register(user: RegisterRequest):
             }).execute()
 
         elif role == "pharmacist":
-            supabase_admin.table("pharmacists").insert({
-                "user_id": user_id,
-                "organisation_id": int(user.pharmacyId),
-                "license_no": user.licenseNumber or f"PENDING-{user_id[:8].upper()}",
-            }).execute()
+                supabase_admin.table("pharmacists").insert({
+                    "user_id": user_id,
+                    "pharmacy_id": int(user.pharmacyId),
+                    "license_no": user.licenseNumber or f"PENDING-{user_id[:8].upper()}",
+                }).execute()
 
         elif role in ["hospital_admin", "pharmacy_admin", "health_ministry_admin"]:
             organisation_id = (
