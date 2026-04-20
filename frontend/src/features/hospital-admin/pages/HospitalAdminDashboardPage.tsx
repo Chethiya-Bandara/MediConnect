@@ -160,7 +160,7 @@ export function HospitalAdminDashboardPage() {
   const dashboard = useHospitalAdminDashboard();
 
   const [view, setView] = useState<DashboardView>("overview");
-  const [theme, setTheme] = useState<ThemeMode>("light");
+  const [theme, setTheme] = useState<ThemeMode>("dark");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteHospitalId, setInviteHospitalId] = useState("");
   const [selectedAffiliationId, setSelectedAffiliationId] = useState("");
@@ -184,6 +184,8 @@ export function HospitalAdminDashboardPage() {
     const storedTheme = window.localStorage.getItem("hospital-admin-theme");
     if (storedTheme === "light" || storedTheme === "dark") {
       setTheme(storedTheme);
+    } else {
+      setTheme("dark");
     }
   }, []);
 

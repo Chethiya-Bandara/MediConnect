@@ -3,12 +3,16 @@ import {
   approveDoctor,
   approveOrganization,
   createManagedOrganisation,
+  createManagedMedicine,
+  deleteManagedMedicine,
   generateMonthlyReport,
   getDiseaseIncidence,
   getHealthMinistryDashboard,
+  getManagedMedicines,
   getManagedOrganisations,
   getTopDiagnoses,
   suspendEntity,
+  updateManagedMedicine,
 } from "../api/healthMinistryAdminApi";
 import type {
   AnalyticsFilters,
@@ -19,6 +23,8 @@ import type {
   HealthMinistryAuditLog,
   HealthMinistryDashboardStats,
   HealthMinistryOverviewStats,
+  ManagedMedicineItem,
+  ManagedMedicinePayload,
   ManagedOrganisationItem,
   PendingDoctorItem,
   PendingOrganisationItem,
@@ -70,6 +76,7 @@ export function useHealthMinistryAdminDashboard() {
   const [pendingOrganisations, setPendingOrganisations] = useState<PendingOrganisationItem[]>([]);
   const [pendingDoctors, setPendingDoctors] = useState<PendingDoctorItem[]>([]);
   const [managedOrganisations, setManagedOrganisations] = useState<ManagedOrganisationItem[]>([]);
+  const [managedMedicines, setManagedMedicines] = useState<ManagedMedicineItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<HealthMinistryAuditLog[]>([]);
   const [incidence, setIncidence] = useState<DiagnosisMetric[]>([]);
   const [topDiagnoses, setTopDiagnoses] = useState<DiagnosisMetric[]>([]);
@@ -80,12 +87,15 @@ export function useHealthMinistryAdminDashboard() {
   const [approvalsMessage, setApprovalsMessage] = useState<string | null>(null);
   const [usersMessage, setUsersMessage] = useState<string | null>(null);
   const [organisationMessage, setOrganisationMessage] = useState<string | null>(null);
+  const [medicineMessage, setMedicineMessage] = useState<string | null>(null);
   const [reportMessage, setReportMessage] = useState<string | null>(null);
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
+  const [isLoadingMedicines, setIsLoadingMedicines] = useState(true);
   const [isSubmittingApproval, setIsSubmittingApproval] = useState(false);
   const [isSubmittingUserAction, setIsSubmittingUserAction] = useState(false);
   const [isCreatingOrganisation, setIsCreatingOrganisation] = useState(false);
+  const [isSubmittingMedicine, setIsSubmittingMedicine] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   const refreshDashboard = async () => {
@@ -146,8 +156,29 @@ export function useHealthMinistryAdminDashboard() {
     }
   };
 
+  const refreshMedicines = async (search = "") => {
+    setIsLoadingMedicines(true);
+
+    try {
+      const response = await getManagedMedicines(search);
+      setManagedMedicines(response);
+      setMedicineMessage(null);
+      return true;
+    } catch (error) {
+      setManagedMedicines([]);
+      setMedicineMessage(
+        error instanceof Error
+          ? error.message
+          : "Medicine registry could not be loaded.",
+      );
+      return false;
+    } finally {
+      setIsLoadingMedicines(false);
+    }
+  };
+
   useEffect(() => {
-    void Promise.all([refreshDashboard(), refreshAnalytics()]);
+    void Promise.all([refreshDashboard(), refreshAnalytics(), refreshMedicines()]);
   }, []);
 
   const overviewStats = useMemo(
@@ -247,6 +278,66 @@ export function useHealthMinistryAdminDashboard() {
     }
   };
 
+  const submitMedicineCreate = async (payload: ManagedMedicinePayload) => {
+    setIsSubmittingMedicine(true);
+    setMedicineMessage(null);
+
+    try {
+      const response = await createManagedMedicine(payload);
+      setMedicineMessage(response.message ?? "Medicine created.");
+      await refreshMedicines();
+      return true;
+    } catch (error) {
+      setMedicineMessage(
+        error instanceof Error ? error.message : "Medicine creation failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingMedicine(false);
+    }
+  };
+
+  const submitMedicineUpdate = async (
+    medicineId: string,
+    payload: ManagedMedicinePayload,
+  ) => {
+    setIsSubmittingMedicine(true);
+    setMedicineMessage(null);
+
+    try {
+      const response = await updateManagedMedicine(medicineId, payload);
+      setMedicineMessage(response.message ?? "Medicine updated.");
+      await refreshMedicines();
+      return true;
+    } catch (error) {
+      setMedicineMessage(
+        error instanceof Error ? error.message : "Medicine update failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingMedicine(false);
+    }
+  };
+
+  const submitMedicineDelete = async (medicineId: string) => {
+    setIsSubmittingMedicine(true);
+    setMedicineMessage(null);
+
+    try {
+      const response = await deleteManagedMedicine(medicineId);
+      setMedicineMessage(response.message ?? "Medicine removed.");
+      await refreshMedicines();
+      return true;
+    } catch (error) {
+      setMedicineMessage(
+        error instanceof Error ? error.message : "Medicine removal failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingMedicine(false);
+    }
+  };
+
   const requestMonthlyReport = async () => {
     setIsGeneratingReport(true);
     setReportMessage(null);
@@ -275,6 +366,7 @@ export function useHealthMinistryAdminDashboard() {
     pendingOrganisations,
     pendingDoctors,
     managedOrganisations,
+    managedMedicines,
     auditLogs,
     incidence,
     topDiagnoses,
@@ -286,20 +378,27 @@ export function useHealthMinistryAdminDashboard() {
     approvalsMessage,
     usersMessage,
     organisationMessage,
+    medicineMessage,
     reportMessage,
     isLoadingDashboard,
     isLoadingAnalytics,
+    isLoadingMedicines,
     isSubmittingApproval,
     isSubmittingUserAction,
     isCreatingOrganisation,
+    isSubmittingMedicine,
     isGeneratingReport,
     setFilters,
     refreshDashboard,
     refreshAnalytics,
+    refreshMedicines,
     submitOrganizationApproval,
     submitDoctorApproval,
     submitUserAction,
     submitOrganisationCreate,
+    submitMedicineCreate,
+    submitMedicineUpdate,
+    submitMedicineDelete,
     requestMonthlyReport,
   };
 }

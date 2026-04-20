@@ -8,6 +8,8 @@ import type {
   HealthMinistryAuditLog,
   HealthMinistryDashboardStats,
   ManagedOrganisationItem,
+  ManagedMedicineItem,
+  ManagedMedicinePayload,
   PendingDoctorItem,
   PendingOrganisationItem,
 } from "../types";
@@ -71,6 +73,18 @@ interface OrganisationRegistryResponse {
     created_at?: string | null;
     linked_table?: string | null;
     linked_record_id?: number | null;
+  }>;
+}
+
+interface MedicineRegistryResponse {
+  items?: Array<{
+    id?: string | number | null;
+    name?: string | null;
+    unit?: string | null;
+    wholesale_price?: number | string | null;
+    retail_price?: number | string | null;
+    created_at?: string | null;
+    inventory_links?: number | string | null;
   }>;
 }
 
@@ -167,6 +181,30 @@ function normalizeManagedOrganisations(
   }));
 }
 
+function normalizeManagedMedicines(
+  payload: MedicineRegistryResponse["items"],
+): ManagedMedicineItem[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload.map((item) => ({
+    id: asString(item.id) ?? "",
+    name: item.name ?? null,
+    unit: item.unit ?? null,
+    wholesalePrice:
+      typeof item.wholesale_price === "number"
+        ? item.wholesale_price
+        : Number(item.wholesale_price ?? 0),
+    retailPrice:
+      typeof item.retail_price === "number"
+        ? item.retail_price
+        : Number(item.retail_price ?? 0),
+    createdAt: item.created_at ?? null,
+    inventoryLinks: Number(item.inventory_links ?? 0),
+  }));
+}
+
 export async function getHealthMinistryDashboard() {
   const response = await apiRequest<DashboardResponse>(
     endpoints.healthMinistryAdmin.dashboard,
@@ -201,6 +239,56 @@ export async function createManagedOrganisation(payload: {
       status: payload.status,
     }),
   });
+}
+
+export async function getManagedMedicines(search = "") {
+  const query = search.trim()
+    ? `?search=${encodeURIComponent(search.trim())}`
+    : "";
+  const response = await apiRequest<MedicineRegistryResponse>(
+    `${endpoints.healthMinistryAdmin.medicinesBase}${query}`,
+  );
+
+  return normalizeManagedMedicines(response.items);
+}
+
+export async function createManagedMedicine(payload: ManagedMedicinePayload) {
+  return apiRequest<{ message?: string }>(endpoints.healthMinistryAdmin.medicinesBase, {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name,
+      unit: payload.unit,
+      wholesale_price: payload.wholesalePrice,
+      retail_price: payload.retailPrice,
+    }),
+  });
+}
+
+export async function updateManagedMedicine(
+  medicineId: string,
+  payload: ManagedMedicinePayload,
+) {
+  return apiRequest<{ message?: string }>(
+    `${endpoints.healthMinistryAdmin.medicinesBase}/${encodeURIComponent(medicineId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        name: payload.name,
+        unit: payload.unit,
+        wholesale_price: payload.wholesalePrice,
+        retail_price: payload.retailPrice,
+      }),
+    },
+  );
+}
+
+export async function deleteManagedMedicine(medicineId: string) {
+  return apiRequest<{ message?: string }>(
+    `${endpoints.healthMinistryAdmin.medicinesBase}/${encodeURIComponent(medicineId)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 function normalizeDiagnosisList(payload: unknown): DiagnosisMetric[] {

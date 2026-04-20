@@ -51,6 +51,7 @@ export const endpoints = {
   healthMinistryAdmin: {
     dashboard: "/moh-admin/dashboard",
     organisationsBase: "/moh-admin/organisations",
+    medicinesBase: "/moh-admin/medicines",
     approveOrganization: "/moh-admin/organizations/approve",
     approveDoctor: "/moh-admin/doctors/approve",
     suspend: "/moh-admin/suspend",

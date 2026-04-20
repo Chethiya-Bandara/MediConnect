@@ -2,6 +2,7 @@ import {
   BarChart3,
   ClipboardCheck,
   Landmark,
+  Pill,
   Settings,
   Shield,
 } from "lucide-react";
@@ -15,6 +16,7 @@ export const healthMinistrySectionTabs: Array<{
 }> = [
   { id: "overview", label: "Overview", icon: Landmark },
   { id: "approvals", label: "Approvals", icon: ClipboardCheck },
+  { id: "medicines", label: "Medicine Registry", icon: Pill },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "users", label: "User Actions", icon: Shield },
   { id: "settings", label: "Settings", icon: Settings },

@@ -216,7 +216,7 @@ export function DoctorDashboardPage() {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [page, setPage] = useState<DoctorPage>("encounter");
-  const [theme, setTheme] = useState<Theme>("light");
+  const [theme, setTheme] = useState<Theme>("dark");
   const [modal, setModal] = useState<DoctorModal>(null);
   const [toast, setToast] = useState<{
     message: string;

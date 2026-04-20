@@ -75,3 +75,27 @@ class OrganizationCreateRequest(BaseModel):
         if normalized not in {"active", "approved", "pending"}:
             raise ValueError("Invalid organisation creation status")
         return normalized
+
+
+class MedicineUpsertRequest(BaseModel):
+    name: str
+    unit: str
+    wholesale_price: float
+    retail_price: float
+
+    @field_validator("name", "unit")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        cleaned = " ".join((value or "").replace("\xa0", " ").split())
+        if not cleaned:
+            raise ValueError("This field is required")
+        return cleaned
+
+    @field_validator("wholesale_price", "retail_price")
+    @classmethod
+    def validate_non_negative_price(cls, value: float) -> float:
+        if value is None:
+            raise ValueError("This field is required")
+        if value < 0:
+            raise ValueError("Price cannot be negative")
+        return float(value)

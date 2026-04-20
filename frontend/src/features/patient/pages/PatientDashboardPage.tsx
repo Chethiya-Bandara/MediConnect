@@ -210,7 +210,7 @@ export function PatientDashboardPage() {
   const [page, setPage] = useState<Page>("overview");
   const [modal, setModal] = useState<Modal>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>("light");
+  const [theme, setTheme] = useState<Theme>("dark");
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [appointments, setAppointments] = useState<DashboardAppointment[]>([]);
   const [bookingOptions, setBookingOptions] = useState<BookingOption[]>([]);

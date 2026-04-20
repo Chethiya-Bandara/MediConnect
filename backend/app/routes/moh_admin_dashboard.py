@@ -3,13 +3,14 @@ from datetime import datetime, timedelta, timezone
 import re
 from typing import Any, Iterable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config.supabase import execute_with_retry, supabase_admin
 from app.middleware.role_checker import HealthMinistryOnly
 from app.schemas.moh_admin_schema import (
     AnalyticsRequest,
     DoctorApprovalRequest,
+    MedicineUpsertRequest,
     OrganizationApprovalRequest,
     OrganizationCreateRequest,
     SuspendRequest,
@@ -44,6 +45,10 @@ def _fetch_single_with_query(query_factory) -> dict[str, Any] | None:
 
 def _normalize_status(value: str | None) -> str:
     return (value or "").strip().lower()
+
+
+def _clean_medicine_text(value: str | None) -> str:
+    return " ".join((value or "").replace("\xa0", " ").split())
 
 
 def _title_status(value: str | None) -> str:
@@ -182,6 +187,88 @@ def _list_all_organisations() -> list[dict[str, Any]]:
         )
 
     return items
+
+
+def _list_all_medicines(search: str | None = None) -> list[dict[str, Any]]:
+    normalized_search = _clean_medicine_text(search)
+    medicine_rows = _fetch_rows_with_query(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, created_at, name, unit, wholesale_price, retail_price")
+            .ilike("name", f"%{normalized_search}%")
+            .order("name")
+        )
+        if normalized_search
+        else (
+            supabase_admin.table("medicines")
+            .select("id, created_at, name, unit, wholesale_price, retail_price")
+            .order("name")
+        )
+    )
+
+    inventory_rows = _fetch_rows_with_query(
+        lambda: supabase_admin.table("inventory").select("medicine_id")
+    )
+    inventory_counter = Counter()
+    for row in inventory_rows:
+        try:
+            inventory_counter[int(row.get("medicine_id"))] += 1
+        except (TypeError, ValueError):
+            continue
+
+    items: list[dict[str, Any]] = []
+    for row in medicine_rows:
+        try:
+            medicine_id = int(row["id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+
+        items.append(
+            {
+                "id": medicine_id,
+                "created_at": row.get("created_at"),
+                "name": _clean_medicine_text(row.get("name")),
+                "unit": _clean_medicine_text(row.get("unit")),
+                "wholesale_price": row.get("wholesale_price"),
+                "retail_price": row.get("retail_price"),
+                "inventory_links": inventory_counter.get(medicine_id, 0),
+            }
+        )
+
+    return items
+
+
+def _get_medicine_or_404(medicine_id: int) -> dict[str, Any]:
+    medicine = _fetch_single_with_query(
+        lambda: supabase_admin.table("medicines")
+        .select("id, created_at, name, unit, wholesale_price, retail_price")
+        .eq("id", medicine_id)
+    )
+    if not medicine:
+        raise HTTPException(status_code=404, detail="Medicine not found.")
+    return medicine
+
+
+def _ensure_unique_medicine_name(name: str, exclude_id: int | None = None):
+    candidates = _fetch_rows_with_query(
+        lambda: supabase_admin.table("medicines")
+        .select("id, name")
+        .ilike("name", name)
+        .limit(25)
+    )
+    normalized_name = _clean_medicine_text(name).lower()
+    for row in candidates:
+        try:
+            row_id = int(row["id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if exclude_id is not None and row_id == exclude_id:
+            continue
+        if _clean_medicine_text(row.get("name")).lower() == normalized_name:
+            raise HTTPException(
+                status_code=409,
+                detail="A medicine with this name already exists in the registry.",
+            )
 
 
 def _get_encounter_rows(
@@ -382,6 +469,150 @@ def create_organisation(
             "status": organisation.get("status"),
             "created_at": organisation.get("created_at"),
         },
+    }
+
+
+@router.get("/medicines")
+def list_medicines(
+    search: str = Query(default=""),
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    _ = current_user
+    items = _list_all_medicines(search=search)
+    return {
+        "items": items,
+        "count": len(items),
+    }
+
+
+@router.post("/medicines")
+def create_medicine(
+    payload: MedicineUpsertRequest,
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    cleaned_name = _clean_medicine_text(payload.name)
+    cleaned_unit = _clean_medicine_text(payload.unit).upper()
+    _ensure_unique_medicine_name(cleaned_name)
+
+    medicine_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .insert(
+                {
+                    "name": cleaned_name,
+                    "unit": cleaned_unit,
+                    "wholesale_price": payload.wholesale_price,
+                    "retail_price": payload.retail_price,
+                }
+            )
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if not medicine_rows:
+        raise HTTPException(status_code=500, detail="Medicine could not be created.")
+
+    medicine = medicine_rows[0]
+    medicine_id = int(medicine["id"])
+    _log_audit_action(
+        user_id=current_user["user_id"],
+        action="MEDICINE_CREATED",
+        entity="medicines",
+        entity_id=medicine_id,
+    )
+
+    return {
+        "message": f"{cleaned_name} added to the national medicine registry.",
+        "item": {
+            "id": medicine_id,
+            "created_at": medicine.get("created_at"),
+            "name": cleaned_name,
+            "unit": cleaned_unit,
+            "wholesale_price": medicine.get("wholesale_price"),
+            "retail_price": medicine.get("retail_price"),
+            "inventory_links": 0,
+        },
+    }
+
+
+@router.put("/medicines/{medicine_id}")
+def update_medicine(
+    medicine_id: int,
+    payload: MedicineUpsertRequest,
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    _get_medicine_or_404(medicine_id)
+    cleaned_name = _clean_medicine_text(payload.name)
+    cleaned_unit = _clean_medicine_text(payload.unit).upper()
+    _ensure_unique_medicine_name(cleaned_name, exclude_id=medicine_id)
+
+    updated_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .update(
+                {
+                    "name": cleaned_name,
+                    "unit": cleaned_unit,
+                    "wholesale_price": payload.wholesale_price,
+                    "retail_price": payload.retail_price,
+                }
+            )
+            .eq("id", medicine_id)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if not updated_rows:
+        raise HTTPException(status_code=500, detail="Medicine could not be updated.")
+
+    _log_audit_action(
+        user_id=current_user["user_id"],
+        action="MEDICINE_UPDATED",
+        entity="medicines",
+        entity_id=medicine_id,
+    )
+    return {"message": f"{cleaned_name} updated."}
+
+
+@router.delete("/medicines/{medicine_id}")
+def delete_medicine(
+    medicine_id: int,
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    medicine = _get_medicine_or_404(medicine_id)
+    linked_inventory_rows = _fetch_rows_with_query(
+        lambda: supabase_admin.table("inventory")
+        .select("id")
+        .eq("medicine_id", medicine_id)
+        .limit(1)
+    )
+    if linked_inventory_rows:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This medicine is still linked to pharmacy inventory rows. "
+                "Remove those stock records first, then delete the catalog item."
+            ),
+        )
+
+    execute_with_retry(
+        lambda: supabase_admin.table("medicines")
+        .delete()
+        .eq("id", medicine_id)
+        .execute()
+    )
+    _log_audit_action(
+        user_id=current_user["user_id"],
+        action="MEDICINE_DELETED",
+        entity="medicines",
+        entity_id=medicine_id,
+    )
+    return {
+        "message": f"{_clean_medicine_text(medicine.get('name')) or f'Medicine #{medicine_id}'} removed from the registry.",
     }
 
 

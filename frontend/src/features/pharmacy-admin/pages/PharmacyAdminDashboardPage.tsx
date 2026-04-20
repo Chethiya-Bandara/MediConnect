@@ -122,7 +122,7 @@ export function PharmacyAdminDashboardPage() {
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("theme");
-    const dark = storedTheme === "dark";
+    const dark = storedTheme !== "light";
     document.documentElement.classList.toggle("dark", dark);
     setIsDark(dark);
   }, []);

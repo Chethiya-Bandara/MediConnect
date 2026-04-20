@@ -1,6 +1,7 @@
 export type HealthMinistryAdminSection =
   | "overview"
   | "approvals"
+  | "medicines"
   | "analytics"
   | "users"
   | "settings";
@@ -54,6 +55,23 @@ export interface ManagedOrganisationItem {
   createdAt: string | null;
   linkedTable: string | null;
   linkedRecordId: number | null;
+}
+
+export interface ManagedMedicineItem {
+  id: string;
+  name: string | null;
+  unit: string | null;
+  wholesalePrice: number | null;
+  retailPrice: number | null;
+  createdAt: string | null;
+  inventoryLinks: number;
+}
+
+export interface ManagedMedicinePayload {
+  name: string;
+  unit: string;
+  wholesalePrice: number;
+  retailPrice: number;
 }
 
 export interface PendingDoctorItem {

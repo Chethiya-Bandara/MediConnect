@@ -11,11 +11,15 @@ import {
   LayoutDashboard,
   LogOut,
   Moon,
+  PackagePlus,
+  Pill,
   RefreshCcw,
+  Save,
   Search,
   ShieldAlert,
   Stethoscope,
   Sun,
+  Trash2,
   UserCircle2,
   UserRoundCheck,
   Users,
@@ -27,10 +31,17 @@ import type {
   ApprovalStatus,
   GovernanceAction,
   GovernanceTargetType,
+  ManagedMedicineItem,
   ManagedOrganisationItem,
 } from "../types";
 
-type DashboardView = "overview" | "approvals" | "organisations" | "analytics" | "audit";
+type DashboardView =
+  | "overview"
+  | "approvals"
+  | "organisations"
+  | "medicines"
+  | "analytics"
+  | "audit";
 type ThemeMode = "light" | "dark";
 type ApprovalEntityFilter = "all" | "organisations" | "doctors";
 
@@ -38,6 +49,7 @@ const views = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "approvals", label: "Approvals", icon: UserRoundCheck },
   { id: "organisations", label: "Organisation Registry", icon: Building2 },
+  { id: "medicines", label: "Medicine Registry", icon: Pill },
   { id: "analytics", label: "Analytics & Reports", icon: BarChart3 },
   { id: "audit", label: "Audit Logs", icon: ClipboardList },
 ] satisfies Array<{
@@ -63,6 +75,15 @@ function formatDisplayDate(value: string | null | undefined) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatLkr(value: number | null | undefined) {
+  const safeValue = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return new Intl.NumberFormat("en-LK", {
+    style: "currency",
+    currency: "LKR",
+    minimumFractionDigits: 2,
+  }).format(safeValue);
 }
 
 function noticeTone(message: string | null | undefined) {
@@ -176,7 +197,7 @@ export function HealthMinistryAdminDashboardPage() {
   const dashboard = useHealthMinistryAdminDashboard();
 
   const [view, setView] = useState<DashboardView>("overview");
-  const [theme, setTheme] = useState<ThemeMode>("light");
+  const [theme, setTheme] = useState<ThemeMode>("dark");
   const [organizationId, setOrganizationId] = useState("");
   const [doctorId, setDoctorId] = useState("");
   const [organisationSearch, setOrganisationSearch] = useState("");
@@ -197,23 +218,58 @@ export function HealthMinistryAdminDashboardPage() {
   const [auditActionFilter, setAuditActionFilter] = useState("ALL");
   const [reportDownloadMessage, setReportDownloadMessage] = useState<string | null>(null);
   const [auditExportMessage, setAuditExportMessage] = useState<string | null>(null);
+  const [medicineSearch, setMedicineSearch] = useState("");
+  const [newMedicineName, setNewMedicineName] = useState("");
+  const [newMedicineUnit, setNewMedicineUnit] = useState("");
+  const [newWholesalePrice, setNewWholesalePrice] = useState("");
+  const [newRetailPrice, setNewRetailPrice] = useState("");
+  const [medicineDrafts, setMedicineDrafts] = useState<
+    Record<
+      string,
+      {
+        name: string;
+        unit: string;
+        wholesalePrice: string;
+        retailPrice: string;
+      }
+    >
+  >({});
 
   const deferredAuditSearch = useDeferredValue(auditSearch.trim().toLowerCase());
   const deferredApprovalSearch = useDeferredValue(approvalsSearch.trim().toLowerCase());
   const deferredOrganisationSearch = useDeferredValue(
     organisationSearch.trim().toLowerCase(),
   );
+  const deferredMedicineSearch = useDeferredValue(medicineSearch.trim().toLowerCase());
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("health-ministry-theme");
     if (storedTheme === "light" || storedTheme === "dark") {
       setTheme(storedTheme);
+    } else {
+      setTheme("dark");
     }
   }, []);
 
   useEffect(() => {
     window.localStorage.setItem("health-ministry-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    setMedicineDrafts(
+      Object.fromEntries(
+        dashboard.managedMedicines.map((row) => [
+          row.id,
+          {
+            name: row.name ?? "",
+            unit: row.unit ?? "",
+            wholesalePrice: String(row.wholesalePrice ?? 0),
+            retailPrice: String(row.retailPrice ?? 0),
+          },
+        ]),
+      ),
+    );
+  }, [dashboard.managedMedicines]);
 
   const topDiagnosis = dashboard.topDiagnoses[0]?.code ?? "No diagnosis feed yet";
   const totalPendingApprovals =
@@ -322,6 +378,22 @@ export function HealthMinistryAdminDashboardPage() {
     });
   }, [dashboard.managedOrganisations, deferredOrganisationSearch]);
 
+  const filteredManagedMedicines = useMemo(() => {
+    return dashboard.managedMedicines.filter((row) => {
+      const haystack = [
+        row.id,
+        row.name,
+        row.unit,
+        row.wholesalePrice,
+        row.retailPrice,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return !deferredMedicineSearch || haystack.includes(deferredMedicineSearch);
+    });
+  }, [dashboard.managedMedicines, deferredMedicineSearch]);
+
   const organisationRegistryStats = useMemo(() => {
     const counts = {
       active: 0,
@@ -342,6 +414,28 @@ export function HealthMinistryAdminDashboardPage() {
 
     return counts;
   }, [dashboard.managedOrganisations]);
+
+  const medicineRegistryStats = useMemo(() => {
+    const totalMedicines = dashboard.managedMedicines.length;
+    const stockedCatalogLinks = dashboard.managedMedicines.filter(
+      (row) => row.inventoryLinks > 0,
+    ).length;
+    const totalRetail = dashboard.managedMedicines.reduce(
+      (sum, row) => sum + (row.retailPrice ?? 0),
+      0,
+    );
+    const totalWholesale = dashboard.managedMedicines.reduce(
+      (sum, row) => sum + (row.wholesalePrice ?? 0),
+      0,
+    );
+
+    return {
+      totalMedicines,
+      stockedCatalogLinks,
+      averageRetail: totalMedicines > 0 ? totalRetail / totalMedicines : 0,
+      averageWholesale: totalMedicines > 0 ? totalWholesale / totalMedicines : 0,
+    };
+  }, [dashboard.managedMedicines]);
 
   const auditRoleOptions = useMemo(
     () => Array.from(new Set(dashboard.auditLogs.map((row) => row.actorRole ?? "Unknown"))).sort(),
@@ -433,6 +527,71 @@ export function HealthMinistryAdminDashboardPage() {
     );
     if (!confirmed) return;
     await dashboard.submitUserAction(row.id, "ORGANIZATION", nextAction);
+  };
+
+  const updateMedicineDraft = (
+    medicineId: string,
+    field: "name" | "unit" | "wholesalePrice" | "retailPrice",
+    value: string,
+  ) => {
+    setMedicineDrafts((current) => ({
+      ...current,
+      [medicineId]: {
+        name: field === "name" ? value : current[medicineId]?.name ?? "",
+        unit: field === "unit" ? value : current[medicineId]?.unit ?? "",
+        wholesalePrice:
+          field === "wholesalePrice"
+            ? value
+            : current[medicineId]?.wholesalePrice ?? "0",
+        retailPrice:
+          field === "retailPrice" ? value : current[medicineId]?.retailPrice ?? "0",
+      },
+    }));
+  };
+
+  const handleMedicineCreate = async () => {
+    if (
+      !newMedicineName.trim() ||
+      !newMedicineUnit.trim() ||
+      !newWholesalePrice.trim() ||
+      !newRetailPrice.trim()
+    ) {
+      return;
+    }
+
+    const created = await dashboard.submitMedicineCreate({
+      name: newMedicineName.trim(),
+      unit: newMedicineUnit.trim(),
+      wholesalePrice: Number(newWholesalePrice),
+      retailPrice: Number(newRetailPrice),
+    });
+
+    if (created) {
+      setNewMedicineName("");
+      setNewMedicineUnit("");
+      setNewWholesalePrice("");
+      setNewRetailPrice("");
+    }
+  };
+
+  const handleMedicineSave = async (row: ManagedMedicineItem) => {
+    const draft = medicineDrafts[row.id];
+    if (!draft) return;
+
+    await dashboard.submitMedicineUpdate(row.id, {
+      name: draft.name.trim(),
+      unit: draft.unit.trim(),
+      wholesalePrice: Number(draft.wholesalePrice),
+      retailPrice: Number(draft.retailPrice),
+    });
+  };
+
+  const handleMedicineDelete = async (row: ManagedMedicineItem) => {
+    const confirmed = window.confirm(
+      `Delete ${row.name ?? `medicine ${row.id}`} from the national catalog?`,
+    );
+    if (!confirmed) return;
+    await dashboard.submitMedicineDelete(row.id);
   };
 
   const exportAuditLogs = () => {
@@ -1235,6 +1394,313 @@ export function HealthMinistryAdminDashboardPage() {
                               {dashboard.isLoadingDashboard
                                 ? "Refreshing organisation registry..."
                                 : "No organisations matched the current search."}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+            </section>
+          ) : null}
+
+          {view === "medicines" ? (
+            <section className="space-y-8">
+              <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h1 className="font-headline text-3xl font-extrabold tracking-tight">
+                    National Medicine Registry
+                  </h1>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    Central catalog control for medicine names, pack units, and national wholesale and retail pricing.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void dashboard.refreshMedicines()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:opacity-90 dark:bg-slate-700"
+                >
+                  <RefreshCcw size={16} />
+                  Refresh Registry
+                </button>
+              </header>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Total medicines
+                  </p>
+                  <p className="mt-3 text-3xl font-extrabold">
+                    {medicineRegistryStats.totalMedicines.toLocaleString("en-LK")}
+                  </p>
+                </div>
+                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Avg wholesale
+                  </p>
+                  <p className="mt-3 text-2xl font-extrabold">
+                    {formatLkr(medicineRegistryStats.averageWholesale)}
+                  </p>
+                </div>
+                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Avg retail
+                  </p>
+                  <p className="mt-3 text-2xl font-extrabold">
+                    {formatLkr(medicineRegistryStats.averageRetail)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-8 xl:grid-cols-[0.95fr,1.35fr]">
+                <section className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-headline text-lg font-bold">Add Medicine</h2>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                        Add a clean catalog row here so doctors, pharmacists, and pharmacy admins all stop inventing their own spellings and prices.
+                      </p>
+                    </div>
+                    <PackagePlus className="text-blue-700 dark:text-blue-400" size={20} />
+                  </div>
+
+                  <div className="mt-6 space-y-4">
+                    <label className="space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Medicine name
+                      </span>
+                      <input
+                        value={newMedicineName}
+                        onChange={(event) => setNewMedicineName(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                        placeholder="PANTOPRAZOLE INJ 40MG"
+                        type="text"
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Unit
+                      </span>
+                      <input
+                        value={newMedicineUnit}
+                        onChange={(event) => setNewMedicineUnit(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                        placeholder="VIAL / 100T / 100G"
+                        type="text"
+                      />
+                    </label>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-2">
+                        <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Wholesale price
+                        </span>
+                        <input
+                          value={newWholesalePrice}
+                          onChange={(event) => setNewWholesalePrice(event.target.value)}
+                          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                          placeholder="5100"
+                          inputMode="decimal"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                        />
+                      </label>
+
+                      <label className="space-y-2">
+                        <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                          Retail price
+                        </span>
+                        <input
+                          value={newRetailPrice}
+                          onChange={(event) => setNewRetailPrice(event.target.value)}
+                          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                          placeholder="5750"
+                          inputMode="decimal"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                        />
+                      </label>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleMedicineCreate()}
+                      disabled={
+                        dashboard.isSubmittingMedicine ||
+                        !newMedicineName.trim() ||
+                        !newMedicineUnit.trim() ||
+                        !newWholesalePrice.trim() ||
+                        !newRetailPrice.trim()
+                      }
+                      className="w-full rounded-2xl bg-blue-700 px-5 py-4 text-sm font-bold text-white shadow-md shadow-blue-900/15 transition-opacity hover:opacity-90 disabled:opacity-60 dark:bg-blue-600"
+                    >
+                      {dashboard.isSubmittingMedicine ? "Saving..." : "Add Medicine"}
+                    </button>
+                  </div>
+
+                  {dashboard.medicineMessage ? (
+                    <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.medicineMessage)}`}>
+                      {dashboard.medicineMessage}
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h2 className="font-headline text-lg font-bold">Live Medicine Registry</h2>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                        Search, adjust pricing, and remove catalog rows that are not tied to pharmacy stock yet.
+                      </p>
+                    </div>
+                    <div className="relative w-full max-w-sm">
+                      <input
+                        type="text"
+                        value={medicineSearch}
+                        onChange={(event) => setMedicineSearch(event.target.value)}
+                        placeholder="Search name, unit, id, or price"
+                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 pr-11 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                      />
+                      <Search className="absolute right-4 top-3.5 text-slate-400 dark:text-slate-500" size={18} />
+                    </div>
+                  </div>
+
+                  <div className="mt-6 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">Medicine</th>
+                          <th className="px-4 py-3 font-semibold">Unit</th>
+                          <th className="px-4 py-3 font-semibold">Wholesale</th>
+                          <th className="px-4 py-3 font-semibold">Retail</th>
+                          <th className="px-4 py-3 font-semibold">Inventory links</th>
+                          <th className="px-4 py-3 font-semibold">Created</th>
+                          <th className="px-4 py-3 text-right font-semibold">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {filteredManagedMedicines.length > 0 ? (
+                          filteredManagedMedicines.map((row) => {
+                            const draft = medicineDrafts[row.id] ?? {
+                              name: row.name ?? "",
+                              unit: row.unit ?? "",
+                              wholesalePrice: String(row.wholesalePrice ?? 0),
+                              retailPrice: String(row.retailPrice ?? 0),
+                            };
+
+                            return (
+                              <tr key={row.id}>
+                                <td className="px-4 py-4 align-top">
+                                  <input
+                                    type="text"
+                                    value={draft.name}
+                                    onChange={(event) =>
+                                      updateMedicineDraft(row.id, "name", event.target.value)
+                                    }
+                                    className="w-full rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                                  />
+                                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                    ID: {row.id}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-4 align-top">
+                                  <input
+                                    type="text"
+                                    value={draft.unit}
+                                    onChange={(event) =>
+                                      updateMedicineDraft(row.id, "unit", event.target.value)
+                                    }
+                                    className="w-full rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                                  />
+                                </td>
+                                <td className="px-4 py-4 align-top">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={draft.wholesalePrice}
+                                    onChange={(event) =>
+                                      updateMedicineDraft(
+                                        row.id,
+                                        "wholesalePrice",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                                  />
+                                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                    {formatLkr(Number(draft.wholesalePrice))}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-4 align-top">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={draft.retailPrice}
+                                    onChange={(event) =>
+                                      updateMedicineDraft(
+                                        row.id,
+                                        "retailPrice",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                                  />
+                                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                    {formatLkr(Number(draft.retailPrice))}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-4 align-top text-slate-500 dark:text-slate-400">
+                                  {row.inventoryLinks > 0 ? `${row.inventoryLinks} stock row(s)` : "Not linked"}
+                                </td>
+                                <td className="px-4 py-4 align-top text-slate-500 dark:text-slate-400">
+                                  {formatDisplayDate(row.createdAt)}
+                                </td>
+                                <td className="px-4 py-4 align-top">
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleMedicineSave(row)}
+                                      disabled={
+                                        dashboard.isSubmittingMedicine ||
+                                        !draft.name.trim() ||
+                                        !draft.unit.trim()
+                                      }
+                                      className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white hover:opacity-90 disabled:opacity-60 dark:bg-blue-600"
+                                    >
+                                      <Save size={14} />
+                                      Save
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleMedicineDelete(row)}
+                                      disabled={dashboard.isSubmittingMedicine || row.inventoryLinks > 0}
+                                      className="inline-flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30"
+                                      title={
+                                        row.inventoryLinks > 0
+                                          ? "This medicine is already linked to pharmacy inventory and cannot be deleted until those rows are removed."
+                                          : "Delete medicine"
+                                      }
+                                    >
+                                      <Trash2 size={14} />
+                                      Delete
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+                              {dashboard.isLoadingMedicines
+                                ? "Refreshing medicine registry..."
+                                : "No medicine rows matched the current search."}
                             </td>
                           </tr>
                         )}
