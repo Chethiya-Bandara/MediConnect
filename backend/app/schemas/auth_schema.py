@@ -27,6 +27,7 @@ class RegisterRequest(BaseModel):
     specialization: Optional[str] = None
     licenseNumber: Optional[str] = None
     pharmacyId: Optional[str] = None
+    hospitalId: Optional[str] = None
     parentNic: Optional[str] = None
     organisationId: Optional[str] = None
     credentialFileName: Optional[str] = None
