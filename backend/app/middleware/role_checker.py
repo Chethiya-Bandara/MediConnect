@@ -27,7 +27,7 @@ def _load_user_row(user_id: str):
     rows = execute_with_retry(
         lambda: (
             supabase_admin.table("users")
-            .select("id, email, role, name")
+            .select("id, email, role, name, status")
             .eq("id", user_id)
             .execute()
             .data
@@ -105,7 +105,15 @@ def build_user_context(
         "email": db_user.get("email"),
         "name": db_user.get("name"),
         "role": user_role,
+        "status": db_user.get("status"),
     }
+
+    user_status = str(db_user.get("status") or "active").strip().lower()
+    if user_status in {"suspended", "inactive", "disabled", "blocked"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is currently suspended. Contact your administrator.",
+        )
 
     try:
         if user_role == "pharmacist":

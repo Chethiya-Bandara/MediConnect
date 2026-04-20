@@ -229,6 +229,130 @@ def _organisation_map(organisation_ids: set[int]):
     return {row["id"]: row for row in rows}
 
 
+def _medicine_map(medicine_ids: set[int]):
+    if not medicine_ids:
+        return {}
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, name, unit, wholesale_price, retail_price")
+            .in_("id", list(medicine_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    return {row["id"]: row for row in rows}
+
+
+def _inventory_medicine_name(row: dict, medicine_lookup: dict[int, dict]) -> str:
+    medicine = medicine_lookup.get(row.get("medicine_id"), {})
+    return (
+        medicine.get("name")
+        or row.get("medicine_name")
+        or row.get("drug_name")
+        or f"Medicine #{row.get('medicine_id') or row.get('id')}"
+    )
+
+
+def _inventory_unit_price(row: dict, medicine_lookup: dict[int, dict]):
+    medicine = medicine_lookup.get(row.get("medicine_id"), {})
+    return (
+        row.get("unit_price")
+        or medicine.get("retail_price")
+        or medicine.get("wholesale_price")
+        or 0
+    )
+
+
+def _normalize_medicine_key(value: Optional[str]) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+    return re.sub(r"\s+", " ", normalized)
+
+
+def _coerce_positive_int(value) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, float) and value.is_integer() and value > 0:
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = int(float(value.strip()))
+            return parsed if parsed > 0 else None
+        except ValueError:
+            return None
+    return None
+
+
+def _prescription_quantity_value(item: dict) -> int:
+    direct_quantity = _coerce_positive_int(item.get("quantity"))
+    if direct_quantity is not None:
+        return direct_quantity
+
+    instructions = item.get("instructions") or ""
+    for pattern in (
+        r"Quantity:\s*(\d+)",
+        r"Qty:\s*(\d+)",
+        r"Duration:\s*(\d+)",
+    ):
+        quantity_match = re.search(pattern, instructions, re.IGNORECASE)
+        if quantity_match:
+            parsed_quantity = _coerce_positive_int(quantity_match.group(1))
+            if parsed_quantity is not None:
+                return parsed_quantity
+
+    return 1
+
+
+def _build_inventory_name_index(rows: list[dict], medicine_lookup: dict[int, dict]):
+    entries = []
+    by_key = {}
+
+    for row in rows:
+        medicine_name = _inventory_medicine_name(row, medicine_lookup)
+        normalized_name = _normalize_medicine_key(medicine_name)
+        entry = {
+            **row,
+            "medicine_name": medicine_name,
+            "normalized_name": normalized_name,
+            "unit_price": _inventory_unit_price(row, medicine_lookup),
+            "stock_quantity": int(row.get("stock_quantity") or 0),
+        }
+        entries.append(entry)
+        if normalized_name:
+            by_key.setdefault(normalized_name, []).append(entry)
+
+    return entries, by_key
+
+
+def _match_inventory_entry(medicine_name: Optional[str], inventory_entries: list[dict], by_key: dict[str, list[dict]]):
+    normalized_target = _normalize_medicine_key(medicine_name)
+    if not normalized_target:
+        return None
+
+    direct_matches = by_key.get(normalized_target, [])
+    if direct_matches:
+        return sorted(
+            direct_matches,
+            key=lambda item: (-item["stock_quantity"], item["unit_price"] or 0),
+        )[0]
+
+    fuzzy_matches = [
+        entry
+        for entry in inventory_entries
+        if normalized_target in entry["normalized_name"]
+        or entry["normalized_name"] in normalized_target
+    ]
+    if len(fuzzy_matches) == 1:
+        return fuzzy_matches[0]
+
+    return None
+
+
 def _hospital_map(hospital_ids: set[int]):
     if not hospital_ids:
         return {}
@@ -398,9 +522,14 @@ def _prescription_quantity_label(item: dict) -> Optional[str]:
         return str(quantity)
 
     instructions = item.get("instructions") or ""
-    match = re.search(r"Duration:\s*([^|]+)", instructions, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
+    for pattern in (
+        r"Quantity:\s*([^|]+)",
+        r"Qty:\s*([^|]+)",
+        r"Duration:\s*([^|]+)",
+    ):
+        match = re.search(pattern, instructions, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
 
     return None
 
@@ -1429,10 +1558,35 @@ def search_pharmacy(
     # ── Sanitise search query (Bihanga B-5.1.2) ──────────────────
     safe_query = sanitize_search_query(query, max_length=100)
 
-    inventory_query = supabase_admin.table("inventory").select("*").order("medicine_name")
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("inventory")
+            .select("id, pharmacy_id, medicine_id, stock_quantity, unit_price, created_at")
+            .order("created_at", desc=True)
+            .limit(200)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+    medicine_lookup = _medicine_map(
+        {row["medicine_id"] for row in rows if row.get("medicine_id")}
+    )
+
     if safe_query:
-        inventory_query = inventory_query.ilike("medicine_name", f"%{safe_query}%")
-    rows = inventory_query.limit(50).execute().data or []
+        normalized_query = safe_query.lower()
+        rows = [
+            row
+            for row in rows
+            if normalized_query in _inventory_medicine_name(row, medicine_lookup).lower()
+        ]
+
+    rows = sorted(
+        rows,
+        key=lambda row: _inventory_medicine_name(row, medicine_lookup).lower(),
+    )[:50]
 
     pharmacy_lookup = {}
     pharmacy_ids = {row["pharmacy_id"] for row in rows}
@@ -1455,15 +1609,17 @@ def search_pharmacy(
     for row in rows:
         pharmacy = pharmacy_lookup.get(row["pharmacy_id"], {})
         organisation = organisation_lookup.get(pharmacy.get("organisation_id"), {})
+        stock_quantity = int(row.get("stock_quantity") or 0)
+        unit_price = _inventory_unit_price(row, medicine_lookup)
         items.append(
             {
                 "id": row["id"],
-                "medicine_name": row["medicine_name"],
-                "stock_quantity": row["stock_quantity"],
-                "unit_price": row["unit_price"],
+                "medicine_name": _inventory_medicine_name(row, medicine_lookup),
+                "stock_quantity": stock_quantity,
+                "unit_price": unit_price,
                 "availability": (
                     "Low Stock"
-                    if row["stock_quantity"] < 10
+                    if stock_quantity < 10
                     else "In Stock"
                 ),
                 "pharmacy": {
@@ -1475,6 +1631,234 @@ def search_pharmacy(
         )
 
     return {"items": items}
+
+
+@router.get("/pharmacies")
+def list_patient_pharmacies(
+    authorization: Optional[str] = Header(None),
+):
+    _require_patient_context(authorization)
+
+    pharmacy_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("pharmacies")
+            .select("id, organisation_id")
+            .order("id")
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+    organisation_lookup = _organisation_map(
+        {row["organisation_id"] for row in pharmacy_rows if row.get("organisation_id")}
+    )
+
+    inventory_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("inventory")
+            .select("pharmacy_id")
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+    indexed_counts: dict[int, int] = {}
+    for row in inventory_rows:
+        pharmacy_id = row.get("pharmacy_id")
+        if pharmacy_id is None:
+            continue
+        indexed_counts[pharmacy_id] = indexed_counts.get(pharmacy_id, 0) + 1
+
+    items = []
+    for row in pharmacy_rows:
+        organisation = organisation_lookup.get(row.get("organisation_id"), {})
+        items.append(
+            {
+                "id": row["id"],
+                "name": organisation.get("name", f"Pharmacy #{row['id']}"),
+                "organisation_status": organisation.get("status"),
+                "indexed_items": indexed_counts.get(row["id"], 0),
+            }
+        )
+
+    items.sort(key=lambda item: item["name"].lower())
+    return {"items": items}
+
+
+@router.get("/pharmacy/estimate")
+def estimate_pharmacy_bill(
+    prescription_id: int = Query(..., gt=0),
+    pharmacy_id: int = Query(..., gt=0),
+    authorization: Optional[str] = Header(None),
+):
+    context = _require_patient_context(authorization)
+    patient = context["patient"]
+
+    prescription_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("prescriptions")
+            .select("*")
+            .eq("id", prescription_id)
+            .eq("patient_id", patient["id"])
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if not prescription_rows:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    prescription = prescription_rows[0]
+    prescription_items = execute_with_retry(
+        lambda: (
+            supabase_admin.table("prescription_items")
+            .select("*")
+            .eq("prescription_id", prescription_id)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+    pharmacy_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("pharmacies")
+            .select("*")
+            .eq("id", pharmacy_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if not pharmacy_rows:
+        raise HTTPException(status_code=404, detail="Pharmacy not found")
+
+    pharmacy = pharmacy_rows[0]
+    organisation_lookup = _organisation_map(
+        {pharmacy["organisation_id"]} if pharmacy.get("organisation_id") else set()
+    )
+    pharmacy_organisation = organisation_lookup.get(pharmacy.get("organisation_id"), {})
+
+    inventory_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("inventory")
+            .select("id, pharmacy_id, medicine_id, stock_quantity, unit_price, created_at")
+            .eq("pharmacy_id", pharmacy_id)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    medicine_lookup = _medicine_map(
+        {row["medicine_id"] for row in inventory_rows if row.get("medicine_id")}
+    )
+    inventory_entries, inventory_by_key = _build_inventory_name_index(
+        inventory_rows,
+        medicine_lookup,
+    )
+
+    doctor_lookup = _doctor_map(
+        {prescription["doctor_id"]} if prescription.get("doctor_id") else set()
+    )
+    doctor = doctor_lookup.get(prescription.get("doctor_id"), {})
+
+    estimated_total = 0.0
+    included_items = 0
+    unavailable_items = 0
+    estimate_items = []
+
+    for item in prescription_items:
+        medicine_name = item.get("medicine_name") or f"Prescription item #{item['id']}"
+        quantity_value = _prescription_quantity_value(item)
+        quantity_label = _prescription_quantity_label(item) or str(quantity_value)
+        inventory_entry = _match_inventory_entry(
+            medicine_name,
+            inventory_entries,
+            inventory_by_key,
+        )
+
+        availability_status = "available"
+        availability_label = "Included in estimate"
+        note = None
+        unit_price = None
+        line_total = None
+        matched_inventory_id = None
+        stock_quantity = inventory_entry.get("stock_quantity", 0) if inventory_entry else 0
+
+        if not inventory_entry:
+            availability_status = "not_listed"
+            availability_label = "Not stocked here"
+            note = "This medicine is not listed in the selected pharmacy inventory."
+        elif stock_quantity <= 0:
+            availability_status = "out_of_stock"
+            availability_label = "Out of stock"
+            note = "The pharmacy catalog has this medicine, but the current stock is zero."
+        elif stock_quantity < quantity_value:
+            availability_status = "insufficient_stock"
+            availability_label = "Insufficient stock"
+            note = (
+                f"Only {stock_quantity} unit(s) are available, which is below the prescribed quantity."
+            )
+            unit_price = inventory_entry.get("unit_price")
+            matched_inventory_id = inventory_entry.get("id")
+        else:
+            unit_price = float(inventory_entry.get("unit_price") or 0)
+            line_total = round(unit_price * quantity_value, 2)
+            estimated_total += line_total
+            included_items += 1
+            matched_inventory_id = inventory_entry.get("id")
+
+        if availability_status != "available":
+            unavailable_items += 1
+
+        estimate_items.append(
+            {
+                "id": item["id"],
+                "inventory_id": matched_inventory_id,
+                "medicine_name": medicine_name,
+                "dosage": item.get("dosage"),
+                "quantity": quantity_label,
+                "quantity_value": quantity_value,
+                "instructions": item.get("instructions"),
+                "availability_status": availability_status,
+                "availability_label": availability_label,
+                "stock_quantity": stock_quantity,
+                "unit_price": unit_price,
+                "estimated_total": line_total,
+                "note": note,
+            }
+        )
+
+    return {
+        "prescription": {
+            "id": prescription["id"],
+            "status": _title_status(prescription.get("status")),
+            "created_at": prescription.get("created_at"),
+            "doctor_name": doctor.get("display_name"),
+        },
+        "pharmacy": {
+            "id": pharmacy_id,
+            "name": pharmacy_organisation.get("name", f"Pharmacy #{pharmacy_id}"),
+            "organisation_status": pharmacy_organisation.get("status"),
+        },
+        "summary": {
+            "estimated_total": round(estimated_total, 2),
+            "included_items": included_items,
+            "excluded_items": len(estimate_items) - included_items,
+            "unavailable_items": unavailable_items,
+        },
+        "items": estimate_items,
+    }
 
 
 @router.get("/dispensing")

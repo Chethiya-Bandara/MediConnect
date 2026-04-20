@@ -5,20 +5,33 @@ import type {
   PharmacyAdminDashboardSummary,
   PharmacyAdminFastMovingItem,
   PharmacyAdminStaffMember,
+  PharmacyAdminStaffRegistrationPayload,
+  PharmacyAdminStaffStatusPayload,
   PharmacyInventoryItem,
   PharmacyInventoryMutationPayload,
   PharmacyInventoryUpdatePayload,
+  PharmacyMedicineCatalogItem,
 } from "../types";
 
 interface RawInventoryItem {
   id?: string | number | null;
   pharmacy_id?: string | number | null;
+  medicine_id?: string | number | null;
   medicine_name?: string | null;
   drug_name?: string | null;
+  medicine_unit?: string | null;
   stock_quantity?: number | string | null;
   unit_price?: number | string | null;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+interface RawMedicineCatalogItem {
+  id?: number | string | null;
+  name?: string | null;
+  unit?: string | null;
+  retail_price?: number | string | null;
+  wholesale_price?: number | string | null;
 }
 
 interface RawAdjustment {
@@ -85,11 +98,23 @@ function normalizeInventoryItem(raw: RawInventoryItem): PharmacyInventoryItem {
   return {
     id: asString(raw.id) ?? `inventory-${Math.random().toString(36).slice(2, 8)}`,
     pharmacyId: asString(raw.pharmacy_id),
+    medicineId: asNumber(raw.medicine_id),
     medicineName: raw.medicine_name ?? raw.drug_name ?? "Unnamed medicine",
+    medicineUnit: raw.medicine_unit ?? null,
     stockQuantity: asNumber(raw.stock_quantity),
     unitPrice: asNumber(raw.unit_price),
     createdAt: raw.created_at ?? null,
     updatedAt: raw.updated_at ?? null,
+  };
+}
+
+function normalizeMedicineCatalogItem(raw: RawMedicineCatalogItem): PharmacyMedicineCatalogItem {
+  return {
+    id: asNumber(raw.id) ?? 0,
+    name: raw.name ?? "Unnamed medicine",
+    unit: raw.unit ?? null,
+    retailPrice: asNumber(raw.retail_price),
+    wholesalePrice: asNumber(raw.wholesale_price),
   };
 }
 
@@ -166,11 +191,19 @@ export async function addInventoryItem(payload: PharmacyInventoryMutationPayload
     method: "POST",
     body: JSON.stringify({
       pharmacy_id: payload.pharmacyId,
+      medicine_id: payload.medicineId,
       medicine_name: payload.medicineName,
       stock_quantity: payload.stockQuantity,
       unit_price: payload.unitPrice,
     }),
   });
+}
+
+export async function searchPharmacyCatalogMedicines(query: string) {
+  const response = await apiRequest<{ items?: RawMedicineCatalogItem[] }>(
+    `${endpoints.pharmacyAdmin.medicinesSearch}?query=${encodeURIComponent(query)}`,
+  );
+  return (response.items ?? []).map((item) => normalizeMedicineCatalogItem(item));
 }
 
 export async function updateInventoryItem(payload: PharmacyInventoryUpdatePayload) {
@@ -189,6 +222,33 @@ export async function deleteInventoryItem(itemId: string) {
     `${endpoints.pharmacyAdmin.inventoryBase}/${encodeURIComponent(itemId)}`,
     {
       method: "DELETE",
+    },
+  );
+}
+
+export async function registerPharmacyStaff(payload: PharmacyAdminStaffRegistrationPayload) {
+  return apiRequest<{ message?: string }>(endpoints.pharmacyAdmin.staffBase, {
+    method: "POST",
+    body: JSON.stringify({
+      pharmacy_id: payload.pharmacyId,
+      full_name: payload.fullName,
+      email: payload.email,
+      password: payload.password,
+      license_no: payload.licenseNo,
+      status: payload.status ?? "active",
+    }),
+  });
+}
+
+export async function updatePharmacyStaffStatus(payload: PharmacyAdminStaffStatusPayload) {
+  return apiRequest<{ message?: string }>(
+    `${endpoints.pharmacyAdmin.staffBase}/${encodeURIComponent(payload.staffId)}/status`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        pharmacy_id: payload.pharmacyId,
+        status: payload.status,
+      }),
     },
   );
 }

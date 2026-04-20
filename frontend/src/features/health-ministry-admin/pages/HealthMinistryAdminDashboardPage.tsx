@@ -605,8 +605,8 @@ export function HealthMinistryAdminDashboardPage() {
                     <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">
                       Leading diagnosis feed says{" "}
                       <span className="font-semibold">{topDiagnosis}</span>. If
-                      that looks empty, blame the missing diagnosis telemetry,
-                      not the paint job.
+                      that looks empty, diagnosis telemetry is not available
+                      yet.
                     </p>
                   </div>
                 </div>

@@ -7,6 +7,8 @@ import type {
   DashboardOverview,
   DashboardRecord,
   DispensingSummary,
+  PatientPharmacyOption,
+  PharmacyEstimate,
   PharmacyInventoryItem,
 } from "../types";
 import type { ApiListResponse } from "../../../types/api";
@@ -105,6 +107,27 @@ export async function searchPharmacy(query: string) {
     `${endpoints.patient.pharmacy}${search.toString() ? `?${search.toString()}` : ""}`,
   );
   return response.items;
+}
+
+export async function getPatientPharmacies() {
+  const response = await apiRequest<ApiListResponse<PatientPharmacyOption>>(
+    endpoints.patient.pharmacies,
+  );
+  return response.items;
+}
+
+export function getPharmacyEstimate(
+  prescriptionId: number,
+  pharmacyId: number,
+) {
+  const search = new URLSearchParams({
+    prescription_id: String(prescriptionId),
+    pharmacy_id: String(pharmacyId),
+  });
+
+  return apiRequest<PharmacyEstimate>(
+    `${endpoints.patient.pharmacyEstimate}?${search.toString()}`,
+  );
 }
 
 export function getDispensingSummary() {

@@ -11,7 +11,6 @@ import {
   MoonStar,
   Pill,
   RefreshCw,
-  Search,
   SendHorizontal,
   Settings,
   ShieldPlus,
@@ -34,8 +33,9 @@ import {
   getBookingOptions,
   getDashboardOverview,
   getDispensingSummary,
+  getPatientPharmacies,
+  getPharmacyEstimate,
   getMedicalRecords,
-  searchPharmacy,
   updateAppointment,
   updateAppointmentConsent,
   updatePatientProfile,
@@ -48,7 +48,8 @@ import type {
   DashboardOverview,
   DashboardRecord,
   DispensingSummary,
-  PharmacyInventoryItem,
+  PatientPharmacyOption,
+  PharmacyEstimate,
 } from "../types";
 
 type Page =
@@ -134,6 +135,29 @@ function formatLkr(value: number) {
   }).format(value);
 }
 
+function estimateTone(status: string) {
+  switch (status) {
+    case "available":
+      return "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300";
+    case "insufficient_stock":
+      return "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300";
+    case "out_of_stock":
+    case "not_listed":
+      return "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300";
+    default:
+      return "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200";
+  }
+}
+
+function recordPreview(record: DashboardRecord) {
+  const cleaned = (record.notes || "").trim();
+  if (!cleaned) {
+    return "No notes stored for this encounter.";
+  }
+
+  return cleaned.length > 180 ? `${cleaned.slice(0, 177)}...` : cleaned;
+}
+
 function toDateInputValue(value: string | null | undefined) {
   if (!value) {
     return "";
@@ -192,7 +216,7 @@ export function PatientDashboardPage() {
   const [bookingOptions, setBookingOptions] = useState<BookingOption[]>([]);
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [records, setRecords] = useState<DashboardRecord[]>([]);
-  const [pharmacyItems, setPharmacyItems] = useState<PharmacyInventoryItem[]>([]);
+  const [pharmacyOptionsList, setPharmacyOptionsList] = useState<PatientPharmacyOption[]>([]);
   const [dispensingSummary, setDispensingSummary] = useState<DispensingSummary>({
     stats: {
       dispensing_events: 0,
@@ -201,15 +225,18 @@ export function PatientDashboardPage() {
     },
     items: [],
   });
-  const [pharmacyQuery, setPharmacyQuery] = useState("");
   const [dashboardError, setDashboardError] = useState<string | null>(null);
-  const [pharmacyError, setPharmacyError] = useState<string | null>(null);
+  const [pharmacyEstimateError, setPharmacyEstimateError] = useState<string | null>(null);
   const [slotError, setSlotError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isPharmacyLoading, setIsPharmacyLoading] = useState(false);
+  const [isEstimateLoading, setIsEstimateLoading] = useState(false);
   const [isSlotsLoading, setIsSlotsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<DashboardAppointment | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<DashboardRecord | null>(null);
+  const [selectedPrescriptionId, setSelectedPrescriptionId] = useState("");
+  const [selectedPharmacyId, setSelectedPharmacyId] = useState("");
+  const [pharmacyEstimate, setPharmacyEstimate] = useState<PharmacyEstimate | null>(null);
   const [appointmentForm, setAppointmentForm] = useState(initialForm);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantMessages, setAssistantMessages] = useState<AssistantChatMessage[]>([]);
@@ -224,7 +251,6 @@ export function PatientDashboardPage() {
   const displayName = overview?.user.name || user?.name || user?.email?.split("@")[0] || "Patient";
   const avatarSeed = encodeURIComponent(displayName);
   const upcomingAppointments = appointments.filter((item) => item.status.toLowerCase() !== "cancelled");
-  const quickPharmacyItems = pharmacyItems.slice(0, 3);
   const deferredAssistantMessages = useDeferredValue(assistantMessages);
   const assistantStorageKey = `patient-dashboard-assistant:v${assistantHistoryVersion}:${overview?.user.id || user?.id || user?.email || "guest"}`;
   const qrCodeUrl = overview?.patient.dhid
@@ -302,6 +328,39 @@ export function PatientDashboardPage() {
     [appointmentForm.slotId, visibleSlots],
   );
 
+  const prescriptionOptions = useMemo(
+    () =>
+      records.flatMap((record) =>
+        record.prescriptions.map((prescription) => ({
+          id: prescription.id,
+          label: `Prescription #${prescription.id} • ${record.doctor.name} • ${formatDateTime(
+            prescription.created_at || record.created_at,
+          )}`,
+          doctorName: record.doctor.name,
+          organisationName: record.organisation.name,
+          createdAt: prescription.created_at || record.created_at,
+          itemCount: prescription.items.length,
+          status: prescription.status,
+        })),
+      ),
+    [records],
+  );
+
+  const pharmacyOptions = useMemo(() => {
+    return [...pharmacyOptionsList].sort((left, right) => left.name.localeCompare(right.name));
+  }, [pharmacyOptionsList]);
+
+  const selectedPrescriptionMeta = useMemo(
+    () =>
+      prescriptionOptions.find((item) => String(item.id) === selectedPrescriptionId) ?? null,
+    [prescriptionOptions, selectedPrescriptionId],
+  );
+
+  const selectedPharmacyMeta = useMemo(
+    () => pharmacyOptions.find((item) => String(item.id) === selectedPharmacyId) ?? null,
+    [pharmacyOptions, selectedPharmacyId],
+  );
+
   const showToast = (
     message: string,
     tone: "success" | "error" | "info" = "success",
@@ -319,20 +378,27 @@ export function PatientDashboardPage() {
     setDashboardError(null);
 
     try {
-      const [overviewData, appointmentData, optionData, recordData, pharmacyData, dispensingData] = await Promise.all([
+      const [
+        pharmacyOptionsData,
+        overviewData,
+        appointmentData,
+        optionData,
+        recordData,
+        dispensingData,
+      ] = await Promise.all([
+        getPatientPharmacies(),
         getDashboardOverview(),
         getAppointments(),
         getBookingOptions(),
         getMedicalRecords(),
-        searchPharmacy(pharmacyQuery),
         getDispensingSummary(),
       ]);
 
+      setPharmacyOptionsList(pharmacyOptionsData);
       setOverview(overviewData);
       setAppointments(appointmentData);
       setBookingOptions(optionData);
       setRecords(recordData);
-      setPharmacyItems(pharmacyData);
       setDispensingSummary(dispensingData);
     } catch (error) {
       if (error instanceof Error && isSessionProfileError(error.message)) {
@@ -424,23 +490,6 @@ export function PatientDashboardPage() {
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(async () => {
-      setIsPharmacyLoading(true);
-      try {
-        const items = await searchPharmacy(pharmacyQuery);
-        setPharmacyItems(items);
-        setPharmacyError(null);
-      } catch (error) {
-      setPharmacyError(error instanceof Error ? error.message : "Pharmacy inventory search could not be completed.");
-      } finally {
-        setIsPharmacyLoading(false);
-      }
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [pharmacyQuery]);
-
-  useEffect(() => {
     if (editingAppointment || !appointmentForm.doctorId) {
       setAvailableSlots([]);
       setSlotError(null);
@@ -478,6 +527,21 @@ export function PatientDashboardPage() {
       }));
     }
   }, [editingAppointment, selectedSlot]);
+
+  useEffect(() => {
+    if (!selectedRecord && records.length > 0) {
+      setSelectedRecord(records[0]);
+    }
+
+    if (selectedRecord && !records.some((record) => record.id === selectedRecord.id)) {
+      setSelectedRecord(records[0] ?? null);
+    }
+  }, [records, selectedRecord]);
+
+  useEffect(() => {
+    setPharmacyEstimate(null);
+    setPharmacyEstimateError(null);
+  }, [selectedPharmacyId, selectedPrescriptionId]);
 
   const sendAssistantMessage = async (preset?: string) => {
     const text = (preset ?? assistantInput).trim();
@@ -690,6 +754,36 @@ export function PatientDashboardPage() {
     }
   };
 
+  const loadPharmacyEstimate = async () => {
+    if (!selectedPrescriptionId) {
+      showToast("Pick an ePrescription first.", "error");
+      return;
+    }
+
+    if (!selectedPharmacyId) {
+      showToast("Pick a pharmacy first.", "error");
+      return;
+    }
+
+    setIsEstimateLoading(true);
+    setPharmacyEstimateError(null);
+
+    try {
+      const estimate = await getPharmacyEstimate(
+        Number(selectedPrescriptionId),
+        Number(selectedPharmacyId),
+      );
+      setPharmacyEstimate(estimate);
+    } catch (error) {
+      setPharmacyEstimate(null);
+      setPharmacyEstimateError(
+        error instanceof Error ? error.message : "Estimate could not be loaded right now.",
+      );
+    } finally {
+      setIsEstimateLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-surface text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6 dark:border-slate-800 dark:bg-slate-900 md:flex">
@@ -860,32 +954,6 @@ export function PatientDashboardPage() {
                   </div>
                 </div>
 
-                <div className="col-span-12 rounded-[1.7rem] bg-primary p-8 text-white shadow-xl shadow-blue-950/10 dark:bg-blue-950 lg:col-span-4">
-                  <h2 className="text-xl font-bold">Quick Pharmacy Search</h2>
-                  <p className="mt-2 text-sm text-blue-100/75">Search the pharmacy inventory instantly.</p>
-                  <div className="relative my-6">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-100/60" size={18} />
-                    <input type="text" value={pharmacyQuery} onChange={(event) => setPharmacyQuery(event.target.value)} placeholder="Search medicine..." className="w-full rounded-xl border-0 bg-white/10 py-3 pl-11 pr-4 text-white placeholder:text-blue-100/60 focus:ring-2 focus:ring-white/30" />
-                  </div>
-                  <div className="space-y-3">
-                    {quickPharmacyItems.length === 0 ? (
-                      <div className="text-sm text-blue-100/80">No indexed pharmacy stock found yet.</div>
-                    ) : (
-                      quickPharmacyItems.map((item) => (
-                        <article key={item.id} className="rounded-xl border border-white/10 bg-white/10 p-3 backdrop-blur-sm">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-bold">{item.medicine_name}</p>
-                              <p className="text-xs text-blue-100/80">{item.pharmacy.name}</p>
-                            </div>
-                            <span className="text-xs font-bold">{item.unit_price}</span>
-                          </div>
-                        </article>
-                      ))
-                    )}
-                  </div>
-                </div>
-
                 <div className="col-span-12 rounded-[1.7rem] border border-slate-100 bg-slate-50 p-8 dark:border-slate-800 dark:bg-slate-800/50">
                   <h2 className="mb-4 font-headline text-xl font-bold">Latest Medical Record</h2>
                   {overview.recent_record ? (
@@ -1000,6 +1068,108 @@ export function PatientDashboardPage() {
                 <h1 className="font-headline text-3xl font-extrabold text-primary dark:text-blue-400">Medical Records</h1>
                 <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Encounter records and prescription items linked to your account.</p>
               </div>
+              {selectedRecord ? (
+                <article className="rounded-[1.9rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Open Record</p>
+                      <h2 className="mt-2 font-headline text-2xl font-extrabold text-primary dark:text-blue-400">
+                        {selectedRecord.doctor.name}
+                      </h2>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                        {selectedRecord.doctor.specialization || "Specialization not set"}
+                        {selectedRecord.organisation.name ? ` • ${selectedRecord.organisation.name}` : ""}
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-primary dark:text-blue-400">
+                        {formatDateTime(selectedRecord.created_at)}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedRecord.appointment.status ? (
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(selectedRecord.appointment.status)}`}>
+                          {formatStatusLabel(selectedRecord.appointment.status)}
+                        </span>
+                      ) : null}
+                      {selectedRecord.prescriptions.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedPrescriptionId(String(selectedRecord.prescriptions[0].id));
+                            setPage("pharmacy");
+                          }}
+                          className="rounded-full bg-primary px-4 py-2 text-xs font-bold text-white dark:bg-blue-600"
+                        >
+                          Check First Prescription Cost
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
+                    <div className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/50">
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Doctor Notes</p>
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-300">
+                        {selectedRecord.notes || "No notes stored for this encounter."}
+                      </p>
+                    </div>
+
+                    <div className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/50">
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Prescription Summary</p>
+                      {selectedRecord.prescriptions.length === 0 ? (
+                        <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+                          No prescriptions linked to this encounter.
+                        </p>
+                      ) : (
+                        <div className="mt-3 space-y-4">
+                          {selectedRecord.prescriptions.map((prescription) => (
+                            <div key={prescription.id} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                  <p className="text-sm font-bold">
+                                    Prescription #{prescription.id} • {formatStatusLabel(prescription.status)}
+                                  </p>
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    {formatDateTime(prescription.created_at)}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPrescriptionId(String(prescription.id));
+                                    setPage("pharmacy");
+                                  }}
+                                  className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                                >
+                                  Price This
+                                </button>
+                              </div>
+                              <div className="mt-3 space-y-3">
+                                {prescription.items.length === 0 ? (
+                                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    No medicine lines saved for this prescription.
+                                  </p>
+                                ) : (
+                                  prescription.items.map((item) => (
+                                    <div key={item.id} className="rounded-xl bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800/70">
+                                      <p className="font-semibold text-slate-900 dark:text-slate-100">{item.medicine_name}</p>
+                                      <p className="mt-1 text-slate-500 dark:text-slate-400">
+                                        {item.dosage || "Dosage not set"} • Qty {item.quantity || "Not set"}
+                                      </p>
+                                      <p className="mt-1 text-slate-500 dark:text-slate-400">
+                                        {item.instructions || "No instructions saved"}
+                                      </p>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              ) : null}
               <div className="grid gap-4">
                 {records.length === 0 ? (
                   <EmptyState
@@ -1016,12 +1186,25 @@ export function PatientDashboardPage() {
                           <p className="text-sm text-slate-500 dark:text-slate-400">{record.doctor.specialization || "Specialization not set"}{record.organisation.name ? ` • ${record.organisation.name}` : ""}</p>
                           <p className="mt-1 text-sm font-semibold text-primary dark:text-blue-400">{formatDateTime(record.created_at)}</p>
                         </div>
-                        {record.appointment.status ? <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(record.appointment.status)}`}>{record.appointment.status}</span> : null}
+                        <div className="flex flex-wrap gap-2">
+                          {record.appointment.status ? <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(record.appointment.status)}`}>{formatStatusLabel(record.appointment.status)}</span> : null}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedRecord(record)}
+                            className={`rounded-full px-4 py-2 text-xs font-bold ${
+                              selectedRecord?.id === record.id
+                                ? "bg-primary text-white dark:bg-blue-600"
+                                : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                            }`}
+                          >
+                            {selectedRecord?.id === record.id ? "Opened" : "Open Record"}
+                          </button>
+                        </div>
                       </div>
                       <div className="mt-4 space-y-4">
                         <div>
-                          <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Notes</p>
-                          <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{record.notes || "No notes stored for this encounter."}</p>
+                          <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Snapshot</p>
+                          <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{recordPreview(record)}</p>
                         </div>
                         <div>
                           <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Prescriptions</p>
@@ -1031,7 +1214,19 @@ export function PatientDashboardPage() {
                             <div className="mt-3 space-y-3">
                               {record.prescriptions.map((prescription) => (
                                 <div key={prescription.id} className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/50">
-                                  <p className="text-sm font-bold">Prescription #{prescription.id} • {prescription.status}</p>
+                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                    <p className="text-sm font-bold">Prescription #{prescription.id} • {formatStatusLabel(prescription.status)}</p>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedPrescriptionId(String(prescription.id));
+                                        setPage("pharmacy");
+                                      }}
+                                      className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-700 shadow-sm dark:bg-slate-900 dark:text-slate-100"
+                                    >
+                                      Check Cost
+                                    </button>
+                                  </div>
                                   <div className="mt-2 space-y-2">
                                     {prescription.items.map((item) => (
                                       <div key={item.id} className="text-sm text-slate-600 dark:text-slate-300">{item.medicine_name} • {item.dosage} • Qty {item.quantity}</div>
@@ -1125,116 +1320,221 @@ export function PatientDashboardPage() {
 
           {!isLoading && !dashboardError && page === "pharmacy" ? (
             <section className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <article className="rounded-[1.5rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Dispensing Events</p>
-                  <p className="mt-3 font-headline text-4xl font-extrabold">{dispensingSummary.stats.dispensing_events}</p>
-                </article>
-                <article className="rounded-[1.5rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Prescriptions Dispensed</p>
-                  <p className="mt-3 font-headline text-4xl font-extrabold">{dispensingSummary.stats.prescriptions_dispensed}</p>
-                </article>
-                <article className="rounded-[1.5rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Total Billed</p>
-                  <p className="mt-3 font-headline text-3xl font-extrabold">{formatLkr(dispensingSummary.stats.total_billed)}</p>
-                </article>
-              </div>
-
               <div className="rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <h2 className="font-headline text-2xl font-extrabold text-primary dark:text-blue-400">Dispensing & Billing</h2>
+                    <h2 className="font-headline text-2xl font-extrabold text-primary dark:text-blue-400">ePrescription Cost Check</h2>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      Pick a prescription and a pharmacy to see the likely bill before you go there.
+                    </p>
+                  </div>
+                  {selectedPrescriptionMeta || selectedPharmacyMeta ? (
+                    <div className="rounded-[1.2rem] bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+                      <p>{selectedPrescriptionMeta ? selectedPrescriptionMeta.label : "No prescription selected yet."}</p>
+                      <p className="mt-1">{selectedPharmacyMeta ? `${selectedPharmacyMeta.name} • ${selectedPharmacyMeta.indexed_items} indexed item(s)` : "No pharmacy selected yet."}</p>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-6 grid gap-4 xl:grid-cols-[1.1fr_1.1fr_auto]">
+                  <label className="block">
+                    <span className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">ePrescription</span>
+                    <select
+                      value={selectedPrescriptionId}
+                      onChange={(event) => setSelectedPrescriptionId(event.target.value)}
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    >
+                      <option value="">Select a prescription</option>
+                      {prescriptionOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">Pharmacy</span>
+                    <select
+                      value={selectedPharmacyId}
+                      onChange={(event) => setSelectedPharmacyId(event.target.value)}
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    >
+                      <option value="">Select a pharmacy</option>
+                      {pharmacyOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => void loadPharmacyEstimate()}
+                    disabled={isEstimateLoading || !selectedPrescriptionId || !selectedPharmacyId}
+                    className="h-fit rounded-xl bg-primary px-6 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60 dark:bg-blue-600 xl:self-end"
+                  >
+                    {isEstimateLoading ? "Checking..." : "Calculate Bill"}
+                  </button>
+                </div>
+
+                {pharmacyEstimateError ? (
+                  <AlertBanner
+                    tone="error"
+                    title="Estimate unavailable"
+                    message={pharmacyEstimateError}
+                    className="mt-5"
+                  />
+                ) : null}
+
+                {pharmacyEstimate ? (
+                  <div className="mt-6 space-y-5">
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
+                        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">Estimated Total</p>
+                        <p className="mt-3 font-headline text-3xl font-extrabold text-primary dark:text-blue-400">
+                          {formatLkr(pharmacyEstimate.summary.estimated_total)}
+                        </p>
+                      </article>
+                      <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
+                        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">Included Items</p>
+                        <p className="mt-3 font-headline text-3xl font-extrabold">
+                          {pharmacyEstimate.summary.included_items}
+                        </p>
+                      </article>
+                      <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
+                        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">Excluded Items</p>
+                        <p className="mt-3 font-headline text-3xl font-extrabold">
+                          {pharmacyEstimate.summary.excluded_items}
+                        </p>
+                      </article>
+                      <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
+                        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">Pharmacy</p>
+                        <p className="mt-3 text-lg font-bold">{pharmacyEstimate.pharmacy.name}</p>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Prescription #{pharmacyEstimate.prescription.id} • {pharmacyEstimate.prescription.doctor_name || "Doctor not found"}
+                        </p>
+                      </article>
+                    </div>
+
+                    {pharmacyEstimate.summary.unavailable_items > 0 ? (
+                      <AlertBanner
+                        tone="info"
+                        title="Some items are missing from this pharmacy"
+                        message="Anything marked unavailable is excluded from the bill total, so the final amount only covers what this pharmacy can actually issue."
+                      />
+                    ) : null}
+
+                    <div className="grid gap-4">
+                      {pharmacyEstimate.items.map((item) => (
+                        <article key={item.id} className="rounded-[1.4rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-lg font-bold">{item.medicine_name}</p>
+                                <span className={`rounded-full px-3 py-1 text-xs font-bold ${estimateTone(item.availability_status)}`}>
+                                  {item.availability_label}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                                {item.dosage || "Dosage not set"} • Qty {item.quantity}
+                              </p>
+                              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                {item.instructions || "No instructions saved"}
+                              </p>
+                            </div>
+
+                            <div className="min-w-[12rem] rounded-[1.2rem] bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800/60">
+                              <p>Stock here: <span className="font-semibold">{item.stock_quantity}</span></p>
+                              <p className="mt-1">
+                                Unit price: <span className="font-semibold">{item.unit_price == null ? "Not priced" : formatLkr(item.unit_price)}</span>
+                              </p>
+                              <p className="mt-1">
+                                Bill line total: <span className="font-semibold">{item.estimated_total == null ? "Not included" : formatLkr(item.estimated_total)}</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          {item.note ? (
+                            <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">
+                              {item.note}
+                            </p>
+                          ) : null}
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-6 rounded-[1.4rem] border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
+                    Select both fields and hit <span className="font-semibold text-slate-700 dark:text-slate-200">Calculate Bill</span>. If a drug is missing from that pharmacy, it will be clearly marked and excluded from the estimate.
+                  </div>
+                )}
+                <div className="mt-6 space-y-6 border-t border-slate-100 pt-6 dark:border-slate-800">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <article className="rounded-[1.5rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950/40">
+                      <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Dispensing Events</p>
+                      <p className="mt-3 font-headline text-4xl font-extrabold">{dispensingSummary.stats.dispensing_events}</p>
+                    </article>
+                    <article className="rounded-[1.5rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950/40">
+                      <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Prescriptions Dispensed</p>
+                      <p className="mt-3 font-headline text-4xl font-extrabold">{dispensingSummary.stats.prescriptions_dispensed}</p>
+                    </article>
+                    <article className="rounded-[1.5rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950/40">
+                      <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Total Billed</p>
+                      <p className="mt-3 font-headline text-3xl font-extrabold">{formatLkr(dispensingSummary.stats.total_billed)}</p>
+                    </article>
+                  </div>
+
+                  <div>
+                    <h3 className="font-headline text-2xl font-extrabold text-primary dark:text-blue-400">Dispensing & Billing</h3>
                     <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Track what has been dispensed and what has been billed against your prescriptions.</p>
                   </div>
-                </div>
 
-                <div className="grid gap-4">
-                  {dispensingSummary.items.length === 0 ? (
-                    <EmptyState
-                      title="No dispensing records yet"
-                      description="Completed pharmacy issues and billing line items will show here once a prescription has been processed."
-                      className="rounded-[1.4rem] p-6"
-                    />
-                  ) : (
-                    dispensingSummary.items.map((item) => (
-                      <article key={item.id} className="rounded-[1.45rem] bg-slate-50 p-5 dark:bg-slate-800/50">
-                        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                          <div>
-                            <p className="text-lg font-bold">{item.pharmacy.name}</p>
-                            <p className="text-sm text-slate-500 dark:text-slate-400">Prescription #{item.prescription_id}</p>
-                            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{formatDateTime(item.created_at)}</p>
+                  <div className="grid gap-4">
+                    {dispensingSummary.items.length === 0 ? (
+                      <EmptyState
+                        title="No dispensing records yet"
+                        description="Completed pharmacy issues and billing line items will show here once a prescription has been processed."
+                        className="rounded-[1.4rem] p-6"
+                      />
+                    ) : (
+                      dispensingSummary.items.map((item) => (
+                        <article key={item.id} className="rounded-[1.45rem] bg-slate-50 p-5 dark:bg-slate-800/50">
+                          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                            <div>
+                              <p className="text-lg font-bold">{item.pharmacy.name}</p>
+                              <p className="text-sm text-slate-500 dark:text-slate-400">Prescription #{item.prescription_id}</p>
+                              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{formatDateTime(item.created_at)}</p>
+                            </div>
+                            <div className="text-left md:text-right">
+                              <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}>{formatStatusLabel(item.status)}</span>
+                              <p className="mt-3 text-sm font-semibold text-slate-500 dark:text-slate-400">Dispensed: {formatLkr(item.total_price)}</p>
+                              <p className="mt-1 text-base font-bold text-primary dark:text-blue-400">Billed: {formatLkr(item.billed_total)}</p>
+                            </div>
                           </div>
-                          <div className="text-left md:text-right">
-                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}>{formatStatusLabel(item.status)}</span>
-                            <p className="mt-3 text-sm font-semibold text-slate-500 dark:text-slate-400">Dispensed: {formatLkr(item.total_price)}</p>
-                            <p className="mt-1 text-base font-bold text-primary dark:text-blue-400">Billed: {formatLkr(item.billed_total)}</p>
+                          <div className="mt-4 grid gap-2">
+                            {item.line_items.length === 0 ? (
+                              <p className="text-sm text-slate-500 dark:text-slate-400">No dispensing line items saved yet.</p>
+                            ) : (
+                              item.line_items.map((lineItem) => (
+                                <div key={lineItem.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900">
+                                  <p className="font-semibold">{lineItem.medicine_name || "Unnamed item"}</p>
+                                  <p className="mt-1 text-slate-500 dark:text-slate-400">
+                                    {lineItem.dosage || "Dosage not set"} • Qty {lineItem.quantity_dispensed}
+                                  </p>
+                                  <p className="mt-1 text-slate-500 dark:text-slate-400">
+                                    {lineItem.instructions || "No instructions saved"}
+                                  </p>
+                                </div>
+                              ))
+                            )}
                           </div>
-                        </div>
-                        <div className="mt-4 grid gap-2">
-                          {item.line_items.length === 0 ? (
-                            <p className="text-sm text-slate-500 dark:text-slate-400">No dispensing line items saved yet.</p>
-                          ) : (
-                            item.line_items.map((lineItem) => (
-                              <div key={lineItem.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900">
-                                <p className="font-semibold">{lineItem.medicine_name || "Unnamed item"}</p>
-                                <p className="mt-1 text-slate-500 dark:text-slate-400">
-                                  {lineItem.dosage || "Dosage not set"} • Qty {lineItem.quantity_dispensed}
-                                </p>
-                                <p className="mt-1 text-slate-500 dark:text-slate-400">
-                                  {lineItem.instructions || "No instructions saved"}
-                                </p>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </article>
-                    ))
-                  )}
+                        </article>
+                      ))
+                    )}
+                  </div>
                 </div>
-              </div>
-
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h1 className="font-headline text-3xl font-extrabold text-primary dark:text-blue-400">Pharmacy Search</h1>
-                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Search medicines across the connected pharmacy inventory.</p>
-                </div>
-                <div className="relative w-full md:max-w-sm">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input type="text" value={pharmacyQuery} onChange={(event) => setPharmacyQuery(event.target.value)} placeholder="Search medicine..." className="w-full rounded-xl border-slate-200 bg-white py-3 pl-11 pr-4 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
-                </div>
-              </div>
-              {isPharmacyLoading ? <LoadingState message="Refreshing pharmacy inventory..." /> : null}
-              {pharmacyError ? (
-                <AlertBanner
-                  tone="error"
-                  title="Pharmacy search unavailable"
-                  message={pharmacyError}
-                />
-              ) : null}
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {pharmacyItems.length === 0 ? (
-                  <EmptyState
-                    title="No pharmacy results"
-                    description="Try a different medicine name or wait until matching inventory is published by connected pharmacies."
-                    className="rounded-[1.7rem] md:col-span-2 xl:col-span-3"
-                  />
-                ) : (
-                  pharmacyItems.map((item) => (
-                    <article key={item.id} className="rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                      <div className="mb-4 flex items-start justify-between">
-                        <div>
-                          <p className="text-lg font-bold">{item.medicine_name}</p>
-                          <p className="text-sm text-slate-500 dark:text-slate-400">{item.pharmacy.name}</p>
-                        </div>
-                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.availability)}`}>{item.availability}</span>
-                      </div>
-                      <div className="space-y-1 text-sm text-slate-600 dark:text-slate-300">
-                        <p>Stock: {item.stock_quantity}</p>
-                        <p>Price: {item.unit_price}</p>
-                      </div>
-                    </article>
-                  ))
-                )}
               </div>
             </section>
           ) : null}

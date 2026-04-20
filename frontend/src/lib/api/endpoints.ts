@@ -13,6 +13,8 @@ export const endpoints = {
     availableSlots: "/patient/dashboard/available-slots",
     records: "/patient/dashboard/records",
     pharmacy: "/patient/dashboard/pharmacy",
+    pharmacies: "/patient/dashboard/pharmacies",
+    pharmacyEstimate: "/patient/dashboard/pharmacy/estimate",
     dispensing: "/patient/dashboard/dispensing",
     assistant: "/patient/dashboard/assistant/respond",
   },
@@ -20,6 +22,7 @@ export const endpoints = {
     dashboard: "/doctor/dashboard",
     profile: "/doctor/dashboard/profile",
     encounters: "/doctor/dashboard/encounters/submit",
+    medicinesSearch: "/doctor/dashboard/medicines/search",
     assistant: "/doctor/dashboard/assistant/respond",
     availability: "/doctor/dashboard/availability",
     inviteAcceptBase: "/doctor/dashboard/invite/accept",
@@ -35,6 +38,8 @@ export const endpoints = {
   pharmacyAdmin: {
     inventoryBase: "/pharmacy-admin/inventory",
     dashboardBase: "/pharmacy-admin/dashboard",
+    medicinesSearch: "/pharmacy-admin/medicines/search",
+    staffBase: "/pharmacy-admin/staff",
   },
   hospitalAdmin: {
     dashboard: "/hospital-admin/dashboard",

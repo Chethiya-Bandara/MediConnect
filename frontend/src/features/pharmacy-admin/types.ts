@@ -8,6 +8,8 @@ export interface PharmacyInventoryItem {
   id: string;
   pharmacyId: string | null;
   medicineName: string;
+  medicineId?: number | null;
+  medicineUnit?: string | null;
   stockQuantity: number | null;
   unitPrice: number | null;
   createdAt: string | null;
@@ -72,13 +74,37 @@ export interface PharmacyAdminDashboardSummary {
 
 export interface PharmacyInventoryMutationPayload {
   pharmacyId: string;
+  medicineId?: number | null;
   medicineName: string;
   stockQuantity: number;
-  unitPrice: number;
+  unitPrice?: number | null;
 }
 
 export interface PharmacyInventoryUpdatePayload {
   itemId: string;
   stockQuantity: number;
   unitPrice: number;
+}
+
+export interface PharmacyMedicineCatalogItem {
+  id: number;
+  name: string;
+  unit: string | null;
+  retailPrice: number | null;
+  wholesalePrice: number | null;
+}
+
+export interface PharmacyAdminStaffRegistrationPayload {
+  pharmacyId: string;
+  fullName: string;
+  email: string;
+  password: string;
+  licenseNo: string;
+  status?: "active" | "suspended";
+}
+
+export interface PharmacyAdminStaffStatusPayload {
+  pharmacyId: string;
+  staffId: string;
+  status: "active" | "suspended";
 }

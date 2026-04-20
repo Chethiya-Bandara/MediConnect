@@ -34,6 +34,9 @@ interface RawPrescriptionItem {
   instructions?: string | null;
   unit_price?: number | string | null;
   price?: number | string | null;
+  catalog_unit?: string | null;
+  pharmacy_stock?: number | string | null;
+  availability_message?: string | null;
   dispensed_quantity?: number | string | null;
 }
 
@@ -138,6 +141,9 @@ function normalizeItem(raw: RawPrescriptionItem): PharmacistPrescriptionItem {
     quantity: prescribedQuantity,
     instructions: raw.instructions ?? null,
     unitPrice: asNumber(raw.unit_price ?? raw.price),
+    catalogUnit: raw.catalog_unit ?? null,
+    pharmacyStock: asNumber(raw.pharmacy_stock),
+    availabilityMessage: raw.availability_message ?? null,
     dispensedQuantity,
     remainingQuantity,
   };

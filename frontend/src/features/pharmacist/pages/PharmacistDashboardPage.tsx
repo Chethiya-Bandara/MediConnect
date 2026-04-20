@@ -132,6 +132,13 @@ export function PharmacistDashboardPage() {
       dashboard.plannedItems.reduce((sum, { quantityToDispense }) => sum + quantityToDispense, 0),
     [dashboard.plannedItems],
   );
+  const unavailableBillingItems = useMemo(
+    () =>
+      dashboard.plannedItems.filter(
+        ({ item, quantityToDispense }) => quantityToDispense > 0 && item.unitPrice === null,
+      ),
+    [dashboard.plannedItems],
+  );
   const partialValidationIssues = useMemo(
     () =>
       dashboard.plannedItems.filter(
@@ -637,6 +644,17 @@ export function PharmacistDashboardPage() {
                                   <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                     {item.instructions ?? "No extra instructions from backend."}
                                   </p>
+                                  <div className="mt-2 space-y-1 text-xs">
+                                    <p className={item.unitPrice !== null ? "text-emerald-700 dark:text-emerald-300" : "text-red-600 dark:text-red-400"}>
+                                      {item.unitPrice !== null
+                                        ? `Price locked: ${formatLkr(item.unitPrice)}${item.catalogUnit ? ` per ${item.catalogUnit}` : ""}`
+                                        : "Not billable from this pharmacy right now"}
+                                    </p>
+                                    <p className="text-slate-500 dark:text-slate-400">
+                                      {item.availabilityMessage ?? "Availability not confirmed yet."}
+                                      {item.pharmacyStock !== null ? ` Stock on hand: ${item.pharmacyStock}.` : ""}
+                                    </p>
+                                  </div>
                                   <div className="mt-3 flex flex-wrap gap-2">
                                     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                                       Current: {formatStatusLabel(selectedPrescription.status)}
@@ -795,6 +813,16 @@ export function PharmacistDashboardPage() {
                         No dispense quantities selected yet. Choose line-item actions and the bill updates live.
                       </p>
                     )}
+
+                    {unavailableBillingItems.length > 0 ? (
+                      <div className="rounded-2xl border border-amber-300/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                        {unavailableBillingItems.map(({ item }) => (
+                          <p key={item.id}>
+                            {item.medicineName}: {item.availabilityMessage ?? "Not available in this pharmacy, so it stays out of the bill."}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
 
                     <div className="flex items-end justify-between border-t border-white/10 pt-4">
                       <div>

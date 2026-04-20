@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import {
   AlertTriangle,
@@ -46,6 +46,7 @@ import {
   getDoctorDashboard,
   requestDoctorAffiliation,
   revokeDoctorAffiliation,
+  searchDoctorMedicines,
   submitDoctorEncounter,
   updateDoctorProfile,
 } from "../api/doctorApi";
@@ -54,6 +55,7 @@ import type {
   DoctorAffiliationHospitalOption,
   DoctorAvailabilitySlot,
   DoctorDashboardData,
+  DoctorMedicineCatalogItem,
   DoctorScheduleItem,
 } from "../types";
 
@@ -232,6 +234,9 @@ export function DoctorDashboardPage() {
   const [medName, setMedName] = useState("");
   const [medDose, setMedDose] = useState("");
   const [medDuration, setMedDuration] = useState("");
+  const [medicineSuggestions, setMedicineSuggestions] = useState<DoctorMedicineCatalogItem[]>([]);
+  const [selectedMedicineSuggestion, setSelectedMedicineSuggestion] = useState<DoctorMedicineCatalogItem | null>(null);
+  const [isMedicineSearchLoading, setIsMedicineSearchLoading] = useState(false);
   const [prescriptionDraft, setPrescriptionDraft] = useState<DraftPrescriptionItem[]>([]);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [submittingEncounter, setSubmittingEncounter] = useState(false);
@@ -250,6 +255,7 @@ export function DoctorDashboardPage() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const deferredMedicineQuery = useDeferredValue(medName.trim());
 
   const activePatient = dashboard?.active_patient ?? null;
   const doctorName =
@@ -371,13 +377,63 @@ export function DoctorDashboardPage() {
     });
   }, [chatLoading, chatMessages, chatOpen]);
 
+  useEffect(() => {
+    const query = deferredMedicineQuery;
+    if (query.length < 2) {
+      setMedicineSuggestions([]);
+      setIsMedicineSearchLoading(false);
+      setSelectedMedicineSuggestion((current) =>
+        current && current.name.toLowerCase() === medName.trim().toLowerCase() ? current : null,
+      );
+      return;
+    }
+
+    let active = true;
+    setIsMedicineSearchLoading(true);
+
+    void searchDoctorMedicines(query)
+      .then((items) => {
+        if (!active) return;
+        setMedicineSuggestions(items);
+        const exactMatch = items.find(
+          (item) => item.name.toLowerCase() === medName.trim().toLowerCase(),
+        );
+        setSelectedMedicineSuggestion(exactMatch ?? null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMedicineSuggestions([]);
+      })
+      .finally(() => {
+        if (!active) return;
+        setIsMedicineSearchLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [deferredMedicineQuery, medName]);
+
   const logoutNow = () => {
     logout();
     navigate("/login");
   };
 
+  const handleMedicineNameChange = (value: string) => {
+    setMedName(value);
+    const exactMatch = medicineSuggestions.find(
+      (item) => item.name.toLowerCase() === value.trim().toLowerCase(),
+    );
+    setSelectedMedicineSuggestion(exactMatch ?? null);
+  };
+
   const addMedicine = () => {
-    const medicine_name = medName.trim();
+    const matchedSuggestion = selectedMedicineSuggestion
+      ?? medicineSuggestions.find(
+        (item) => item.name.toLowerCase() === medName.trim().toLowerCase(),
+      )
+      ?? null;
+    const medicine_name = matchedSuggestion?.name ?? medName.trim();
     if (!medicine_name) {
       showToast("Medicine name is required before adding a prescription item.", "error");
       return;
@@ -409,6 +465,8 @@ export function DoctorDashboardPage() {
     setMedName("");
     setMedDose("");
     setMedDuration("");
+    setMedicineSuggestions([]);
+    setSelectedMedicineSuggestion(null);
   };
 
   const editMedicine = (item: DraftPrescriptionItem) => {
@@ -416,6 +474,7 @@ export function DoctorDashboardPage() {
     setMedName(item.medicine_name);
     setMedDose(item.dosage);
     setMedDuration(item.duration);
+    setSelectedMedicineSuggestion(null);
   };
 
   const submitEncounter = async () => {
@@ -451,6 +510,8 @@ export function DoctorDashboardPage() {
       setMedName("");
       setMedDose("");
       setMedDuration("");
+      setMedicineSuggestions([]);
+      setSelectedMedicineSuggestion(null);
       showToast("Encounter and prescription saved.");
       await loadDashboard();
     } catch (err) {
@@ -846,13 +907,37 @@ export function DoctorDashboardPage() {
                     </div>
                   </div>
                   <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
-                    <input value={medName} onChange={(event) => setMedName(event.target.value)} className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Drug name" />
+                    <input value={medName} list="doctor-medicine-catalog" onChange={(event) => handleMedicineNameChange(event.target.value)} className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Drug name" />
+                    <datalist id="doctor-medicine-catalog">
+                      {medicineSuggestions.map((item) => (
+                        <option key={item.id} value={item.name}>
+                          {item.unit ?? "unit"} • LKR {item.retail_price ?? 0}
+                        </option>
+                      ))}
+                    </datalist>
                     <input value={medDose} onChange={(event) => setMedDose(event.target.value)} className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Dosage" />
                     <input value={medDuration} onChange={(event) => setMedDuration(event.target.value)} className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Duration" />
                     <button type="button" onClick={addMedicine} className="flex items-center justify-center rounded-xl bg-primary-container py-3 text-white shadow-md shadow-blue-500/20 hover:bg-primary">
                       {editingDraftId ? <PencilLine size={18} /> : <Plus size={18} />}
                     </button>
                   </div>
+                  {medName.trim().length >= 2 ? (
+                    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-300">
+                      {isMedicineSearchLoading ? (
+                        <span>Loading central medicine catalog...</span>
+                      ) : selectedMedicineSuggestion ? (
+                        <>
+                          <span className="font-bold text-primary dark:text-blue-400">{selectedMedicineSuggestion.name}</span>
+                          <span>{selectedMedicineSuggestion.unit ?? "Unit not set"}</span>
+                          <span>Retail {selectedMedicineSuggestion.retail_price !== null ? `LKR ${selectedMedicineSuggestion.retail_price.toFixed(2)}` : "price missing"}</span>
+                        </>
+                      ) : medicineSuggestions.length > 0 ? (
+                        <span>{medicineSuggestions.length} catalog match(es) loaded. Pick one to keep pharmacy pricing clean.</span>
+                      ) : (
+                        <span>No catalog match yet. Free-text still works, but billing will love you more if you pick a real medicine.</span>
+                      )}
+                    </div>
+                  ) : null}
                   {editingDraftId ? (
                     <div className="mb-4 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200">
                       <span>Editing an existing prescription item. Save changes or clear the fields to stop editing.</span>
@@ -863,6 +948,8 @@ export function DoctorDashboardPage() {
                           setMedName("");
                           setMedDose("");
                           setMedDuration("");
+                          setMedicineSuggestions([]);
+                          setSelectedMedicineSuggestion(null);
                         }}
                         className="font-bold uppercase tracking-widest"
                       >

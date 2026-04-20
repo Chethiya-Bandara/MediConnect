@@ -178,6 +178,71 @@ def _organisation_map(organisation_ids) -> dict:
     return {row["id"]: row for row in rows}
 
 
+def _medicine_map(medicine_ids) -> dict:
+    ids = _sorted_unique(medicine_ids)
+    if not ids:
+        return {}
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, name, retail_price, wholesale_price, unit")
+            .in_("id", ids)
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+    return {row["id"]: row for row in rows}
+
+
+def _medicine_by_name(medicine_name: str) -> Optional[dict]:
+    normalized = (medicine_name or "").strip()
+    if not normalized:
+        return None
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, name, retail_price, wholesale_price, unit")
+            .ilike("name", normalized)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+    if rows:
+        return rows[0]
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, name, retail_price, wholesale_price, unit")
+            .ilike("name", f"%{normalized}%")
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+    return rows[0] if rows else None
+
+
+def _inventory_display_name(item: dict, medicine_lookup: dict | None = None) -> str:
+    medicine_lookup = medicine_lookup or {}
+    medicine = medicine_lookup.get(item.get("medicine_id"), {})
+    return (
+        medicine.get("name")
+        or item.get("medicine_name")
+        or item.get("drug_name")
+        or f"Medicine #{item.get('medicine_id') or item.get('id')}"
+    )
+
+
 def _encounter_map(encounter_ids) -> dict:
     ids = _sorted_unique(encounter_ids)
     if not ids:
@@ -256,6 +321,30 @@ def _prescription_items_by_prescription(prescription_ids) -> dict:
     for row in rows:
         mapped.setdefault(row["prescription_id"], []).append(_serialize_prescription_item(row))
     return mapped
+
+
+def _inventory_map_for_pharmacy(pharmacy_id: int | None, medicine_ids) -> dict:
+    ids = _sorted_unique(medicine_ids)
+    if not pharmacy_id or not ids:
+        return {}
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("inventory")
+            .select("id, medicine_id, stock_quantity, unit_price")
+            .eq("pharmacy_id", pharmacy_id)
+            .in_("medicine_id", ids)
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+    return {
+        row["medicine_id"]: row
+        for row in rows
+        if row.get("medicine_id") is not None
+    }
 
 
 def _build_prescription_context(prescriptions: list[dict]) -> dict:
@@ -410,11 +499,15 @@ def _dispensing_history_entries(dispensing_rows: list[dict]) -> list[dict]:
 
 
 def reduce_stock(medicine_name: str, pharmacy_id: int, quantity: int) -> dict:
+    medicine = _medicine_by_name(medicine_name)
+    if not medicine:
+        raise HTTPException(404, f"{medicine_name} is not registered in the medicines catalog.")
+
     item = execute_with_retry(
         lambda: (
             supabase_admin.table("inventory")
-            .select("id, medicine_name, stock_quantity, unit_price")
-            .eq("medicine_name", medicine_name)
+            .select("id, medicine_id, stock_quantity, unit_price")
+            .eq("medicine_id", medicine["id"])
             .eq("pharmacy_id", pharmacy_id)
             .single()
             .execute()
@@ -435,7 +528,11 @@ def reduce_stock(medicine_name: str, pharmacy_id: int, quantity: int) -> dict:
         "stock_quantity": current_stock - quantity,
         "updated_at": datetime.utcnow().isoformat(),
     }).eq("id", item.data["id"]).execute()
-    return item.data
+    return {
+        **item.data,
+        "medicine_name": medicine.get("name") or medicine_name,
+        "unit_price": item.data.get("unit_price") or medicine.get("retail_price") or 0,
+    }
 
 
 # ── Prescription Endpoints ────────────────────────────────────────────────────
@@ -467,8 +564,11 @@ def get_prescriptions():
     ]
 
 
-@router.get("/prescriptions/{prescription_id}", dependencies=[Depends(PharmacistOnly)])
-def get_prescription_details(prescription_id: str):
+@router.get("/prescriptions/{prescription_id}")
+def get_prescription_details(
+    prescription_id: str,
+    user: dict = Depends(PharmacistOnly),
+):
     """
     Returns prescription details and items for dispensing.
     Pharmacists only.
@@ -502,12 +602,60 @@ def get_prescription_details(prescription_id: str):
         default=list,
     )
 
+    pharmacist_org_id = user.get("organisation_id")
+    pharmacy_lookup = _pharmacy_map_by_organisation(
+        {int(pharmacist_org_id)}
+        if pharmacist_org_id is not None
+        else set()
+    )
+    pharmacy = pharmacy_lookup.get(int(pharmacist_org_id)) if pharmacist_org_id is not None else None
+    pharmacy_id = pharmacy.get("id") if pharmacy else None
+
+    items = context["prescription_items_lookup"].get(prescription.data["id"], [])
+    medicine_by_item_id = {}
+    medicine_ids = set()
+    for item in items:
+        medicine = _medicine_by_name(item.get("medicine_name") or "")
+        if medicine:
+            medicine_by_item_id[item["id"]] = medicine
+            medicine_ids.add(medicine["id"])
+
+    inventory_lookup = _inventory_map_for_pharmacy(pharmacy_id, medicine_ids)
+    enriched_items = []
+    for item in items:
+        medicine = medicine_by_item_id.get(item["id"])
+        inventory_item = inventory_lookup.get(medicine.get("id")) if medicine else None
+        stock_quantity = _coerce_int(inventory_item.get("stock_quantity")) if inventory_item else None
+        has_stock = stock_quantity is not None and stock_quantity > 0
+        enriched_items.append(
+            {
+                **item,
+                "medicine_id": medicine.get("id") if medicine else None,
+                "catalog_unit": medicine.get("unit") if medicine else None,
+                "unit_price": (
+                    float(inventory_item.get("unit_price") or 0)
+                    if inventory_item and has_stock
+                    else None
+                ),
+                "pharmacy_stock": stock_quantity,
+                "availability_message": (
+                    "Available in your pharmacy inventory."
+                    if inventory_item and has_stock
+                    else (
+                        "Listed in your inventory but currently out of stock."
+                        if inventory_item
+                        else "This medicine is not stocked in your pharmacy."
+                    )
+                ),
+            }
+        )
+
     return {
         "prescription": _serialize_prescription_summary(
             prescription.data,
             **context,
         ),
-        "items": context["prescription_items_lookup"].get(prescription.data["id"], []),
+        "items": enriched_items,
         "dispensations": _dispensing_history_entries(dispensing_rows),
         "note": "Clinical notes and encounter data are not available to pharmacy staff.",
     }
@@ -647,7 +795,12 @@ def dispense_prescription(
             "dispensed_quantity": new_dispensed
         }).eq("id", item_id).execute()
 
-        unit_price = float(inventory_item.get("unit_price") or 0)
+        medicine = _medicine_by_name(medicine_name)
+        unit_price = float(
+            inventory_item.get("unit_price")
+            or (medicine.get("retail_price") if medicine else 0)
+            or 0
+        )
         line_total = unit_price * qty
         total_price += line_total
         dispensing_line_items.append(
@@ -820,7 +973,7 @@ def generate_bill(
         try:
             inventory_item = (
                 supabase_admin.table("inventory")
-                .select("id, medicine_name, unit_price, stock_quantity, pharmacy_id")
+                .select("id, medicine_id, unit_price, stock_quantity, pharmacy_id")
                 .eq("id", item.inventory_id)
                 .eq("pharmacy_id", payload.pharmacy_id)
                 .single()
@@ -839,11 +992,16 @@ def generate_bill(
                 detail=f"Medicine ID {item.inventory_id} not found"
             )
 
+        medicine_lookup = _medicine_map(
+            {inventory_item.get("medicine_id")} if inventory_item.get("medicine_id") else set()
+        )
+        medicine_name = _inventory_display_name(inventory_item, medicine_lookup)
+
         # ── Validate stock availability ───────────────────────────
         if inventory_item["stock_quantity"] < item.quantity:
             raise HTTPException(
                 status_code=400,
-                detail=f"Insufficient stock for {inventory_item['medicine_name']}. "
+                detail=f"Insufficient stock for {medicine_name}. "
                        f"Available: {inventory_item['stock_quantity']}, "
                        f"Requested: {item.quantity}"
             )
@@ -855,7 +1013,7 @@ def generate_bill(
 
         bill_lines.append({
             "inventory_id":   item.inventory_id,
-            "medicine_name":  inventory_item["medicine_name"],
+            "medicine_name":  medicine_name,
             "quantity":       item.quantity,
             "unit_price":     server_unit_price,   # ← always from DB
             "line_total":     line_total,

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal, Optional
 import uuid
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile, Depends
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile, Depends, Query
 from app.middleware.file_validator import validate_upload_file, sanitize_filename
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -216,8 +216,39 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _search_medicines(query: str, limit: int = 8) -> list[dict]:
+    normalized = (query or "").strip()
+    if len(normalized) < 2:
+        return []
+
+    return execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, name, unit, retail_price, wholesale_price")
+            .ilike("name", f"%{normalized}%")
+            .order("name")
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+
 def _title_status(value: Optional[str]) -> str:
     return (value or "unknown").replace("_", " ").title()
+
+
+@router.get("/medicines/search")
+def doctor_medicine_search(
+    query: str = Query(default=""),
+    authorization: Optional[str] = Header(None),
+):
+    _require_doctor_context(authorization)
+    return {
+        "items": _search_medicines(query),
+    }
 
 
 def _build_prescription_instructions(

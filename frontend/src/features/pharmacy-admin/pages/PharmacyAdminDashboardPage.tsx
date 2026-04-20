@@ -18,8 +18,13 @@ import { useNavigate } from "react-router-dom";
 import { cn } from "../../../lib/utils/cn";
 import { formatDate } from "../../../lib/utils/formatDate";
 import { useAuth } from "../../auth/context/AuthContext";
+import { searchPharmacyCatalogMedicines } from "../api/pharmacyAdminApi";
 import { usePharmacyAdminDashboard } from "../hooks/usePharmacyAdminDashboard";
-import type { PharmacyAdminSection, PharmacyInventoryItem } from "../types";
+import type {
+  PharmacyAdminSection,
+  PharmacyInventoryItem,
+  PharmacyMedicineCatalogItem,
+} from "../types";
 
 function formatLkr(value: number | null) {
   if (value === null) return "N/A";
@@ -80,6 +85,10 @@ function formatStatusLabel(value: string | null | undefined) {
   return value.replaceAll("_", " ");
 }
 
+function normalizeMedicineKey(value: string | null | undefined) {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 export function PharmacyAdminDashboardPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -90,14 +99,26 @@ export function PharmacyAdminDashboardPage() {
   const [staffStatusFilter, setStaffStatusFilter] = useState("ALL");
   const [inventoryFeedback, setInventoryFeedback] = useState<string | null>(null);
   const [reportFeedback, setReportFeedback] = useState<string | null>(null);
+  const [staffFeedback, setStaffFeedback] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     medicineName: "",
-    stockQuantity: "0",
-    unitPrice: "0",
+    stockQuantity: "",
+    unitPrice: "",
   });
+  const [showStaffCreateForm, setShowStaffCreateForm] = useState(false);
+  const [staffCreateForm, setStaffCreateForm] = useState({
+    fullName: "",
+    email: "",
+    password: "",
+    licenseNo: "",
+  });
+  const [catalogSuggestions, setCatalogSuggestions] = useState<PharmacyMedicineCatalogItem[]>([]);
+  const [selectedCatalogMedicine, setSelectedCatalogMedicine] = useState<PharmacyMedicineCatalogItem | null>(null);
+  const [isCatalogSearchLoading, setIsCatalogSearchLoading] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, { stockQuantity: string; unitPrice: string }>>({});
   const dashboard = usePharmacyAdminDashboard(user?.organisationId ?? null);
   const deferredStaffFilter = useDeferredValue(staffStatusFilter);
+  const deferredCatalogQuery = useDeferredValue(createForm.medicineName.trim());
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("theme");
@@ -121,6 +142,64 @@ export function PharmacyAdminDashboardPage() {
     });
   }, [dashboard.inventory]);
 
+  useEffect(() => {
+    const query = deferredCatalogQuery;
+    if (query.length < 2) {
+      setCatalogSuggestions([]);
+      setIsCatalogSearchLoading(false);
+      setSelectedCatalogMedicine((current) =>
+        current && current.name.toLowerCase() === createForm.medicineName.trim().toLowerCase()
+          ? current
+          : null,
+      );
+      return;
+    }
+
+    let active = true;
+    setIsCatalogSearchLoading(true);
+
+    void searchPharmacyCatalogMedicines(query)
+      .then((items) => {
+        if (!active) return;
+        setCatalogSuggestions(items);
+        const normalizedQuery = normalizeMedicineKey(createForm.medicineName);
+        const matchedSuggestion = items.find(
+          (item) => normalizeMedicineKey(item.name) === normalizedQuery,
+        ) ?? (
+          items.length === 1
+            ? items[0]
+            : items.find((item) => normalizeMedicineKey(item.name).startsWith(normalizedQuery))
+        ) ?? null;
+
+        if (matchedSuggestion) {
+          setSelectedCatalogMedicine(matchedSuggestion);
+          setCreateForm((current) => ({
+            ...current,
+            medicineName: matchedSuggestion.name,
+            unitPrice: matchedSuggestion.retailPrice !== null ? String(matchedSuggestion.retailPrice) : "",
+          }));
+        } else {
+          setSelectedCatalogMedicine(null);
+          setCreateForm((current) => ({
+            ...current,
+            unitPrice: "",
+          }));
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setCatalogSuggestions([]);
+      })
+      .finally(() => {
+        if (!active) return;
+        setIsCatalogSearchLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [createForm.medicineName, deferredCatalogQuery]);
+
   const toggleTheme = () => {
     const next = !isDark;
     document.documentElement.classList.toggle("dark", next);
@@ -135,7 +214,8 @@ export function PharmacyAdminDashboardPage() {
 
   const activeSummary = dashboard.summary;
   const userInitials = getInitials(user?.name);
-  const activePharmacyId = dashboard.activePharmacyId ?? dashboard.pharmacyIdInput;
+  const activePharmacyId =
+    dashboard.summary?.pharmacyId ?? dashboard.activePharmacyId ?? dashboard.pharmacyIdInput;
 
   const topMovingItems = activeSummary?.reportSummary.fastMovingItems ?? [];
   const recentAdjustments = activeSummary?.reportSummary.recentAdjustments ?? [];
@@ -196,19 +276,61 @@ export function PharmacyAdminDashboardPage() {
       return;
     }
 
+    const matchedMedicine =
+      selectedCatalogMedicine
+      ?? catalogSuggestions.find(
+        (item) => normalizeMedicineKey(item.name) === normalizeMedicineKey(createForm.medicineName),
+      )
+      ?? (catalogSuggestions.length === 1 ? catalogSuggestions[0] : null)
+      ?? null;
+
+    if (!matchedMedicine) {
+      setInventoryFeedback("Pick a medicine from the central catalog before saving stock.");
+      return;
+    }
+
     const success = await dashboard.createMedicine({
       pharmacyId: activePharmacyId,
-      medicineName: createForm.medicineName.trim(),
+      medicineId: matchedMedicine.id,
+      medicineName: matchedMedicine.name,
       stockQuantity: normalizeNumberInput(createForm.stockQuantity),
-      unitPrice: normalizeNumberInput(createForm.unitPrice),
+      unitPrice: matchedMedicine.retailPrice ?? normalizeNumberInput(createForm.unitPrice),
     });
 
     if (success) {
-      setCreateForm({ medicineName: "", stockQuantity: "0", unitPrice: "0" });
+      setCreateForm({ medicineName: "", stockQuantity: "", unitPrice: "" });
+      setCatalogSuggestions([]);
+      setSelectedCatalogMedicine(null);
       setShowCreateForm(false);
       setInventoryFeedback("New inventory item added successfully.");
     } else {
       setInventoryFeedback(dashboard.actionMessage ?? "Inventory item creation failed.");
+    }
+  };
+
+  const handleCreateMedicineNameChange = (value: string) => {
+    setCreateForm((current) => ({ ...current, medicineName: value }));
+    const normalizedValue = normalizeMedicineKey(value);
+    const matchedSuggestion = catalogSuggestions.find(
+      (item) => normalizeMedicineKey(item.name) === normalizedValue,
+    ) ?? (
+      catalogSuggestions.length === 1
+        ? catalogSuggestions[0]
+        : catalogSuggestions.find((item) => normalizeMedicineKey(item.name).startsWith(normalizedValue))
+    ) ?? null;
+
+    setSelectedCatalogMedicine(matchedSuggestion ?? null);
+    if (matchedSuggestion) {
+      setCreateForm((current) => ({
+        ...current,
+        medicineName: matchedSuggestion.name,
+        unitPrice: matchedSuggestion.retailPrice !== null ? String(matchedSuggestion.retailPrice) : "",
+      }));
+    } else {
+      setCreateForm((current) => ({
+        ...current,
+        unitPrice: "",
+      }));
     }
   };
 
@@ -362,6 +484,11 @@ export function PharmacyAdminDashboardPage() {
               {reportFeedback}
             </div>
           ) : null}
+          {staffFeedback ? (
+            <div className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(staffFeedback)}`}>
+              {staffFeedback}
+            </div>
+          ) : null}
         </div>
 
         {section === "dashboard" ? (
@@ -510,34 +637,71 @@ export function PharmacyAdminDashboardPage() {
 
             {showCreateForm ? (
               <div className="grid gap-4 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:grid-cols-4">
-                <input
-                  value={createForm.medicineName}
-                  onChange={(event) => setCreateForm((current) => ({ ...current, medicineName: event.target.value }))}
-                  placeholder="Medicine name"
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
-                <input
-                  value={createForm.stockQuantity}
-                  onChange={(event) => setCreateForm((current) => ({ ...current, stockQuantity: event.target.value }))}
-                  placeholder="Stock quantity"
-                  type="number"
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
-                <input
-                  value={createForm.unitPrice}
-                  onChange={(event) => setCreateForm((current) => ({ ...current, unitPrice: event.target.value }))}
-                  placeholder="Unit price"
-                  type="number"
-                  step="0.01"
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                    Medicine Name
+                  </span>
+                  <input
+                    list="pharmacy-admin-medicine-catalog"
+                    value={createForm.medicineName}
+                    onChange={(event) => handleCreateMedicineNameChange(event.target.value)}
+                    placeholder="Start typing medicine name"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </label>
+                <datalist id="pharmacy-admin-medicine-catalog">
+                  {catalogSuggestions.map((item) => (
+                    <option key={item.id} value={item.name}>
+                      {item.unit ?? "unit"} • Retail LKR {item.retailPrice ?? 0}
+                    </option>
+                  ))}
+                </datalist>
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                    Stock Quantity
+                  </span>
+                  <input
+                    value={createForm.stockQuantity}
+                    onChange={(event) => setCreateForm((current) => ({ ...current, stockQuantity: event.target.value }))}
+                    placeholder="Enter stock quantity"
+                    type="number"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                    Unit Price (Auto)
+                  </span>
+                  <input
+                    value={createForm.unitPrice}
+                    readOnly
+                    placeholder="Auto from catalog"
+                    type="number"
+                    step="0.01"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm outline-none dark:border-slate-700 dark:bg-slate-800/70 dark:text-white"
+                  />
+                </label>
                 <div className="flex gap-3">
                   <button type="button" onClick={() => void handleCreateMedicine()} className="flex-1 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-slate-100 dark:text-slate-900">
                     Save
                   </button>
-                  <button type="button" onClick={() => setShowCreateForm(false)} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold dark:border-slate-700">
+                  <button type="button" onClick={() => { setShowCreateForm(false); setSelectedCatalogMedicine(null); setCatalogSuggestions([]); }} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold dark:border-slate-700">
                     Cancel
                   </button>
+                </div>
+                <div className="md:col-span-4 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-300">
+                  {isCatalogSearchLoading ? (
+                    <span>Loading central medicine catalog...</span>
+                  ) : selectedCatalogMedicine ? (
+                    <span>
+                      Locked to <span className="font-bold text-primary dark:text-blue-400">{selectedCatalogMedicine.name}</span>
+                      {" "}• {selectedCatalogMedicine.unit ?? "Unit not set"} • Retail {formatLkr(selectedCatalogMedicine.retailPrice)}
+                    </span>
+                  ) : createForm.medicineName.trim().length >= 2 ? (
+                    <span>Pick the catalog hit from the browser suggestion list. If one result only exists, the form now auto-locks it.</span>
+                  ) : (
+                    <span>Start typing a medicine name and the central catalog suggestions will show up here.</span>
+                  )}
                 </div>
               </div>
             ) : null}
@@ -730,7 +894,7 @@ export function PharmacyAdminDashboardPage() {
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight">Pharmacist Management</h1>
                 <p className="mt-2 text-slate-500 dark:text-slate-400">
-                  Registered dispensers under this pharmacy organisation, loaded from the backend.
+                  Live pharmacist accounts under this pharmacy organisation, with real backend permission control.
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -748,18 +912,133 @@ export function PharmacyAdminDashboardPage() {
                 </select>
                 <button
                   type="button"
-                  onClick={() => {
-                    dashboard.notifyMissingStaffAction();
-                    setInventoryFeedback("Staff permission updates are blocked until the backend exposes a staff-management endpoint.");
-                  }}
+                  onClick={() => setShowStaffCreateForm((current) => !current)}
                   className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-slate-700"
                 >
-                  Permission Controls
+                  {showStaffCreateForm ? "Hide Registration" : "Register Pharmacist"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void dashboard.loadDashboardSummary()}
+                  className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-bold dark:bg-slate-800 dark:text-slate-200"
+                >
+                  Refresh Staff
                 </button>
               </div>
             </header>
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+              {showStaffCreateForm ? (
+                <div className="md:col-span-3 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="mb-5">
+                    <h3 className="text-lg font-bold">Register New Pharmacist</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      Creates the auth user, users row, and pharmacists row in one shot instead of this page pretending to help.
+                    </p>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                        Full Name
+                      </span>
+                      <input
+                        value={staffCreateForm.fullName}
+                        onChange={(event) => setStaffCreateForm((current) => ({ ...current, fullName: event.target.value }))}
+                        placeholder="Pharmacist full name"
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                        Email
+                      </span>
+                      <input
+                        value={staffCreateForm.email}
+                        onChange={(event) => setStaffCreateForm((current) => ({ ...current, email: event.target.value }))}
+                        placeholder="pharmacist@email.com"
+                        type="email"
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                        Temporary Password
+                      </span>
+                      <input
+                        value={staffCreateForm.password}
+                        onChange={(event) => setStaffCreateForm((current) => ({ ...current, password: event.target.value }))}
+                        placeholder="At least 8 characters"
+                        type="password"
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                        License Number
+                      </span>
+                      <input
+                        value={staffCreateForm.licenseNo}
+                        onChange={(event) => setStaffCreateForm((current) => ({ ...current, licenseNo: event.target.value }))}
+                        placeholder="License / registration number"
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      disabled={dashboard.isMutatingStaff || !activePharmacyId}
+                      onClick={() => {
+                        if (!activePharmacyId) {
+                          setStaffFeedback("This admin is not linked to a pharmacy yet.");
+                          return;
+                        }
+                        void dashboard.registerStaff({
+                          pharmacyId: activePharmacyId,
+                          fullName: staffCreateForm.fullName,
+                          email: staffCreateForm.email,
+                          password: staffCreateForm.password,
+                          licenseNo: staffCreateForm.licenseNo,
+                          status: "active",
+                        }).then((success) => {
+                          setStaffFeedback(
+                            success
+                              ? `${staffCreateForm.fullName} registered under this pharmacy.`
+                              : dashboard.actionMessage ?? "Pharmacist registration failed.",
+                          );
+                          if (!success) return;
+                          setStaffCreateForm({
+                            fullName: "",
+                            email: "",
+                            password: "",
+                            licenseNo: "",
+                          });
+                          setShowStaffCreateForm(false);
+                        });
+                      }}
+                      className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900"
+                    >
+                      {dashboard.isMutatingStaff ? "Registering..." : "Create Pharmacist"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowStaffCreateForm(false);
+                        setStaffCreateForm({
+                          fullName: "",
+                          email: "",
+                          password: "",
+                          licenseNo: "",
+                        });
+                      }}
+                      className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-bold dark:border-slate-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               {filteredStaff.length > 0 ? filteredStaff.map((member) => (
                 <div key={member.id} className="group relative overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="mb-6 flex items-center gap-4">
@@ -774,20 +1053,51 @@ export function PharmacyAdminDashboardPage() {
                     </div>
                   </div>
                   <div className="mb-6 space-y-2">
-                    <p className="flex justify-between text-[11px]"><span>Status:</span><span className="font-bold text-green-600">{formatStatusLabel(member.status)}</span></p>
+                    <p className="flex justify-between text-[11px]">
+                      <span>Status:</span>
+                      <span className={cn(
+                        "font-bold",
+                        (member.status ?? "").toLowerCase() === "suspended"
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-green-600 dark:text-green-400",
+                      )}
+                      >
+                        {formatStatusLabel(member.status)}
+                      </span>
+                    </p>
                     <p className="flex justify-between text-[11px]"><span>Email:</span><span>{member.email ?? "Not supplied"}</span></p>
                     <p className="flex justify-between text-[11px]"><span>Dispense events:</span><span>{member.dispenseEventsCount}</span></p>
                     <p className="flex justify-between text-[11px]"><span>Last activity:</span><span>{formatDateTime(member.lastDispensedAt)}</span></p>
                   </div>
                   <button
                     type="button"
+                    disabled={dashboard.isMutatingStaff || !activePharmacyId}
                     onClick={() => {
-                      dashboard.notifyMissingStaffAction();
-                      setInventoryFeedback(`Permission changes for ${member.name} are unavailable until the backend exposes that module.`);
+                      if (!activePharmacyId) {
+                        setStaffFeedback("This admin is not linked to a pharmacy yet.");
+                        return;
+                      }
+                      const nextStatus = (member.status ?? "").toLowerCase() === "suspended" ? "active" : "suspended";
+                      void dashboard.updateStaffStatus({
+                        pharmacyId: activePharmacyId,
+                        staffId: member.id,
+                        status: nextStatus,
+                      }).then((success) => {
+                        setStaffFeedback(
+                          success
+                            ? `${member.name} marked as ${nextStatus}.`
+                            : dashboard.actionMessage ?? `Failed to update ${member.name}.`,
+                        );
+                      });
                     }}
-                    className="w-full rounded-lg bg-slate-100 py-2 text-[10px] font-bold uppercase tracking-widest transition-colors hover:bg-error/10 hover:text-error dark:bg-slate-800"
+                    className={cn(
+                      "w-full rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                      (member.status ?? "").toLowerCase() === "suspended"
+                        ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300"
+                        : "bg-slate-100 hover:bg-error/10 hover:text-error dark:bg-slate-800",
+                    )}
                   >
-                    Access Control Unavailable
+                    {(member.status ?? "").toLowerCase() === "suspended" ? "Reactivate Access" : "Suspend Access"}
                   </button>
                 </div>
               )) : (
@@ -796,17 +1106,16 @@ export function PharmacyAdminDashboardPage() {
                 </div>
               )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  dashboard.notifyMissingStaffAction();
-                  setInventoryFeedback("New pharmacist registration will be available once backend staff-management support is released.");
-                }}
-                className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 p-6 text-slate-400 transition-all hover:border-primary hover:text-primary dark:border-slate-800"
-              >
-                <UserCog className="mb-2" size={36} />
-                <p className="text-xs font-bold uppercase tracking-widest">Register New Pharmacist</p>
-              </button>
+              {!showStaffCreateForm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowStaffCreateForm(true)}
+                  className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 p-6 text-slate-400 transition-all hover:border-primary hover:text-primary dark:border-slate-800"
+                >
+                  <UserCog className="mb-2" size={36} />
+                  <p className="text-xs font-bold uppercase tracking-widest">Register New Pharmacist</p>
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}

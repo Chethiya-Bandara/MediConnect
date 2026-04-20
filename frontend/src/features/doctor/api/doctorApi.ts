@@ -3,6 +3,7 @@ import type {
   DoctorAffiliationHospitalOption,
   DoctorAvailabilitySlot,
   DoctorDashboardData,
+  DoctorMedicineCatalogItem,
 } from "../types";
 import { apiRequest } from "../../../lib/api/client";
 import { endpoints } from "../../../lib/api/endpoints";
@@ -60,6 +61,13 @@ export function askDoctorAssistant(payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function searchDoctorMedicines(query: string) {
+  const response = await apiRequest<{ items?: DoctorMedicineCatalogItem[] }>(
+    `${endpoints.doctor.medicinesSearch}?query=${encodeURIComponent(query)}`,
+  );
+  return Array.isArray(response.items) ? response.items : [];
 }
 
 export async function getDoctorAvailability() {

@@ -4,7 +4,9 @@ import {
   deleteInventoryItem,
   getDashboardSummary,
   getInventory,
+  registerPharmacyStaff,
   updateInventoryItem,
+  updatePharmacyStaffStatus,
 } from "../api/pharmacyAdminApi";
 import { lowStockThreshold } from "../constants";
 import type {
@@ -12,6 +14,8 @@ import type {
   PharmacyInventoryItem,
   PharmacyInventoryMutationPayload,
   PharmacyInventoryStats,
+  PharmacyAdminStaffRegistrationPayload,
+  PharmacyAdminStaffStatusPayload,
   PharmacyInventoryUpdatePayload,
 } from "../types";
 
@@ -80,6 +84,7 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
   const [isLoadingInventory, setIsLoadingInventory] = useState(false);
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
   const [isMutatingInventory, setIsMutatingInventory] = useState(false);
+  const [isMutatingStaff, setIsMutatingStaff] = useState(false);
   const [summary, setSummary] = useState<PharmacyAdminDashboardSummary | null>(null);
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -94,23 +99,29 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
     setActivePharmacyId(nextId);
   }, [organisationId]);
 
-  const loadDashboardSummary = async (pharmacyId = activePharmacyId ?? pharmacyIdInput.trim()) => {
+  const loadDashboardSummary = async (
+    pharmacyId = activePharmacyId ?? pharmacyIdInput.trim(),
+  ) => {
     if (!pharmacyId) {
       setSummary(null);
-      return false;
+      return null;
     }
 
     setIsLoadingDashboard(true);
     try {
       const response = await getDashboardSummary(pharmacyId);
       setSummary(response);
-      return true;
+      const resolvedPharmacyId = response.pharmacyId || pharmacyId;
+      if (resolvedPharmacyId) {
+        setActivePharmacyId(resolvedPharmacyId);
+      }
+      return resolvedPharmacyId;
     } catch (loadError) {
       setSummary(null);
       setError(
         loadError instanceof Error ? loadError.message : "Dashboard summary could not be loaded.",
       );
-      return false;
+      return null;
     } finally {
       setIsLoadingDashboard(false);
     }
@@ -131,14 +142,17 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
     try {
       const items = await getInventory(pharmacyId);
       setInventory(items);
-      setActivePharmacyId(pharmacyId);
       setSelectedItemId(items[0]?.id ?? null);
-      await loadDashboardSummary(pharmacyId);
+      const resolvedFromSummary = await loadDashboardSummary(pharmacyId);
+      const resolvedPharmacyId = items[0]?.pharmacyId ?? resolvedFromSummary ?? null;
+      if (resolvedPharmacyId) {
+        setActivePharmacyId(resolvedPharmacyId);
+      }
       return true;
     } catch (loadError) {
       setInventory([]);
       setSelectedItemId(null);
-      setActivePharmacyId(pharmacyId);
+      setActivePharmacyId(null);
       setError(
         loadError instanceof Error ? loadError.message : "Inventory could not be loaded.",
       );
@@ -275,10 +289,46 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
     downloadCsv("pharmacy-revenue-report.csv", rows);
   };
 
-  const notifyMissingStaffAction = () => {
-    setActionMessage(
-      "Staff permission changes are not exposed by the current backend yet, so this action is intentionally blocked instead of faking success.",
-    );
+  const registerStaff = async (payload: PharmacyAdminStaffRegistrationPayload) => {
+    setIsMutatingStaff(true);
+    setActionMessage(null);
+
+    try {
+      const response = await registerPharmacyStaff(payload);
+      setActionMessage(response.message ?? "Pharmacist registered.");
+      await loadDashboardSummary(payload.pharmacyId);
+      return true;
+    } catch (mutationError) {
+      setActionMessage(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "Pharmacist registration failed.",
+      );
+      return false;
+    } finally {
+      setIsMutatingStaff(false);
+    }
+  };
+
+  const updateStaffStatus = async (payload: PharmacyAdminStaffStatusPayload) => {
+    setIsMutatingStaff(true);
+    setActionMessage(null);
+
+    try {
+      const response = await updatePharmacyStaffStatus(payload);
+      setActionMessage(response.message ?? "Staff status updated.");
+      await loadDashboardSummary(payload.pharmacyId);
+      return true;
+    } catch (mutationError) {
+      setActionMessage(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "Staff status update failed.",
+      );
+      return false;
+    } finally {
+      setIsMutatingStaff(false);
+    }
   };
 
   return {
@@ -296,6 +346,7 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
     isLoadingInventory,
     isLoadingDashboard,
     isMutatingInventory,
+    isMutatingStaff,
     setPharmacyIdInput,
     setSearchQuery,
     setSelectedItemId,
@@ -305,8 +356,9 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
     createMedicine,
     updateMedicine,
     removeMedicine,
+    registerStaff,
+    updateStaffStatus,
     exportInventoryCsv,
     exportRevenueCsv,
-    notifyMissingStaffAction,
   };
 }

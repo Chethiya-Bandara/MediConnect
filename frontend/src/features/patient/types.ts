@@ -111,13 +111,57 @@ export interface PharmacyInventoryItem {
   id: number;
   medicine_name: string;
   stock_quantity: number;
-  unit_price: string;
+  unit_price: number | string;
   availability: string;
   pharmacy: {
     id: number;
     name: string;
     organisation_status: string | null;
   };
+}
+
+export interface PatientPharmacyOption {
+  id: number;
+  name: string;
+  organisation_status: string | null;
+  indexed_items: number;
+}
+
+export interface PharmacyEstimateItem {
+  id: number;
+  inventory_id: number | null;
+  medicine_name: string;
+  dosage: string | null;
+  quantity: string;
+  quantity_value: number;
+  instructions: string | null;
+  availability_status: "available" | "not_listed" | "out_of_stock" | "insufficient_stock";
+  availability_label: string;
+  stock_quantity: number;
+  unit_price: number | null;
+  estimated_total: number | null;
+  note: string | null;
+}
+
+export interface PharmacyEstimate {
+  prescription: {
+    id: number;
+    status: string;
+    created_at: string | null;
+    doctor_name: string | null;
+  };
+  pharmacy: {
+    id: number;
+    name: string;
+    organisation_status: string | null;
+  };
+  summary: {
+    estimated_total: number;
+    included_items: number;
+    excluded_items: number;
+    unavailable_items: number;
+  };
+  items: PharmacyEstimateItem[];
 }
 
 export interface AssistantChatMessage {

@@ -139,3 +139,11 @@ export interface DoctorAvailabilitySlot {
   end_time: string;
   is_booked?: boolean;
 }
+
+export interface DoctorMedicineCatalogItem {
+  id: number;
+  name: string;
+  unit: string | null;
+  retail_price: number | null;
+  wholesale_price: number | null;
+}

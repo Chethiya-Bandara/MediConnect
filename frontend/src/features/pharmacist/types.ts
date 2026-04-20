@@ -32,6 +32,9 @@ export interface PharmacistPrescriptionItem {
   quantity: number | null;
   instructions: string | null;
   unitPrice: number | null;
+  catalogUnit: string | null;
+  pharmacyStock: number | null;
+  availabilityMessage: string | null;
   dispensedQuantity: number;
   remainingQuantity: number | null;
 }
