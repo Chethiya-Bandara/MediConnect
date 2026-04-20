@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { HeartPulse, MoonStar, SunMedium } from "lucide-react";
 
 export function PortalTopNav() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("patient-dashboard-theme");
-    setTheme(savedTheme === "dark" ? "dark" : "light");
+    setTheme(savedTheme === "light" ? "light" : "dark");
   }, []);
 
   useEffect(() => {
