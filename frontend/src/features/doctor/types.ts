@@ -135,6 +135,7 @@ export interface DoctorAssistantReply {
 export interface DoctorAvailabilitySlot {
   id: number;
   doctor_id: number;
+  hospital_id?: number | null;
   start_time: string;
   end_time: string;
   is_booked?: boolean;

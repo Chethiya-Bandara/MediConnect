@@ -14,6 +14,7 @@ export interface HospitalAvailabilitySlot {
   startTime: string | null;
   endTime: string | null;
   createdAt: string | null;
+  isBooked: boolean;
 }
 
 export interface HospitalOverviewStats {
@@ -29,6 +30,12 @@ export interface CreateAvailabilityPayload {
   startTime: string;
   endTime: string;
   slotDurationMinutes: number;
+}
+
+export interface UpdateAvailabilityPayload {
+  slotId: string;
+  startTime: string;
+  endTime: string;
 }
 
 export interface InviteDoctorPayload {

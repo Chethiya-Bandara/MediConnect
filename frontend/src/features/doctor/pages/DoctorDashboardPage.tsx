@@ -5,6 +5,7 @@ import {
   Bell,
   Building2,
   CalendarDays,
+  CheckCircle2,
   ChevronRight,
   ClipboardPlus,
   FileArchive,
@@ -48,6 +49,7 @@ import {
   revokeDoctorAffiliation,
   searchDoctorMedicines,
   submitDoctorEncounter,
+  updateDoctorAvailability,
   updateDoctorProfile,
 } from "../api/doctorApi";
 import type {
@@ -135,6 +137,10 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
+function todayInputDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function formatStatusLabel(value: string | null | undefined) {
   return (value || "unknown")
     .replaceAll("_", " ")
@@ -157,6 +163,21 @@ function formatTimeWindow(start: string | null | undefined, end: string | null |
     hour: "numeric",
     minute: "2-digit",
   })}`;
+}
+
+function formatSlotInputTime(value: string | null | undefined) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleTimeString("en-LK", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function buildSriLankaIso(slotDate: string, slotTime: string) {
+  return `${slotDate}T${slotTime}:00+05:30`;
 }
 
 function affiliationTone(status: string) {
@@ -243,13 +264,20 @@ export function DoctorDashboardPage() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingAvailability, setSavingAvailability] = useState(false);
   const [deletingAvailabilityId, setDeletingAvailabilityId] = useState<number | null>(null);
+  const [reschedulingAvailabilityId, setReschedulingAvailabilityId] = useState<number | null>(null);
+  const [editingAvailabilityId, setEditingAvailabilityId] = useState<number | null>(null);
+  const [editingAvailabilityStart, setEditingAvailabilityStart] = useState("");
+  const [editingAvailabilityEnd, setEditingAvailabilityEnd] = useState("");
   const [requestingHospitalId, setRequestingHospitalId] = useState<number | null>(null);
   const [revokingAffiliationId, setRevokingAffiliationId] = useState<number | null>(null);
   const [profileName, setProfileName] = useState("");
   const [profileSpecialization, setProfileSpecialization] = useState("");
   const [profileSlmcNumber, setProfileSlmcNumber] = useState("");
-  const [availabilityStart, setAvailabilityStart] = useState("");
-  const [availabilityEnd, setAvailabilityEnd] = useState("");
+  const [availabilityDate, setAvailabilityDate] = useState(todayInputDate);
+  const [availabilityStart, setAvailabilityStart] = useState("09:00");
+  const [availabilityEnd, setAvailabilityEnd] = useState("12:00");
+  const [selectedAvailabilityHospitalId, setSelectedAvailabilityHospitalId] = useState<number | "">("");
+  const [activeAppointmentId, setActiveAppointmentId] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
@@ -288,6 +316,23 @@ export function DoctorDashboardPage() {
     [dashboard],
   );
 
+  const approvedHospitalOptions = useMemo(
+    () =>
+      affiliationHospitals.filter((hospital) => {
+        const normalized = (hospital.current_status ?? "").toLowerCase();
+        return normalized.includes("approved") || normalized.includes("active");
+      }),
+    [affiliationHospitals],
+  );
+
+  useEffect(() => {
+    if (selectedAvailabilityHospitalId || approvedHospitalOptions.length === 0) {
+      return;
+    }
+
+    setSelectedAvailabilityHospitalId(approvedHospitalOptions[0].id);
+  }, [approvedHospitalOptions, selectedAvailabilityHospitalId]);
+
   const showToast = (
     message: string,
     tone: "success" | "error" | "info" = "success",
@@ -296,13 +341,13 @@ export function DoctorDashboardPage() {
     window.setTimeout(() => setToast(null), 3200);
   };
 
-  const loadDashboard = async () => {
+  const loadDashboard = async (nextActiveAppointmentId = activeAppointmentId) => {
     setLoading(true);
     setError(null);
     try {
       const [payload, slots, hospitals] = await Promise.all([
-        getDoctorDashboard(),
-        getDoctorAvailability(),
+        getDoctorDashboard(nextActiveAppointmentId),
+        getDoctorAvailability(availabilityDate, selectedAvailabilityHospitalId),
         getDoctorAffiliationHospitals(),
       ]);
       setDashboard(payload);
@@ -336,20 +381,30 @@ export function DoctorDashboardPage() {
   }, []);
 
   useEffect(() => {
-    const storageKey = `doctor-chat-history-${dashboard?.user.id ?? "guest"}`;
-    const stored = localStorage.getItem(storageKey);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as ChatMessage[];
-        if (parsed.length > 0) {
-          setChatMessages(parsed);
-          return;
-        }
-      } catch {
-        localStorage.removeItem(storageKey);
-      }
+    if (loading) {
+      return;
     }
 
+    let ignore = false;
+    getDoctorAvailability(availabilityDate, selectedAvailabilityHospitalId)
+      .then((slots) => {
+        if (!ignore) {
+          setAvailabilitySlots(slots);
+          setAvailabilityError(null);
+        }
+      })
+      .catch((err) => {
+        if (!ignore) {
+          setAvailabilityError(err instanceof Error ? err.message : "Availability slots could not be loaded");
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [availabilityDate, loading, selectedAvailabilityHospitalId]);
+
+  useEffect(() => {
     setChatMessages([
       makeChat(
         "assistant",
@@ -357,14 +412,6 @@ export function DoctorDashboardPage() {
       ),
     ]);
   }, [dashboard?.user.id, activePatient, dashboard?.schedule.length]);
-
-  useEffect(() => {
-    if (!dashboard?.user.id || chatMessages.length === 0) return;
-    localStorage.setItem(
-      `doctor-chat-history-${dashboard.user.id}`,
-      JSON.stringify(chatMessages),
-    );
-  }, [chatMessages, dashboard?.user.id]);
 
   useEffect(() => {
     if (!chatOpen) {
@@ -477,6 +524,16 @@ export function DoctorDashboardPage() {
     setSelectedMedicineSuggestion(null);
   };
 
+  const openAppointmentEncounter = async (appointmentId: number) => {
+    setActiveAppointmentId(appointmentId);
+    setDiagnosisInput("");
+    setClinicalNotes("");
+    setPrescriptionDraft([]);
+    setEditingDraftId(null);
+    await loadDashboard(appointmentId);
+    setPage("encounter");
+  };
+
   const submitEncounter = async () => {
     if (!activePatient) {
       showToast("No active patient is selected yet.", "error");
@@ -513,7 +570,9 @@ export function DoctorDashboardPage() {
       setMedicineSuggestions([]);
       setSelectedMedicineSuggestion(null);
       showToast("Encounter and prescription saved.");
-      await loadDashboard();
+      setActiveAppointmentId(null);
+      setPage("appointments");
+      await loadDashboard(null);
     } catch (err) {
       showToast(
         err instanceof Error ? err.message : "Encounter could not be saved",
@@ -545,33 +604,36 @@ export function DoctorDashboardPage() {
   };
 
   const saveAvailability = async () => {
-    if (approvedAffiliations.length === 0) {
+    if (approvedHospitalOptions.length === 0) {
       showToast("Get one hospital approval before publishing live slots.", "error");
       return;
     }
 
-    const start = new Date(availabilityStart);
-    const end = new Date(availabilityEnd);
-
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-      showToast("Select both start and end time for the availability slot.", "error");
+    if (!availabilityDate || !availabilityStart || !availabilityEnd) {
+      showToast("Select a date plus start and end time.", "error");
       return;
     }
 
-    if (end <= start) {
+    if (availabilityEnd <= availabilityStart) {
       showToast("Availability end time must be later than the start time.", "error");
+      return;
+    }
+
+    if (!selectedAvailabilityHospitalId) {
+      showToast("Select the hospital this availability belongs to.", "error");
       return;
     }
 
     setSavingAvailability(true);
     try {
-      await createDoctorAvailability({
-        start_time: start.toISOString(),
-        end_time: end.toISOString(),
+      const response = await createDoctorAvailability({
+        hospital_id: selectedAvailabilityHospitalId,
+        slot_date: availabilityDate,
+        start_time: availabilityStart,
+        end_time: availabilityEnd,
+        slot_duration_minutes: 15,
       });
-      setAvailabilityStart("");
-      setAvailabilityEnd("");
-      showToast("Availability slot saved.");
+      showToast(`Created ${response.created_count ?? response.slots?.length ?? 1} slot(s).`);
       await loadDashboard();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Availability slot could not be saved";
@@ -579,6 +641,48 @@ export function DoctorDashboardPage() {
       showToast(message, "error");
     } finally {
       setSavingAvailability(false);
+    }
+  };
+
+  const startReschedulingAvailability = (slot: DoctorAvailabilitySlot) => {
+    setEditingAvailabilityId(slot.id);
+    setEditingAvailabilityStart(formatSlotInputTime(slot.start_time));
+    setEditingAvailabilityEnd(formatSlotInputTime(slot.end_time));
+  };
+
+  const cancelReschedulingAvailability = () => {
+    setEditingAvailabilityId(null);
+    setEditingAvailabilityStart("");
+    setEditingAvailabilityEnd("");
+  };
+
+  const saveRescheduledAvailability = async (slotId: number) => {
+    if (!availabilityDate || !editingAvailabilityStart || !editingAvailabilityEnd) {
+      showToast("Pick both start and end time before rescheduling.", "error");
+      return;
+    }
+
+    if (editingAvailabilityEnd <= editingAvailabilityStart) {
+      showToast("New end time must be later than start time.", "error");
+      return;
+    }
+
+    setReschedulingAvailabilityId(slotId);
+    try {
+      await updateDoctorAvailability(slotId, {
+        start_time: buildSriLankaIso(availabilityDate, editingAvailabilityStart),
+        end_time: buildSriLankaIso(availabilityDate, editingAvailabilityEnd),
+      });
+      showToast("Availability slot rescheduled.");
+      cancelReschedulingAvailability();
+      const slots = await getDoctorAvailability(availabilityDate, selectedAvailabilityHospitalId);
+      setAvailabilitySlots(slots);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Availability slot could not be rescheduled";
+      setAvailabilityError(message);
+      showToast(message, "error");
+    } finally {
+      setReschedulingAvailabilityId(null);
     }
   };
 
@@ -802,7 +906,7 @@ export function DoctorDashboardPage() {
                 <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><UserRound className="mb-4 text-blue-500" size={28} /><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Patients Seen Today</p><p className="text-3xl font-black dark:text-white">{dashboard?.stats.patients_seen_today ?? 0}</p></div>
                 <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><AlertTriangle className="mb-4 text-orange-500" size={28} /><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Pending Reports</p><p className="text-3xl font-black dark:text-white">{dashboard?.stats.pending_reports ?? 0}</p></div>
                 <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><FileArchive className="mb-4 text-green-500" size={28} /><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Recorded Encounters</p><p className="text-3xl font-black dark:text-white">{dashboard?.stats.recorded_encounters ?? 0}</p></div>
-                <div className="relative overflow-hidden rounded-3xl bg-primary p-6 text-white shadow-xl"><ClipboardPlus className="mb-4" size={28} /><p className="text-[10px] font-bold uppercase tracking-widest text-blue-200">Current Patient</p><p className="text-xl font-bold">{activePatient?.patient.name ?? "No active session"}</p><button type="button" onClick={() => setPage("encounter")} className="mt-2 text-xs font-bold underline">Open Encounter →</button></div>
+                <div className="relative overflow-hidden rounded-3xl bg-primary p-6 text-white shadow-xl"><ClipboardPlus className="mb-4" size={28} /><p className="text-[10px] font-bold uppercase tracking-widest text-blue-200">Current Patient</p><p className="text-xl font-bold">{activePatient?.patient.name ?? "No active session"}</p><button type="button" onClick={() => setPage(activePatient ? "encounter" : "appointments")} className="mt-2 text-xs font-bold underline">{activePatient ? "Open Encounter" : "Pick From Schedule"} →</button></div>
               </div>
               <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div className="mb-6 flex items-center justify-between"><h3 className="text-lg font-bold dark:text-white">Upcoming In Queue</h3><button type="button" onClick={() => setPage("appointments")} className="text-sm font-bold text-primary dark:text-blue-400">View Full Schedule</button></div>
@@ -827,20 +931,6 @@ export function DoctorDashboardPage() {
           {page === "encounter" ? (
             <section className="grid grid-cols-12 gap-8 animate-fadeIn">
               <div className="col-span-12 space-y-8 lg:col-span-8">
-                <div className="flex items-start gap-4 rounded-2xl border border-amber-200/50 bg-[#ffdcc7] p-5 text-amber-900 shadow-sm dark:border-amber-700/30 dark:bg-amber-900/30 dark:text-amber-100">
-                  <div className="rounded-xl bg-white/50 p-2 dark:bg-amber-800/50"><Sparkles size={18} /></div>
-                  <div className="flex-1">
-                    <h4 className="font-headline text-xs font-bold uppercase tracking-widest">Clinical Guard</h4>
-                    <p className="mt-1 text-sm leading-relaxed">
-                      {activePatient
-                        ? activePatient.latest_record?.notes
-                          ? "Latest patient record is loaded below. Double-check consent and update the encounter instead of winging it."
-                          : "There is an active patient, but no previous encounter note has been saved yet. Your next submission will create the first encounter record."
-                        : "No active patient is loaded. Get affiliations and bookings first."}
-                    </p>
-                  </div>
-                </div>
-
                 <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-primary dark:text-blue-400"><ClipboardPlus size={18} />Encounter Details</h3>
                   {activePatient ? (
@@ -1080,28 +1170,42 @@ export function DoctorDashboardPage() {
                 <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                   <div>
                     <h3 className="text-lg font-bold text-primary dark:text-blue-400">Availability Management</h3>
-                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Create and remove your own bookable slots using the current backend support.</p>
-                  </div>
-                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-300">
-                    {approvedAffiliations.length
-                      ? `Active hospital access: ${approvedAffiliations.map((item) => item.organisation.name).join(", ")}`
-                      : "Join an approved hospital before publishing live slots."}
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Pick a hospital, choose the clinic date, then publish a time period.</p>
                   </div>
                 </div>
-                {approvedAffiliations.length === 0 ? (
+                {approvedHospitalOptions.length === 0 ? (
                   <AlertBanner tone="info" message="No approved hospital access yet. Open the Hospital Access tab and send a join request before you publish availability." />
                 ) : null}
-                <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
+                <div className="grid gap-4 md:grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_auto]">
                   <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Start Time</label>
-                    <input type="datetime-local" value={availabilityStart} onChange={(event) => setAvailabilityStart(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Hospital</label>
+                    <select
+                      value={selectedAvailabilityHospitalId}
+                      onChange={(event) => setSelectedAvailabilityHospitalId(event.target.value ? Number(event.target.value) : "")}
+                      className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="">Select hospital</option>
+                      {approvedHospitalOptions.map((hospital) => (
+                        <option key={hospital.id} value={hospital.id}>
+                          {hospital.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">End Time</label>
-                    <input type="datetime-local" value={availabilityEnd} onChange={(event) => setAvailabilityEnd(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Date</label>
+                    <input type="date" value={availabilityDate} onChange={(event) => setAvailabilityDate(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
                   </div>
-                  <button type="button" onClick={() => void saveAvailability()} disabled={savingAvailability || approvedAffiliations.length === 0} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md disabled:opacity-60">
-                    {savingAvailability ? "Saving..." : "Add Slot"}
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Start</label>
+                    <input type="time" value={availabilityStart} onChange={(event) => setAvailabilityStart(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">End</label>
+                    <input type="time" value={availabilityEnd} onChange={(event) => setAvailabilityEnd(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                  </div>
+                  <button type="button" onClick={() => void saveAvailability()} disabled={savingAvailability || approvedHospitalOptions.length === 0} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md disabled:cursor-not-allowed disabled:opacity-60 md:self-end">
+                    {savingAvailability ? "Saving..." : "Create Slots"}
                   </button>
                 </div>
                 {availabilityError ? (
@@ -1110,22 +1214,60 @@ export function DoctorDashboardPage() {
                   </div>
                 ) : null}
                 <div className="mt-5 grid gap-3">
-                  {availabilitySlots.length ? availabilitySlots.map((slot) => (
-                    <div key={slot.id} className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="font-bold dark:text-slate-200">{formatDate(slot.start_time)}</p>
-                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{formatTimeWindow(slot.start_time, slot.end_time)}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-bold dark:text-slate-200">Published Slots For {formatDate(`${availabilityDate}T00:00:00`)}</h4>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                      {availabilitySlots.length} slot(s)
+                    </span>
+                  </div>
+                  {availabilitySlots.length ? availabilitySlots.map((slot) => {
+                    const isEditing = editingAvailabilityId === slot.id;
+                    const isBusy = deletingAvailabilityId === slot.id || reschedulingAvailabilityId === slot.id;
+
+                    return (
+                      <div key={slot.id} className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50 md:flex-row md:items-center md:justify-between">
+                        <div className="min-w-0">
+                          <p className="font-bold dark:text-slate-200">{formatDate(slot.start_time)}</p>
+                          {isEditing ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <input type="time" value={editingAvailabilityStart} onChange={(event) => setEditingAvailabilityStart(event.target.value)} className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white" />
+                              <input type="time" value={editingAvailabilityEnd} onChange={(event) => setEditingAvailabilityEnd(event.target.value)} className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white" />
+                            </div>
+                          ) : (
+                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{formatTimeWindow(slot.start_time, slot.end_time)}</p>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${slot.is_booked ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
+                            {slot.is_booked ? "Booked" : "Open"}
+                          </span>
+                          {isEditing ? (
+                            <>
+                              <button type="button" onClick={() => void saveRescheduledAvailability(slot.id)} disabled={isBusy} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                                <CheckCircle2 size={14} />
+                                {reschedulingAvailabilityId === slot.id ? "Saving..." : "Save"}
+                              </button>
+                              <button type="button" onClick={cancelReschedulingAvailability} disabled={isBusy} className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:text-slate-200">
+                                <X size={14} />
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => startReschedulingAvailability(slot)} disabled={Boolean(slot.is_booked) || isBusy} className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-blue-900/20 dark:text-blue-300">
+                                <PencilLine size={14} />
+                                Reschedule
+                              </button>
+                              <button type="button" onClick={() => void removeAvailability(slot.id)} disabled={Boolean(slot.is_booked) || isBusy} className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300">
+                                <Trash2 size={14} />
+                                {deletingAvailabilityId === slot.id ? "Removing..." : "Remove"}
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${slot.is_booked ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
-                          {slot.is_booked ? "Booked" : "Open"}
-                        </span>
-                        <button type="button" onClick={() => void removeAvailability(slot.id)} disabled={Boolean(slot.is_booked) || deletingAvailabilityId === slot.id} className="rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300">
-                          {deletingAvailabilityId === slot.id ? "Removing..." : "Remove"}
-                        </button>
-                      </div>
-                    </div>
-                  )) : (
+                    );
+                  }) : (
                     <EmptyState
                       title="No availability published yet"
                       description="Add a valid slot above to make your schedule bookable from the patient side."
@@ -1148,7 +1290,7 @@ export function DoctorDashboardPage() {
                             <p className="mt-1 text-xs text-slate-500">{item.organisation.name} • {item.patient.dhid ?? "DHID pending"}</p>
                             <p className="mt-1 text-xs font-medium text-blue-700 dark:text-blue-300">Consent: {formatStatusLabel(item.consent.status)}</p>
                           </div>
-                          <button type="button" onClick={() => { setPage("encounter"); setDiagnosisInput(""); setClinicalNotes(""); setPrescriptionDraft([]); }} className="rounded-lg bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white">
+                          <button type="button" onClick={() => void openAppointmentEncounter(item.id)} className="rounded-lg bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white">
                             {item.encounter ? "Review" : "Open"}
                           </button>
                         </div>

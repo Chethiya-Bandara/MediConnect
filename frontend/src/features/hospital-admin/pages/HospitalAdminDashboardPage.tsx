@@ -4,16 +4,18 @@ import {
   Building2,
   CalendarDays,
   CheckCircle2,
-  Clock3,
   Filter,
   LayoutDashboard,
   LogOut,
   Moon,
+  Pencil,
   RefreshCcw,
+  Save,
   Search,
   ShieldCheck,
   Stethoscope,
   Sun,
+  Trash2,
   Users,
   XCircle,
 } from "lucide-react";
@@ -59,6 +61,21 @@ function formatShortDate(value: string | null | undefined) {
     month: "short",
     day: "2-digit",
   });
+}
+
+function formatSlotTime(value: string | null | undefined) {
+  if (!value) return "--:--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("en-LK", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function buildSriLankaIso(slotDate: string, slotTime: string) {
+  return `${slotDate}T${slotTime}:00+05:30`;
 }
 
 function buildInitials(name: string | null | undefined) {
@@ -169,6 +186,9 @@ export function HospitalAdminDashboardPage() {
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("12:00");
   const [slotDurationMinutes, setSlotDurationMinutes] = useState(15);
+  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+  const [editingStartTime, setEditingStartTime] = useState("");
+  const [editingEndTime, setEditingEndTime] = useState("");
   const [auditSearch, setAuditSearch] = useState("");
   const [staffSearch, setStaffSearch] = useState("");
   const [staffFilter, setStaffFilter] = useState<StaffFilter>("all");
@@ -179,6 +199,17 @@ export function HospitalAdminDashboardPage() {
 
   const deferredAuditSearch = useDeferredValue(auditSearch.trim().toLowerCase());
   const deferredStaffSearch = useDeferredValue(staffSearch.trim().toLowerCase());
+
+  const schedulingDoctors = useMemo(() => {
+    const seenDoctorIds = new Set<string>();
+    return dashboard.activeStaff.filter((doctor) => {
+      if (!doctor.doctorId || seenDoctorIds.has(doctor.doctorId)) {
+        return false;
+      }
+      seenDoctorIds.add(doctor.doctorId);
+      return true;
+    });
+  }, [dashboard.activeStaff]);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("hospital-admin-theme");
@@ -194,10 +225,15 @@ export function HospitalAdminDashboardPage() {
   }, [theme]);
 
   useEffect(() => {
-    if (!selectedDoctorId && dashboard.activeStaff[0]?.doctorId) {
-      setSelectedDoctorId(dashboard.activeStaff[0].doctorId);
+    const firstDoctorId = schedulingDoctors[0]?.doctorId ?? "";
+    const selectedDoctorExists = schedulingDoctors.some(
+      (doctor) => doctor.doctorId === selectedDoctorId,
+    );
+
+    if (!selectedDoctorExists && selectedDoctorId !== firstDoctorId) {
+      setSelectedDoctorId(firstDoctorId);
     }
-  }, [dashboard.activeStaff, selectedDoctorId]);
+  }, [schedulingDoctors, selectedDoctorId]);
 
   useEffect(() => {
     if (!inviteHospitalId) {
@@ -212,6 +248,14 @@ export function HospitalAdminDashboardPage() {
       setSelectedAffiliationId(dashboard.pendingAffiliations[0].affiliationId);
     }
   }, [dashboard.pendingAffiliations, selectedAffiliationId]);
+
+  useEffect(() => {
+    if (!selectedDoctorId || !slotDate) {
+      return;
+    }
+
+    void dashboard.loadAvailability(selectedDoctorId, slotDate);
+  }, [selectedDoctorId, slotDate]);
 
   const generatedSlots = useMemo(
     () => buildGeneratedSlots(slotDate, startTime, endTime, slotDurationMinutes),
@@ -267,6 +311,11 @@ export function HospitalAdminDashboardPage() {
       return matchesStatus && matchesSearch;
     });
   }, [dashboard.activeStaff, deferredStaffSearch, staffFilter]);
+
+  const selectedDoctor = useMemo(
+    () => schedulingDoctors.find((doctor) => doctor.doctorId === selectedDoctorId) ?? null,
+    [schedulingDoctors, selectedDoctorId],
+  );
 
   const auditActionOptions = useMemo(
     () => Array.from(new Set(dashboard.auditLogs.map((row) => row.action ?? "UNKNOWN"))).sort(),
@@ -400,6 +449,45 @@ export function HospitalAdminDashboardPage() {
   const handleLoadAvailability = async (doctorId: string) => {
     dashboard.setAvailabilityDoctorIdInput(doctorId);
     await dashboard.loadAvailability(doctorId, slotDate);
+  };
+
+  const startEditingSlot = (slotId: string, start: string | null, end: string | null) => {
+    setEditingSlotId(slotId);
+    setEditingStartTime(formatSlotTime(start));
+    setEditingEndTime(formatSlotTime(end));
+  };
+
+  const cancelEditingSlot = () => {
+    setEditingSlotId(null);
+    setEditingStartTime("");
+    setEditingEndTime("");
+  };
+
+  const saveEditedSlot = async () => {
+    if (!editingSlotId || !selectedDoctorId || !slotDate) {
+      return;
+    }
+
+    const success = await dashboard.editAvailability(
+      {
+        slotId: editingSlotId,
+        startTime: buildSriLankaIso(slotDate, editingStartTime),
+        endTime: buildSriLankaIso(slotDate, editingEndTime),
+      },
+      selectedDoctorId,
+      slotDate,
+    );
+    if (success) {
+      cancelEditingSlot();
+    }
+  };
+
+  const deleteSlot = async (slotId: string) => {
+    if (!selectedDoctorId) {
+      return;
+    }
+
+    await dashboard.removeAvailability(slotId, selectedDoctorId, slotDate);
   };
 
   const exportAuditLogs = () => {
@@ -586,7 +674,7 @@ export function HospitalAdminDashboardPage() {
                       </button>
                     </div>
                     <div className="grid grid-cols-4 bg-slate-50/80 px-6 py-3 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
-                      <span>Practitioner</span>
+                      <span>Doctor</span>
                       <span>Specialization</span>
                       <span>Date Requested</span>
                       <span className="text-right">Actions</span>
@@ -795,7 +883,7 @@ export function HospitalAdminDashboardPage() {
                       <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
                           <tr>
-                            <th className="px-6 py-4">Practitioner</th>
+                            <th className="px-6 py-4">Doctor</th>
                             <th className="px-6 py-4">Specialty</th>
                             <th className="px-6 py-4">Status</th>
                             <th className="px-6 py-4">SLMC</th>
@@ -1047,13 +1135,21 @@ export function HospitalAdminDashboardPage() {
                 ) : null}
               </header>
 
-              <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <h3 className="mb-6 text-lg font-bold">1. Select Criteria</h3>
-                  <div className="space-y-5">
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_1fr]">
+                <aside className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-blue-500 dark:text-blue-300">
+                      Schedule Context
+                    </p>
+                    <h3 className="mt-2 text-lg font-extrabold">Doctor and day</h3>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Selecting a doctor or date now loads that day automatically.
+                    </p>
+                  </div>
+                  <div className="space-y-4">
                     <div>
                       <label className="mb-2 block text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                        Practitioner
+                        Doctor
                       </label>
                       <select
                         value={selectedDoctorId}
@@ -1061,7 +1157,7 @@ export function HospitalAdminDashboardPage() {
                         className="w-full rounded-xl border-0 bg-slate-100 p-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
                       >
                         <option value="">Select a doctor...</option>
-                        {dashboard.activeStaff.map((doctor) => (
+                        {schedulingDoctors.map((doctor) => (
                           <option key={doctor.affiliationId} value={doctor.doctorId}>
                             {(doctor.doctorName ?? `Doctor ${doctor.doctorId}`) +
                               (doctor.specialization ? ` (${doctor.specialization})` : "")}
@@ -1080,23 +1176,32 @@ export function HospitalAdminDashboardPage() {
                         className="w-full rounded-xl border-0 bg-slate-100 p-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
                       />
                     </div>
-                    <div>
-                      <label className="mb-2 block text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                        Hospital Scope
-                      </label>
-                      <div className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        {dashboard.hospital.name ?? "Hospital not linked"} • {dashboard.hospital.id ?? "No org id"}
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleLoadAvailability(selectedDoctorId)}
+                      disabled={dashboard.isLoadingAvailability || !selectedDoctorId}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    >
+                      <RefreshCcw size={15} />
+                      {dashboard.isLoadingAvailability ? "Loading Slots..." : "Refresh Day Slots"}
+                    </button>
                   </div>
-                </div>
+                  <div className="rounded-2xl bg-slate-100 p-4 text-sm dark:bg-slate-800">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                      Selected
+                    </p>
+                    <p className="mt-2 font-bold">
+                      {selectedDoctor?.doctorName ?? (selectedDoctorId ? `Doctor ${selectedDoctorId}` : "No doctor")}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {formatShortDate(slotDate)} • {dashboard.availabilitySlots.length} loaded slot(s)
+                    </p>
+                  </div>
+                </aside>
 
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-2">
-                  <div className="mb-6 flex items-center justify-between">
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="mb-6">
                     <h3 className="text-lg font-bold">2. Define Time Slots</h3>
-                    <span className="rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                      Active Doctor: {selectedDoctorId || "Not selected"}
-                    </span>
                   </div>
 
                   <div className="mb-8 flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50 md:flex-row md:items-end">
@@ -1135,14 +1240,6 @@ export function HospitalAdminDashboardPage() {
                         className="w-full rounded-lg border-0 bg-white p-2 text-sm dark:bg-slate-900 dark:text-white"
                       />
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void handleCreateAvailability()}
-                      disabled={dashboard.isSubmittingDoctorAction || Boolean(slotValidationMessage)}
-                      className="rounded-lg bg-slate-900 p-2.5 text-white hover:bg-slate-700 disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
-                    >
-                      <Clock3 size={16} />
-                    </button>
                   </div>
 
                   {slotValidationMessage ? (
@@ -1204,21 +1301,20 @@ export function HospitalAdminDashboardPage() {
 
                   <div className="border-t border-slate-200 pt-6 dark:border-slate-800">
                     <div className="flex flex-wrap items-center justify-between gap-4">
-                      <button
-                        type="button"
-                        onClick={() => void handleLoadAvailability(selectedDoctorId)}
-                        disabled={dashboard.isLoadingAvailability || !selectedDoctorId}
-                        className="rounded-xl bg-slate-100 px-5 py-3 text-sm font-bold text-slate-700 hover:bg-slate-200 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                      >
-                        {dashboard.isLoadingAvailability ? "Loading..." : "Load Current Availability"}
-                      </button>
+                      <div>
+                        <p className="text-sm font-bold">Ready to publish</p>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Existing slots are checked before new ones are inserted.
+                        </p>
+                      </div>
                       <button
                         type="button"
                         onClick={() => void handleCreateAvailability()}
                         disabled={dashboard.isSubmittingDoctorAction || Boolean(slotValidationMessage)}
-                        className="rounded-xl bg-blue-700 px-8 py-3 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60"
+                        className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-8 py-3 text-sm font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        Save Availability
+                        <Save size={16} />
+                        {dashboard.isSubmittingDoctorAction ? "Saving..." : "Save Availability"}
                       </button>
                     </div>
                   </div>
@@ -1229,24 +1325,118 @@ export function HospitalAdminDashboardPage() {
                     </div>
                   ) : null}
 
-                  {dashboard.availabilitySlots.length > 0 ? (
-                    <div className="mt-6 rounded-2xl bg-slate-50 p-4 dark:bg-slate-800">
-                      <h4 className="mb-3 text-sm font-bold">Loaded Availability</h4>
-                      <div className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
-                        {dashboard.availabilitySlots.map((slot) => (
-                          <div
-                            key={slot.id}
-                            className="flex items-center justify-between rounded-lg bg-white px-4 py-3 dark:bg-slate-900"
-                          >
-                            <span>{slot.dayOfWeek || "Unknown day"}</span>
-                            <span>
-                              {formatDisplayDate(slot.startTime)} - {formatDisplayDate(slot.endTime)}
-                            </span>
-                          </div>
-                        ))}
+                  <div className="mt-6 rounded-2xl bg-slate-50 p-4 dark:bg-slate-800">
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-bold">Existing Slots For {formatShortDate(slotDate)}</h4>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Edit or delete open slots. Booked slots stay locked.
+                        </p>
                       </div>
+                      <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        {dashboard.availabilitySlots.length} loaded
+                      </span>
                     </div>
-                  ) : null}
+                    <div className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+                      {dashboard.availabilitySlots.length > 0 ? (
+                        dashboard.availabilitySlots.map((slot) => {
+                          const isEditing = editingSlotId === slot.id;
+
+                          return (
+                            <div
+                              key={slot.id}
+                              className="flex flex-col gap-3 rounded-xl bg-white px-4 py-3 dark:bg-slate-900 md:flex-row md:items-center md:justify-between"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-bold text-slate-900 dark:text-slate-100">
+                                    {slot.dayOfWeek || "Selected day"}
+                                  </span>
+                                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${
+                                    slot.isBooked
+                                      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                                      : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                                  }`}>
+                                    {slot.isBooked ? "Booked" : "Open"}
+                                  </span>
+                                </div>
+                                {isEditing ? (
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <input
+                                      type="time"
+                                      value={editingStartTime}
+                                      onChange={(event) => setEditingStartTime(event.target.value)}
+                                      className="rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800 dark:text-white"
+                                    />
+                                    <input
+                                      type="time"
+                                      value={editingEndTime}
+                                      onChange={(event) => setEditingEndTime(event.target.value)}
+                                      className="rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800 dark:text-white"
+                                    />
+                                  </div>
+                                ) : (
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    {formatDisplayDate(slot.startTime)} - {formatDisplayDate(slot.endTime)}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {isEditing ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => void saveEditedSlot()}
+                                      disabled={dashboard.isSubmittingDoctorAction}
+                                      className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-60"
+                                    >
+                                      <CheckCircle2 size={14} />
+                                      Save
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={cancelEditingSlot}
+                                      className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                    >
+                                      <XCircle size={14} />
+                                      Cancel
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => startEditingSlot(slot.id, slot.startTime, slot.endTime)}
+                                      disabled={slot.isBooked}
+                                      className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800 dark:text-slate-200"
+                                    >
+                                      <Pencil size={14} />
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void deleteSlot(slot.id)}
+                                      disabled={slot.isBooked || dashboard.isSubmittingDoctorAction}
+                                      className="inline-flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300"
+                                    >
+                                      <Trash2 size={14} />
+                                      Delete
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+                          {dashboard.isLoadingAvailability
+                            ? "Loading availability for this day..."
+                            : "No slots exist for this doctor on the selected date yet."}
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
                   {dashboard.error ? (
                     <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">

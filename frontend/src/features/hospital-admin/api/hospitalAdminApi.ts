@@ -10,11 +10,13 @@ import type {
   InviteDoctorPayload,
   PendingAffiliationItem,
   PendingInvitationItem,
+  UpdateAvailabilityPayload,
 } from "../types";
 
 interface RawAvailabilitySlot {
   id?: string | number | null;
   doctor_id?: string | number | null;
+  hospital_id?: string | number | null;
   start_time?: string | null;
   end_time?: string | null;
   created_at?: string | null;
@@ -90,13 +92,14 @@ function normalizeAvailabilitySlot(raw: RawAvailabilitySlot): HospitalAvailabili
   return {
     id: asString(raw.id) ?? `slot-${Math.random().toString(36).slice(2, 8)}`,
     doctorId: asString(raw.doctor_id),
-    hospitalId: null,
+    hospitalId: asString(raw.hospital_id),
     dayOfWeek: raw.start_time
       ? new Date(raw.start_time).toLocaleDateString("en-LK", { weekday: "long" })
       : null,
     startTime: raw.start_time ?? null,
     endTime: raw.end_time ?? null,
     createdAt: raw.created_at ?? null,
+    isBooked: Boolean(raw.is_booked),
   };
 }
 
@@ -200,16 +203,17 @@ export async function getHospitalAdminDashboard() {
 }
 
 export async function getDoctorAvailability(doctorId: string, slotDate?: string) {
-  const response = await apiRequest<RawAvailabilitySlot[]>(
+  const response = await apiRequest<RawAvailabilitySlot[] | { slots?: RawAvailabilitySlot[] }>(
     `${endpoints.hospitalAdmin.availabilityBase}/${encodeURIComponent(doctorId)}${
       slotDate ? `?slot_date=${encodeURIComponent(slotDate)}` : ""
     }`,
   );
-  return response.map((item) => normalizeAvailabilitySlot(item));
+  const items = Array.isArray(response) ? response : response.slots;
+  return (items ?? []).map((item) => normalizeAvailabilitySlot(item));
 }
 
 export async function createAvailabilitySlot(payload: CreateAvailabilityPayload) {
-  return apiRequest<{ message?: string; created_count?: number }>(
+  return apiRequest<{ message?: string; created_count?: number; slots?: RawAvailabilitySlot[] }>(
     endpoints.hospitalAdmin.availabilityBase,
     {
       method: "POST",
@@ -220,6 +224,28 @@ export async function createAvailabilitySlot(payload: CreateAvailabilityPayload)
         end_time: payload.endTime,
         slot_duration_minutes: payload.slotDurationMinutes,
       }),
+    },
+  );
+}
+
+export function updateAvailabilitySlot(payload: UpdateAvailabilityPayload) {
+  return apiRequest<{ success: boolean; slot: RawAvailabilitySlot | null }>(
+    `${endpoints.hospitalAdmin.availabilityBase}/${encodeURIComponent(payload.slotId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        start_time: payload.startTime,
+        end_time: payload.endTime,
+      }),
+    },
+  );
+}
+
+export function deleteAvailabilitySlot(slotId: string) {
+  return apiRequest<{ success: boolean }>(
+    `${endpoints.hospitalAdmin.availabilityBase}/${encodeURIComponent(slotId)}`,
+    {
+      method: "DELETE",
     },
   );
 }

@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 import uuid
 
@@ -15,6 +15,8 @@ from app.middleware.ai_disclaimer import build_safe_response
 from app.utils.gemini_client import call_gemini_assistant
 
 router = APIRouter(prefix="/doctor/dashboard", tags=["doctor-dashboard"])
+
+SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -88,13 +90,27 @@ class AssistantHistoryMessage(BaseModel):
         return cleaned
 
 class AvailabilitySlotCreateRequest(BaseModel):
-    start_time: str
-    end_time: str
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    slot_date: Optional[str] = None
+    hospital_id: Optional[int] = None
+    slot_duration_minutes: int = Field(default=15, ge=5, le=240)
 
     @model_validator(mode="after")
     def validate_times(self):
-        start = _parse_iso_datetime(self.start_time)
-        end = _parse_iso_datetime(self.end_time)
+        if self.slot_date:
+            if not self.start_time or not self.end_time:
+                raise ValueError("Start and end time are required")
+            try:
+                start = _parse_local_slot_datetime(self.slot_date, self.start_time)
+                end = _parse_local_slot_datetime(self.slot_date, self.end_time)
+            except ValueError as exc:
+                raise ValueError("Invalid date or time format") from exc
+        else:
+            if not self.start_time or not self.end_time:
+                raise ValueError("Start and end time are required")
+            start = _parse_iso_datetime(self.start_time)
+            end = _parse_iso_datetime(self.end_time)
 
         if not start or not end:
             raise ValueError("Invalid datetime format")
@@ -103,6 +119,19 @@ class AvailabilitySlotCreateRequest(BaseModel):
             raise ValueError("End time must be after start time")
 
         return self
+
+
+class AvailabilitySlotUpdateRequest(BaseModel):
+    start_time: str
+    end_time: str
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def validate_text(cls, value: str):
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field cannot be empty")
+        return cleaned
 
 
 class AssistantRequest(BaseModel):
@@ -210,10 +239,39 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None or parsed.utcoffset() is None:
-            parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            parsed = parsed.replace(tzinfo=SRI_LANKA_TZ)
         return parsed
     except ValueError:
         return None
+
+
+def _parse_local_slot_datetime(slot_date: str, slot_time: str) -> datetime:
+    parsed = datetime.fromisoformat(f"{slot_date}T{slot_time}:00")
+    return parsed.replace(tzinfo=SRI_LANKA_TZ)
+
+
+def _local_date(value: Optional[str]) -> Optional[str]:
+    parsed = _parse_iso_datetime(value)
+    if not parsed:
+        return None
+    return parsed.astimezone(SRI_LANKA_TZ).date().isoformat()
+
+
+def _is_missing_column_error(exc: Exception, column_name: str) -> bool:
+    return column_name in str(exc).lower() and "column" in str(exc).lower()
+
+
+def _insert_availability_rows(rows: list[dict]):
+    try:
+        return (
+            supabase_admin.table("availability_slots")
+            .insert(rows)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        raise
 
 
 def _search_medicines(query: str, limit: int = 8) -> list[dict]:
@@ -696,7 +754,7 @@ def _build_active_patient_bundle(active_schedule_item, doctor_id: int):
     }
 
 
-def _build_dashboard_payload(context):
+def _build_dashboard_payload(context, active_appointment_id: Optional[int] = None):
     doctor = context["doctor"]
     user = context["user"]
     doctor_id = doctor["id"]
@@ -754,7 +812,12 @@ def _build_dashboard_payload(context):
         )
         for row in appointments
     ]
-    active_schedule_item = _select_active_schedule_item(schedule_items)
+    active_schedule_item = None
+    if active_appointment_id is not None:
+        active_schedule_item = next(
+            (item for item in schedule_items if item.get("id") == active_appointment_id),
+            None,
+        )
     active_patient = _build_active_patient_bundle(active_schedule_item, doctor_id)
 
     completed_today_patient_ids = set()
@@ -919,9 +982,12 @@ def _doctor_assistant_fallback(message: str, snapshot: dict) -> str:
 
 
 @router.get("")
-def get_doctor_dashboard(authorization: Optional[str] = Header(None)):
+def get_doctor_dashboard(
+    authorization: Optional[str] = Header(None),
+    active_appointment_id: Optional[int] = Query(default=None),
+):
     context = _require_doctor_context(authorization)
-    return _build_dashboard_payload(context)
+    return _build_dashboard_payload(context, active_appointment_id)
 
 
 @router.patch("/profile")
@@ -1122,8 +1188,8 @@ def doctor_assistant_respond(
     context = _require_doctor_context(authorization)
     snapshot = _build_dashboard_payload(context)
 
-    if payload.patient_id and snapshot.get("active_patient"):
-        active_patient = snapshot["active_patient"].get("patient", {})
+    if payload.patient_id:
+        active_patient = (snapshot.get("active_patient") or {}).get("patient", {})
         if active_patient.get("id") != payload.patient_id:
             schedule = snapshot.get("schedule", [])
             matching = next(
@@ -1164,22 +1230,48 @@ def create_availability_slot(
     context = _require_doctor_context(authorization)
     doctor_id = context["doctor"]["id"]
 
-    if not _approved_doctor_affiliations(doctor_id):
+    approved_affiliations = _approved_doctor_affiliations(doctor_id)
+    if not approved_affiliations:
         raise HTTPException(
             status_code=400,
             detail="Join an approved hospital before publishing availability slots",
         )
 
-    start = payload.start_time
-    end = payload.end_time
+    selected_affiliation = None
+    if payload.hospital_id is not None:
+        selected_affiliation = next(
+            (
+                row for row in approved_affiliations
+                if int(row.get("hospital_id") or 0) == payload.hospital_id
+            ),
+            None,
+        )
+        if not selected_affiliation:
+            raise HTTPException(status_code=403, detail="Doctor is not approved for the selected hospital")
+    elif len(approved_affiliations) == 1:
+        selected_affiliation = approved_affiliations[0]
+
+    if payload.slot_date:
+        start_dt = _parse_local_slot_datetime(payload.slot_date, payload.start_time or "")
+        end_dt = _parse_local_slot_datetime(payload.slot_date, payload.end_time or "")
+        duration = timedelta(minutes=payload.slot_duration_minutes)
+    else:
+        start_dt = _parse_iso_datetime(payload.start_time)
+        end_dt = _parse_iso_datetime(payload.end_time)
+        duration = end_dt - start_dt if start_dt and end_dt else timedelta(minutes=0)
+
+    if not start_dt or not end_dt:
+        raise HTTPException(status_code=400, detail="Invalid slot date or time")
+    if end_dt <= start_dt:
+        raise HTTPException(status_code=400, detail="End time must be after start time")
 
     # Prevent overlapping slots
     existing = (
         supabase_admin.table("availability_slots")
         .select("*")
         .eq("doctor_id", doctor_id)
-        .lt("start_time", end)
-        .gt("end_time", start)
+        .lt("start_time", end_dt.isoformat())
+        .gt("end_time", start_dt.isoformat())
         .execute()
         .data
         or []
@@ -1188,38 +1280,151 @@ def create_availability_slot(
     if existing:
         raise HTTPException(status_code=400, detail="Slot overlaps with existing availability")
 
-    slot = (
-        supabase_admin.table("availability_slots")
-        .insert({
+    selected_hospital_id = selected_affiliation.get("hospital_id") if selected_affiliation else payload.hospital_id
+
+    rows = []
+    cursor = start_dt
+    while cursor + duration <= end_dt:
+        row = {
             "doctor_id": doctor_id,
-            "start_time": start,
-            "end_time": end,
-        })
-        .execute()
-        .data
-    )
+            "hospital_id": selected_hospital_id,
+            "start_time": cursor.isoformat(),
+            "end_time": (cursor + duration).isoformat(),
+        }
+        rows.append(row)
+        cursor += duration
+
+        if not payload.slot_date:
+            break
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No slots could be generated for the selected window")
+
+    slots = _insert_availability_rows(rows)
 
     return {
         "success": True,
-        "slot": slot[0] if slot else None
+        "created_count": len(slots),
+        "slot": slots[0] if slots else None,
+        "slots": slots,
     }
 
 @router.get("/availability")
-def get_availability(authorization: Optional[str] = Header(None)):
+def get_availability(
+    authorization: Optional[str] = Header(None),
+    slot_date: Optional[str] = Query(default=None),
+    hospital_id: Optional[int] = Query(default=None),
+):
     context = _require_doctor_context(authorization)
     doctor_id = context["doctor"]["id"]
 
-    slots = (
+    query = (
         supabase_admin.table("availability_slots")
         .select("*")
         .eq("doctor_id", doctor_id)
-        .order("start_time")
+    )
+
+    if hospital_id is not None:
+        selected_affiliation = next(
+            (
+                row for row in _approved_doctor_affiliations(doctor_id)
+                if int(row.get("hospital_id") or 0) == hospital_id
+            ),
+            None,
+        )
+        if not selected_affiliation:
+            raise HTTPException(status_code=403, detail="Doctor is not approved for the selected hospital")
+
+        query = query.eq("hospital_id", hospital_id)
+
+    try:
+        slots = query.order("start_time").execute().data or []
+    except Exception as exc:
+        if hospital_id is not None and _is_missing_column_error(exc, "hospital_id"):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "availability_slots.hospital_id is missing in Supabase. "
+                    "Add that column before hospital-specific filtering can work."
+                ),
+            ) from exc
+        raise
+
+    if slot_date:
+        slots = [row for row in slots if _local_date(row.get("start_time")) == slot_date]
+
+    return {"slots": slots}
+
+@router.patch("/availability/{slot_id}")
+def update_slot(
+    slot_id: int,
+    payload: AvailabilitySlotUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    context = _require_doctor_context(authorization)
+    doctor_id = context["doctor"]["id"]
+
+    current_rows = (
+        supabase_admin.table("availability_slots")
+        .select("*")
+        .eq("id", slot_id)
+        .eq("doctor_id", doctor_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not current_rows:
+        raise HTTPException(status_code=404, detail="Slot not found")
+
+    current = current_rows[0]
+    if current.get("is_booked"):
+        raise HTTPException(status_code=400, detail="Cannot reschedule a booked slot")
+
+    hospital_id = current.get("hospital_id")
+    if hospital_id:
+        selected_affiliation = next(
+            (
+                row
+                for row in _approved_doctor_affiliations(doctor_id)
+                if int(row.get("hospital_id") or 0) == int(hospital_id)
+            ),
+            None,
+        )
+        if not selected_affiliation:
+            raise HTTPException(status_code=403, detail="Doctor is not approved for this slot hospital")
+
+    start_dt = _parse_iso_datetime(payload.start_time)
+    end_dt = _parse_iso_datetime(payload.end_time)
+    if not start_dt or not end_dt:
+        raise HTTPException(status_code=400, detail="Invalid slot date or time")
+    if end_dt <= start_dt:
+        raise HTTPException(status_code=400, detail="End time must be after start time")
+
+    overlaps = (
+        supabase_admin.table("availability_slots")
+        .select("*")
+        .eq("doctor_id", doctor_id)
+        .neq("id", slot_id)
+        .lt("start_time", end_dt.isoformat())
+        .gt("end_time", start_dt.isoformat())
+        .execute()
+        .data
+        or []
+    )
+    if overlaps:
+        raise HTTPException(status_code=409, detail="Updated slot overlaps existing availability")
+
+    updated = (
+        supabase_admin.table("availability_slots")
+        .update({"start_time": start_dt.isoformat(), "end_time": end_dt.isoformat()})
+        .eq("id", slot_id)
         .execute()
         .data
         or []
     )
 
-    return {"slots": slots}
+    return {"success": True, "slot": updated[0] if updated else None}
 
 @router.delete("/availability/{slot_id}")
 def delete_slot(slot_id: int, authorization: Optional[str] = Header(None)):

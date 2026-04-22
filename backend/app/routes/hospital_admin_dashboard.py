@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,14 +31,83 @@ class CreateAvailabilityRequest(BaseModel):
         return cleaned
 
 
+class UpdateAvailabilityRequest(BaseModel):
+    start_time: str
+    end_time: str
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def validate_text(cls, value: str):
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field cannot be empty")
+        return cleaned
+
+
+SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
 
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=SRI_LANKA_TZ)
+        return parsed
     except ValueError:
         return None
+
+
+def _parse_local_slot_datetime(slot_date: str, slot_time: str) -> datetime:
+    parsed = datetime.fromisoformat(f"{slot_date}T{slot_time}:00")
+    return parsed.replace(tzinfo=SRI_LANKA_TZ)
+
+
+def _local_date(value: Optional[str]) -> Optional[str]:
+    parsed = _parse_iso_datetime(value)
+    if not parsed:
+        return None
+    return parsed.astimezone(SRI_LANKA_TZ).date().isoformat()
+
+
+def _insert_availability_rows(rows: list[dict]):
+    return (
+        supabase_admin.table("availability_slots")
+        .insert(rows)
+        .execute()
+        .data
+        or []
+    )
+
+
+def _approved_hospital_affiliation(doctor_id: int | str, hospital_id: int | str) -> Optional[dict]:
+    rows = (
+        supabase_admin.table("doctor_affiliations")
+        .select("*")
+        .eq("doctor_id", doctor_id)
+        .eq("hospital_id", hospital_id)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    return next(
+        (
+            row
+            for row in rows
+            if (row.get("status") or "").lower() in {"approved", "active"}
+        ),
+        None,
+    )
+
+
+def _parse_doctor_id(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid doctor ID") from exc
 
 
 def _hospital_admin_context(current_user: dict = Depends(RoleChecker(["hospital_admin"]))):
@@ -241,11 +310,11 @@ def get_hospital_admin_dashboard(context=Depends(_hospital_admin_context)):
         .data
         or []
     )
-    today = datetime.now().astimezone().date()
+    today = datetime.now(SRI_LANKA_TZ).date()
     appointments_today = 0
     for row in all_appointments:
         start_time = _parse_iso_datetime(row.get("start_time"))
-        if start_time and start_time.astimezone().date() == today:
+        if start_time and start_time.astimezone(SRI_LANKA_TZ).date() == today:
             appointments_today += 1
 
     today_slots = []
@@ -254,13 +323,14 @@ def get_hospital_admin_dashboard(context=Depends(_hospital_admin_context)):
             supabase_admin.table("availability_slots")
             .select("*")
             .in_("doctor_id", list(active_doctor_ids))
+            .eq("hospital_id", hospital["id"])
             .execute()
             .data
             or []
         )
         for row in slot_rows:
             start_time = _parse_iso_datetime(row.get("start_time"))
-            if start_time and start_time.astimezone().date() == today:
+            if start_time and start_time.astimezone(SRI_LANKA_TZ).date() == today:
                 today_slots.append(row)
 
     total_slots_today = len(today_slots)
@@ -350,26 +420,18 @@ def revoke_affiliation(
 
 @router.get("/availability/{doctor_id}")
 def get_availability(
-    doctor_id: str,
+    doctor_id: int,
     slot_date: Optional[str] = Query(default=None),
     context=Depends(_hospital_admin_context),
 ):
-    doctor_rows = (
-        supabase_admin.table("doctor_affiliations")
-        .select("*")
-        .eq("doctor_id", doctor_id)
-        .eq("hospital_id", context["hospital"]["id"])
-        .execute()
-        .data
-        or []
-    )
-    if not doctor_rows:
+    if not _approved_hospital_affiliation(doctor_id, context["hospital"]["id"]):
         raise HTTPException(status_code=404, detail="Doctor is not linked to this hospital")
 
     slots = (
         supabase_admin.table("availability_slots")
         .select("*")
         .eq("doctor_id", doctor_id)
+        .eq("hospital_id", context["hospital"]["id"])
         .order("start_time")
         .execute()
         .data
@@ -379,11 +441,10 @@ def get_availability(
         slots = [
             row
             for row in slots
-            if (start := _parse_iso_datetime(row.get("start_time")))
-            and start.astimezone().date().isoformat() == slot_date
+            if _local_date(row.get("start_time")) == slot_date
         ]
 
-    return slots
+    return {"slots": slots}
 
 
 @router.post("/availability")
@@ -391,17 +452,8 @@ def create_availability(
     data: CreateAvailabilityRequest,
     context=Depends(_hospital_admin_context),
 ):
-    approved_link = (
-        supabase_admin.table("doctor_affiliations")
-        .select("*")
-        .eq("doctor_id", data.doctor_id)
-        .eq("hospital_id", context["hospital"]["id"])
-        .in_("status", ["approved", "active"])
-        .limit(1)
-        .execute()
-        .data
-        or []
-    )
+    doctor_id = _parse_doctor_id(data.doctor_id)
+    approved_link = _approved_hospital_affiliation(doctor_id, context["hospital"]["id"])
     if not approved_link:
         raise HTTPException(
             status_code=400,
@@ -409,8 +461,8 @@ def create_availability(
         )
 
     try:
-        start = datetime.fromisoformat(f"{data.slot_date}T{data.start_time}:00")
-        end = datetime.fromisoformat(f"{data.slot_date}T{data.end_time}:00")
+        start = _parse_local_slot_datetime(data.slot_date, data.start_time)
+        end = _parse_local_slot_datetime(data.slot_date, data.end_time)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid slot date or time") from exc
 
@@ -418,33 +470,131 @@ def create_availability(
         raise HTTPException(status_code=400, detail="End time must be after start time")
 
     duration = timedelta(minutes=data.slot_duration_minutes)
+    existing_slots = (
+        supabase_admin.table("availability_slots")
+        .select("*")
+        .eq("doctor_id", doctor_id)
+        .lt("start_time", end.isoformat())
+        .gt("end_time", start.isoformat())
+        .execute()
+        .data
+        or []
+    )
+    if existing_slots:
+        raise HTTPException(status_code=409, detail="Selected window overlaps existing availability")
+
     cursor = start
     rows = []
     while cursor + duration <= end:
-        rows.append(
-            {
-                "doctor_id": data.doctor_id,
-                "start_time": cursor.isoformat(),
-                "end_time": (cursor + duration).isoformat(),
-            }
-        )
+        row = {
+            "doctor_id": doctor_id,
+            "hospital_id": context["hospital"]["id"],
+            "start_time": cursor.isoformat(),
+            "end_time": (cursor + duration).isoformat(),
+        }
+        rows.append(row)
         cursor += duration
 
     if not rows:
         raise HTTPException(status_code=400, detail="No slots could be generated for the selected window")
 
-    created = (
-        supabase_admin.table("availability_slots")
-        .insert(rows)
-        .execute()
-        .data
-        or []
-    )
+    created = _insert_availability_rows(rows)
 
     return {
         "message": f"Created {len(created)} availability slot(s).",
         "created_count": len(created),
+        "slots": created,
     }
+
+
+@router.patch("/availability/{slot_id}")
+def update_availability(
+    slot_id: int,
+    data: UpdateAvailabilityRequest,
+    context=Depends(_hospital_admin_context),
+):
+    current_rows = (
+        supabase_admin.table("availability_slots")
+        .select("*")
+        .eq("id", slot_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not current_rows:
+        raise HTTPException(status_code=404, detail="Availability slot not found")
+
+    current = current_rows[0]
+    doctor_id = current.get("doctor_id")
+    if current.get("hospital_id") and str(current.get("hospital_id")) != str(context["hospital"]["id"]):
+        raise HTTPException(status_code=403, detail="Slot does not belong to this hospital")
+
+    if not _approved_hospital_affiliation(doctor_id, context["hospital"]["id"]):
+        raise HTTPException(status_code=403, detail="Slot does not belong to this hospital scope")
+    if current.get("is_booked"):
+        raise HTTPException(status_code=400, detail="Booked slots cannot be edited")
+
+    start = _parse_iso_datetime(data.start_time)
+    end = _parse_iso_datetime(data.end_time)
+    if not start or not end:
+        raise HTTPException(status_code=400, detail="Invalid slot date or time")
+    if end <= start:
+        raise HTTPException(status_code=400, detail="End time must be after start time")
+
+    overlaps = (
+        supabase_admin.table("availability_slots")
+        .select("*")
+        .eq("doctor_id", doctor_id)
+        .neq("id", slot_id)
+        .lt("start_time", end.isoformat())
+        .gt("end_time", start.isoformat())
+        .execute()
+        .data
+        or []
+    )
+    if overlaps:
+        raise HTTPException(status_code=409, detail="Updated slot overlaps existing availability")
+
+    updated = (
+        supabase_admin.table("availability_slots")
+        .update({"start_time": start.isoformat(), "end_time": end.isoformat()})
+        .eq("id", slot_id)
+        .execute()
+        .data
+        or []
+    )
+    return {"success": True, "slot": updated[0] if updated else None}
+
+
+@router.delete("/availability/{slot_id}")
+def delete_availability(
+    slot_id: int,
+    context=Depends(_hospital_admin_context),
+):
+    current_rows = (
+        supabase_admin.table("availability_slots")
+        .select("*")
+        .eq("id", slot_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not current_rows:
+        raise HTTPException(status_code=404, detail="Availability slot not found")
+
+    current = current_rows[0]
+    if current.get("hospital_id") and str(current.get("hospital_id")) != str(context["hospital"]["id"]):
+        raise HTTPException(status_code=403, detail="Slot does not belong to this hospital")
+
+    if not _approved_hospital_affiliation(current.get("doctor_id"), context["hospital"]["id"]):
+        raise HTTPException(status_code=403, detail="Slot does not belong to this hospital scope")
+    if current.get("is_booked"):
+        raise HTTPException(status_code=400, detail="Booked slots cannot be deleted")
+
+    supabase_admin.table("availability_slots").delete().eq("id", slot_id).execute()
+    return {"success": True}
 
 
 @router.post("/invite")

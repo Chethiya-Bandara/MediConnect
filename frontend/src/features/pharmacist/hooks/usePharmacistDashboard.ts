@@ -188,7 +188,7 @@ export function usePharmacistDashboard(
       const targetId =
         nextSelectedId && items.some((item) => item.id === nextSelectedId)
           ? nextSelectedId
-          : items[0]?.id ?? null;
+          : null;
 
       setSelectedPrescriptionId(targetId);
       return targetId;
@@ -483,7 +483,8 @@ export function usePharmacistDashboard(
       });
 
       setActionMessage(response.message ?? "Dispensing successful.");
-      const nextId = await loadPrescriptions(selectedPrescriptionId);
+      setSelectedPrescriptionId(null);
+      const nextId = await loadPrescriptions(null);
       await Promise.all([loadDetail(nextId), loadHistory()]);
       return true;
     } catch (dispenseError) {

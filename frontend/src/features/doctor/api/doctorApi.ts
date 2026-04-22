@@ -8,8 +8,11 @@ import type {
 import { apiRequest } from "../../../lib/api/client";
 import { endpoints } from "../../../lib/api/endpoints";
 
-export function getDoctorDashboard() {
-  return apiRequest<DoctorDashboardData>(endpoints.doctor.dashboard);
+export function getDoctorDashboard(activeAppointmentId?: number | null) {
+  const path = activeAppointmentId
+    ? `${endpoints.doctor.dashboard}?active_appointment_id=${encodeURIComponent(activeAppointmentId)}`
+    : endpoints.doctor.dashboard;
+  return apiRequest<DoctorDashboardData>(path);
 }
 
 export function updateDoctorProfile(payload: {
@@ -70,9 +73,19 @@ export async function searchDoctorMedicines(query: string) {
   return Array.isArray(response.items) ? response.items : [];
 }
 
-export async function getDoctorAvailability() {
+export async function getDoctorAvailability(slotDate?: string, hospitalId?: number | "") {
+  const search = new URLSearchParams();
+  if (slotDate) {
+    search.set("slot_date", slotDate);
+  }
+  if (hospitalId) {
+    search.set("hospital_id", String(hospitalId));
+  }
+  const path = search.toString()
+    ? `${endpoints.doctor.availability}?${search.toString()}`
+    : endpoints.doctor.availability;
   const response = await apiRequest<{ slots: DoctorAvailabilitySlot[] }>(
-    endpoints.doctor.availability,
+    path,
   );
   return Array.isArray(response.slots) ? response.slots : [];
 }
@@ -80,8 +93,16 @@ export async function getDoctorAvailability() {
 export function createDoctorAvailability(payload: {
   start_time: string;
   end_time: string;
+  slot_date?: string;
+  hospital_id?: number;
+  slot_duration_minutes?: number;
 }) {
-  return apiRequest<{ success: boolean; slot: DoctorAvailabilitySlot | null }>(
+  return apiRequest<{
+    success: boolean;
+    created_count?: number;
+    slot: DoctorAvailabilitySlot | null;
+    slots?: DoctorAvailabilitySlot[];
+  }>(
     endpoints.doctor.availability,
     {
       method: "POST",
@@ -95,6 +116,19 @@ export function deleteDoctorAvailability(slotId: number) {
     `${endpoints.doctor.availability}/${slotId}`,
     {
       method: "DELETE",
+    },
+  );
+}
+
+export function updateDoctorAvailability(
+  slotId: number,
+  payload: { start_time: string; end_time: string },
+) {
+  return apiRequest<{ success: boolean; slot: DoctorAvailabilitySlot | null }>(
+    `${endpoints.doctor.availability}/${slotId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     },
   );
 }

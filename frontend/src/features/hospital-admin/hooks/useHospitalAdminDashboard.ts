@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   createAvailabilitySlot,
+  deleteAvailabilitySlot,
   decideAffiliation,
   getDoctorAvailability,
   getHospitalAdminDashboard,
   inviteDoctor,
   revokeAffiliation,
+  updateAvailabilitySlot,
 } from "../api/hospitalAdminApi";
 import type {
   ActiveStaffMember,
@@ -18,6 +20,7 @@ import type {
   InviteDoctorPayload,
   PendingAffiliationItem,
   PendingInvitationItem,
+  UpdateAvailabilityPayload,
 } from "../types";
 
 function createEmptyStats(): HospitalDashboardStats {
@@ -170,6 +173,62 @@ export function useHospitalAdminDashboard() {
     }
   };
 
+  const editAvailability = async (
+    payload: UpdateAvailabilityPayload,
+    doctorId = activeDoctorId,
+    slotDate?: string,
+  ) => {
+    setIsSubmittingDoctorAction(true);
+    setDoctorsMessage(null);
+
+    try {
+      await updateAvailabilitySlot(payload);
+      setDoctorsMessage("Availability slot updated.");
+      if (doctorId) {
+        await loadAvailability(doctorId, slotDate);
+      }
+      await refreshDashboard();
+      return true;
+    } catch (availabilityError) {
+      setDoctorsMessage(
+        availabilityError instanceof Error
+          ? availabilityError.message
+          : "Availability update failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingDoctorAction(false);
+    }
+  };
+
+  const removeAvailability = async (
+    slotId: string,
+    doctorId = activeDoctorId,
+    slotDate?: string,
+  ) => {
+    setIsSubmittingDoctorAction(true);
+    setDoctorsMessage(null);
+
+    try {
+      await deleteAvailabilitySlot(slotId);
+      setDoctorsMessage("Availability slot deleted.");
+      if (doctorId) {
+        await loadAvailability(doctorId, slotDate);
+      }
+      await refreshDashboard();
+      return true;
+    } catch (availabilityError) {
+      setDoctorsMessage(
+        availabilityError instanceof Error
+          ? availabilityError.message
+          : "Availability delete failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingDoctorAction(false);
+    }
+  };
+
   const sendInvite = async (payload: InviteDoctorPayload) => {
     setIsSubmittingDoctorAction(true);
     setDoctorsMessage(null);
@@ -260,6 +319,8 @@ export function useHospitalAdminDashboard() {
     refreshDashboard,
     loadAvailability,
     addAvailability,
+    editAvailability,
+    removeAvailability,
     sendInvite,
     submitAffiliationDecision,
     submitAffiliationRevoke,

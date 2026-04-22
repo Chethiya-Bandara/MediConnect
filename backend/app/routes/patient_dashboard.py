@@ -403,6 +403,12 @@ def _resolve_slot_organisation_id(
     if organisation_id:
         return organisation_id
 
+    hospital_id = slot.get("hospital_id")
+    if hospital_id:
+        hospital = hospital_lookup.get(hospital_id)
+        if hospital:
+            return hospital.get("organisation_id")
+
     doctor_id = slot.get("doctor_id")
     if not doctor_id:
         return None
