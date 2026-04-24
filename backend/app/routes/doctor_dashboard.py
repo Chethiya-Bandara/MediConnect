@@ -1452,7 +1452,12 @@ def delete_slot(slot_id: int, authorization: Optional[str] = Header(None)):
     return {"success": True}
 
 @router.put("/invite/accept/{invitation_id}")
-def accept_invitation(invitation_id: str, doctor_id: str):
+def accept_invitation(
+    invitation_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    context = _require_doctor_context(authorization)
+    doctor_id = str(context["doctor_id"])
 
     invitation = supabase_admin.table("doctor_invitations") \
         .select("*") \
