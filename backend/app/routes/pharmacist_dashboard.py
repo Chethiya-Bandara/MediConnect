@@ -728,7 +728,7 @@ def dispense_prescription(
     except (TypeError, ValueError):
         raise HTTPException(400, "Invalid pharmacy organisation ID.")
 
-    if pharmacist_org_id is not None and pharmacy_org_id != int(pharmacist_org_id):
+    if pharmacist_org_id is None or pharmacy_org_id != int(pharmacist_org_id):
         raise HTTPException(
             403,
             "You can only dispense against your assigned pharmacy organisation.",
