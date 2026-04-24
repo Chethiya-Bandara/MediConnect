@@ -42,17 +42,6 @@ class RegisterRequest(BaseModel):
             raise ValueError("Invalid role")
         return normalized
 
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, value: str):
-        if len(value) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        if not any(character.isalpha() for character in value):
-            raise ValueError("Password must contain letters")
-        if not any(character.isdigit() for character in value):
-            raise ValueError("Password must contain numbers")
-        return value
-
     @field_validator("nic", "parentNic")
     @classmethod
     def validate_nic(cls, value: Optional[str]):
