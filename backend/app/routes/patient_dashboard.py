@@ -2039,7 +2039,6 @@ def assistant_respond(
 @router.get("/lookup/{dhid}")
 def lookup_by_dhid(
     dhid: str,
-    authorization: Optional[str] = Header(None),
     current_user: dict = Depends(RoleChecker(["doctor", "pharmacist", "hospital_admin"]))
 ):
     """
