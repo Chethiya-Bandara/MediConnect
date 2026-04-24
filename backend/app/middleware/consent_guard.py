@@ -112,15 +112,15 @@ def check_consent(doctor_id: int, appointment_id: int) -> bool:
             )
         )
 
-        if latest_action != "CONSENT_GRANTED":
-            # Latest action was CONSENT_REVOKED or unknown
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "Access denied. Patient has revoked consent for this appointment. "
-                    "You cannot access their medical history."
-                )
+    if latest_action != "CONSENT_GRANTED":
+        # Latest action was CONSENT_REVOKED or unknown
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Access denied. Patient has revoked consent for this appointment. "
+                "You cannot access their medical history."
             )
+        )
 
     return True
 
