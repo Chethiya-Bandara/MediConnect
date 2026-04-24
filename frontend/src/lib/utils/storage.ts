@@ -1,13 +1,16 @@
+// Tokens stored in sessionStorage instead of localStorage so they are
+// never persisted to disk and are cleared when the browser tab closes.
+// Full migration to httpOnly cookies is the next step.
 export function getStoredToken() {
-  return localStorage.getItem("token");
+  return sessionStorage.getItem("token");
 }
 
 export function setStoredToken(token: string) {
-  localStorage.setItem("token", token);
+  sessionStorage.setItem("token", token);
 }
 
 export function removeStoredToken() {
-  localStorage.removeItem("token");
+  sessionStorage.removeItem("token");
 }
 
 export function getStoredJson<T>(key: string): T | null {
