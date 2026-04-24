@@ -1762,7 +1762,11 @@ def revoke_affiliation(
     return {"message": "Affiliation revoked", "affiliation_id": current["id"]}
 
 @router.post("/upload-attachment")
-async def upload(file: UploadFile = File(...)):
+async def upload(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    _require_doctor_context(authorization)
     file_id = str(uuid.uuid4())
     path = f"attachments/{file_id}_{file.filename}"
 
