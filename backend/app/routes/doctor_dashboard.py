@@ -232,6 +232,15 @@ def _require_doctor_context(authorization: Optional[str]):
     }
 
 
+def _require_doctor_consent(
+    appointment_id: int,
+    authorization: Optional[str] = Header(None),
+) -> dict:
+    context = _require_doctor_context(authorization)
+    check_consent(doctor_id=context["doctor"]["id"], appointment_id=appointment_id)
+    return context
+
+
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -1536,21 +1545,14 @@ async def upload_license(
 def get_patient_history(
     patient_id: int,
     appointment_id: int,
-    authorization: Optional[str] = Header(None),
+    context: dict = Depends(_require_doctor_consent),
 ):
     """
     Returns a patient's medical history for a specific appointment.
     Requires patient consent — blocked with 403 if not granted.
     Consent Guard applied (Bihanga B-3.1.1)
     """
-    context = _require_doctor_context(authorization)
-    doctor  = context["doctor"]
-
-    # ── Consent Guard ─────────────────────────────────────────────
-    check_consent(
-        doctor_id=doctor["id"],
-        appointment_id=appointment_id
-    )
+    doctor = context["doctor"]
 
     # ── Fetch patient encounters ──────────────────────────────────
     try:
