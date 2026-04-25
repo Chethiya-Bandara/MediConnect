@@ -31,7 +31,7 @@ _ENDPOINT_LIMITS: dict[str, tuple[int, int]] = {
     "/patient/dashboard/appointments": (30, 60),  # 30 per minute
 
     # DHID lookup — prevent enumeration
-    "/patient/dashboard/lookup": (10, 60),    # 10 per minute
+    "/patient/dashboard/lookup": (3, 60),     # 3 per minute
 }
 _DEFAULT_LIMIT = (90, 60)            # 90 per minute for all other routes
 
