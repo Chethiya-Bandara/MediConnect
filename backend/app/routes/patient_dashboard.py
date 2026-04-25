@@ -1091,7 +1091,7 @@ def get_overview(authorization: Optional[str] = Header(None)):
     }
 
 
-@router.get("/appointments")
+@router.get("/appointments", dependencies=[Depends(RoleChecker(["patient"]))])
 def list_appointments(authorization: Optional[str] = Header(None)):
     context = _require_patient_context(authorization)
     patient = context["patient"]
@@ -1122,7 +1122,7 @@ def list_appointments(authorization: Optional[str] = Header(None)):
     }
 
 
-@router.patch("/profile")
+@router.patch("/profile", dependencies=[Depends(RoleChecker(["patient"]))])
 def update_profile(
     payload: ProfileUpdateRequest,
     authorization: Optional[str] = Header(None),
@@ -1148,7 +1148,7 @@ def update_profile(
     }
 
 
-@router.get("/booking-options")
+@router.get("/booking-options", dependencies=[Depends(RoleChecker(["patient"]))])
 def get_booking_options(authorization: Optional[str] = Header(None)):
     _require_patient_context(authorization)
 
@@ -1208,7 +1208,7 @@ def get_booking_options(authorization: Optional[str] = Header(None)):
         ]
     }
 
-@router.get("/available-slots")
+@router.get("/available-slots", dependencies=[Depends(RoleChecker(["patient"]))])
 def get_available_slots(
     doctor_id: int,
     authorization: Optional[str] = Header(None)
@@ -1255,7 +1255,7 @@ def get_available_slots(
     return {"slots": slots}
 
 
-@router.post("/appointments")
+@router.post("/appointments", dependencies=[Depends(RoleChecker(["patient"]))])
 def create_appointment(
     payload: AppointmentCreateRequest,
     authorization: Optional[str] = Header(None)
@@ -1397,7 +1397,7 @@ def create_appointment(
     return _format_appointment(appointment, doctor_lookup, organisation_lookup)
 
 
-@router.patch("/appointments/{appointment_id}")
+@router.patch("/appointments/{appointment_id}", dependencies=[Depends(RoleChecker(["patient"]))])
 def update_appointment(
     appointment_id: int,
     payload: AppointmentUpdateRequest,
@@ -1446,7 +1446,7 @@ def update_appointment(
     return _format_appointment(row, doctor_lookup, organisation_lookup)
 
 
-@router.post("/appointments/{appointment_id}/consent")
+@router.post("/appointments/{appointment_id}/consent", dependencies=[Depends(RoleChecker(["patient"]))])
 def update_consent(
     appointment_id: int,
     payload: ConsentUpdateRequest,
@@ -1486,7 +1486,7 @@ def update_consent(
     }
 
 
-@router.get("/records")
+@router.get("/records", dependencies=[Depends(RoleChecker(["patient"]))])
 def list_records(authorization: Optional[str] = Header(None)):
     context = _require_patient_context(authorization)
     patient = context["patient"]
@@ -1554,7 +1554,7 @@ def list_records(authorization: Optional[str] = Header(None)):
     }
 
 
-@router.get("/pharmacy")
+@router.get("/pharmacy", dependencies=[Depends(RoleChecker(["patient"]))])
 def search_pharmacy(
     authorization: Optional[str] = Header(None),
     query: str = Query(default="", max_length=120),
@@ -1639,7 +1639,7 @@ def search_pharmacy(
     return {"items": items}
 
 
-@router.get("/pharmacies")
+@router.get("/pharmacies", dependencies=[Depends(RoleChecker(["patient"]))])
 def list_patient_pharmacies(
     authorization: Optional[str] = Header(None),
 ):
@@ -1695,7 +1695,7 @@ def list_patient_pharmacies(
     return {"items": items}
 
 
-@router.get("/pharmacy/estimate")
+@router.get("/pharmacy/estimate", dependencies=[Depends(RoleChecker(["patient"]))])
 def estimate_pharmacy_bill(
     prescription_id: int = Query(..., gt=0),
     pharmacy_id: int = Query(..., gt=0),
@@ -1867,7 +1867,7 @@ def estimate_pharmacy_bill(
     }
 
 
-@router.get("/dispensing")
+@router.get("/dispensing", dependencies=[Depends(RoleChecker(["patient"]))])
 def list_dispensing(authorization: Optional[str] = Header(None)):
     context = _require_patient_context(authorization)
     patient = context["patient"]
@@ -2006,7 +2006,7 @@ def list_dispensing(authorization: Optional[str] = Header(None)):
     }
 
 
-@router.post("/assistant/respond")
+@router.post("/assistant/respond", dependencies=[Depends(RoleChecker(["patient"]))])
 def assistant_respond(
     payload: AssistantRequest, authorization: Optional[str] = Header(None)
 ):
