@@ -16,7 +16,7 @@ router = APIRouter(prefix="/hospital-admin", tags=["hospital-admin-dashboard"])
 
 
 class CreateAvailabilityRequest(BaseModel):
-    doctor_id: str
+    doctor_id: int
     slot_date: str
     start_time: str
     end_time: str
