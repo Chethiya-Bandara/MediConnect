@@ -76,10 +76,10 @@ async def rate_limit_middleware(request: Request, call_next):
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"],        # Safe — no cookies involved
+    allow_credentials=False,    # No cookies = no CSRF risk
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
