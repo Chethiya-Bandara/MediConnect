@@ -9,7 +9,6 @@
 #
 # RATE LIMIT RULES:
 #   /login           → 5 attempts  per 1 minute   (brute force protection)
-#   /register        → 3 attempts  per 10 minutes  (spam/bot protection)
 #   /forgot-password → 5 attempts  per 1 minute   (enumeration protection)
 #   All other routes → 90 requests per 1 minute   (general DoS protection)
 #
@@ -29,8 +28,6 @@
 LOGIN_LIMIT_REQUESTS    = 5
 LOGIN_LIMIT_WINDOW      = 60      # seconds
 
-REGISTER_LIMIT_REQUESTS = 3
-REGISTER_LIMIT_WINDOW   = 600     # seconds (10 minutes)
 
 FORGOT_PASSWORD_LIMIT_REQUESTS = 5
 FORGOT_PASSWORD_LIMIT_WINDOW   = 60      # seconds

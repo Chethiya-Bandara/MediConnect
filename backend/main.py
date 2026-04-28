@@ -14,7 +14,6 @@ app = FastAPI()
 #
 # Limits:
 #   /login          → 5 attempts per minute    (brute force protection)
-#   /register       → 3 attempts per 10 mins   (spam/bot protection)
 #   /forgot-password → 5 attempts per minute   (enumeration protection)
 #   All other routes → 90 requests per minute  (general protection)
 
@@ -24,7 +23,6 @@ _RATE_LIMIT_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
 _ENDPOINT_LIMITS: dict[str, tuple[int, int]] = {
     # Auth endpoints
     "/login":                    (5,  60),    # 5 per minute
-    "/register":                 (3,  600),   # 3 per 10 minutes
     "/forgot-password":          (5,  60),    # 5 per minute
 
     # Appointment endpoints — prevent ID enumeration
