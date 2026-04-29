@@ -22,7 +22,7 @@ class CreateAvailabilityRequest(BaseModel):
     end_time: str
     slot_duration_minutes: int = Field(default=15, ge=5, le=240)
 
-    @field_validator("doctor_id", "slot_date", "start_time", "end_time")
+    @field_validator("slot_date", "start_time", "end_time")
     @classmethod
     def validate_text(cls, value: str):
         cleaned = value.strip()
@@ -30,6 +30,12 @@ class CreateAvailabilityRequest(BaseModel):
             raise ValueError("Field cannot be empty")
         return cleaned
 
+    @field_validator("doctor_id")
+    @classmethod
+    def validate_doctor_id(cls, value: int):
+        if value <= 0:
+            raise ValueError("doctor_id must be positive")
+        return value
 
 class UpdateAvailabilityRequest(BaseModel):
     start_time: str
