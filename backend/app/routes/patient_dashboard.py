@@ -1417,7 +1417,7 @@ def update_appointment(
     )
     if not rows:
         raise HTTPException(status_code=404, detail="Appointment not found")
-    
+
     ALLOWED_PATIENT_STATUS_UPDATES={"cancelled"}
     current_status = rows[0]["status"]
 
@@ -1438,8 +1438,6 @@ def update_appointment(
                 detail="Cannot modify a completed appointment"
             )
         update_data["status"] = payload.status
-    if payload.start_time is not None or payload.end_time is not None:
-        update_data["status"] = payload.status or "pending"
 
     updated = (
         supabase_admin.table("appointments")
