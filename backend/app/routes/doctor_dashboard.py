@@ -1477,6 +1477,9 @@ def accept_invitation(
     if not invitation.data:
         raise HTTPException(404, "Invitation not found")
 
+    if invitation.data.get("doctor_email") != context["user"].get("email"):
+        raise HTTPException(403, "This invitation was not sent to you.")
+
     # create affiliation
     supabase_admin.table("doctor_affiliations").insert({
         "doctor_id": doctor_id,
