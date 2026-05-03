@@ -1466,7 +1466,7 @@ def accept_invitation(
     authorization: Optional[str] = Header(None),
 ):
     context = _require_doctor_context(authorization)
-    doctor_id = str(context["doctor_id"])
+    doctor_id = str(context["doctor"]["id"])
 
     invitation = supabase_admin.table("doctor_invitations") \
         .select("*") \
