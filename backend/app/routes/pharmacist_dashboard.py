@@ -754,7 +754,7 @@ def dispense_prescription(
     if not pres.data:
         raise HTTPException(404, "Prescription not found")
 
-    if pres.data["status"] == "DISPENSED":
+    if (pres.data["status"] or "").upper() == "DISPENSED":
         raise HTTPException(400, "Prescription already fully dispensed.")
 
     dispensing_line_items = []
