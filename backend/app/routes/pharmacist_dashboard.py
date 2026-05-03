@@ -7,7 +7,7 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.config.supabase import execute_with_retry, supabase, supabase_admin
 from app.middleware.role_checker import RoleChecker, PharmacistOnly
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/pharmacist/dashboard", tags=["Pharmacist-dashboard"]
 
 class BillItem(BaseModel):
     inventory_id: int
-    quantity:     int
+    quantity:     int = Field(..., gt=0)
 
 
 class BillRequest(BaseModel):
