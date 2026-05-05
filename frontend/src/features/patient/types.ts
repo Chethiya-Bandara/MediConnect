@@ -32,6 +32,8 @@ export interface DashboardOverview {
     id: number;
     dhid: string;
     created_at: string | null;
+    medical_record_consent_default: boolean;
+    medical_record_consent_last_updated: string | null;
   };
   stats: {
     total_appointments: number;

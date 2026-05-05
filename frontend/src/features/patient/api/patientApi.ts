@@ -26,7 +26,10 @@ export async function getAppointments() {
   return response.items;
 }
 
-export function updatePatientProfile(payload: { name: string }) {
+export function updatePatientProfile(payload: {
+  name?: string;
+  medical_record_consent_default?: boolean;
+}) {
   return apiRequest<DashboardOverview["user"]>(endpoints.patient.profile, {
     method: "PATCH",
     body: JSON.stringify(payload),

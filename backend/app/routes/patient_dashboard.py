@@ -54,15 +54,24 @@ class ConsentUpdateRequest(BaseModel):
 
 
 class ProfileUpdateRequest(BaseModel):
-    name: str
+    name: Optional[str] = None
+    medical_record_consent_default: Optional[bool] = None
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, value: str):
+    def validate_name(cls, value: Optional[str]):
+        if value is None:
+            return value
         cleaned = value.strip()
         if len(cleaned) < 3:
             raise ValueError("Name must be at least 3 characters")
         return cleaned
+
+    @model_validator(mode="after")
+    def validate_payload(self):
+        if self.name is None and self.medical_record_consent_default is None:
+            raise ValueError("Provide at least one profile field to update")
+        return self
 
 
 class AssistantHistoryMessage(BaseModel):
@@ -584,6 +593,33 @@ def _consent_state_map(appointment_ids: set[int]):
     return consent_lookup
 
 
+def _patient_default_consent_state(patient_id: int) -> dict[str, object]:
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("audit_logs")
+            .select("action, timestamp")
+            .eq("entity", "patient_consent_default")
+            .eq("entity_id", patient_id)
+            .order("timestamp", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    latest = rows[0] if rows else None
+    if not latest:
+        return {"granted": True, "last_updated": None, "status": "Default On"}
+
+    granted = latest.get("action") != "CONSENT_DEFAULT_REVOKED"
+    return {
+        "granted": granted,
+        "last_updated": latest.get("timestamp"),
+        "status": "Default On" if granted else "Default Off",
+    }
+
+
 def _build_assistant_snapshot(patient: dict, user: dict):
     appointments = (
         supabase_admin.table("appointments")
@@ -969,6 +1005,7 @@ def _fallback_assistant_answer(message: str, snapshot: dict) -> str:
 def get_overview(authorization: Optional[str] = Header(None)):
     context = _require_patient_context(authorization)
     patient = context["patient"]
+    default_consent = _patient_default_consent_state(patient["id"])
 
     appointments = execute_with_retry(
         lambda: (
@@ -1057,6 +1094,8 @@ def get_overview(authorization: Optional[str] = Header(None)):
             "id": patient["id"],
             "dhid": patient["dhid"],
             "created_at": patient.get("created_at"),
+            "medical_record_consent_default": bool(default_consent["granted"]),
+            "medical_record_consent_last_updated": default_consent["last_updated"],
         },
         "stats": {
             "total_appointments": len(appointments),
@@ -1129,22 +1168,40 @@ def update_profile(
 ):
     context = _require_patient_context(authorization)
 
-    updated = (
-        supabase_admin.table("users")
-        .update({"name": payload.name})
-        .eq("id", context["user_id"])
-        .execute()
-        .data
-        or []
-    )
-    _log_audit_action(context["user_id"], "PROFILE_UPDATED", "users", context["patient"]["id"])
+    updated = []
+    resolved_name = context["user"].get("name")
 
-    row = updated[0] if updated else {**context["user"], "name": payload.name}
+    if payload.name is not None:
+        updated = (
+            supabase_admin.table("users")
+            .update({"name": payload.name})
+            .eq("id", context["user_id"])
+            .execute()
+            .data
+            or []
+        )
+        resolved_name = payload.name
+        _log_audit_action(context["user_id"], "PROFILE_UPDATED", "users", context["patient"]["id"])
+
+    if payload.medical_record_consent_default is not None:
+        _log_audit_action(
+            context["user_id"],
+            "CONSENT_DEFAULT_GRANTED" if payload.medical_record_consent_default else "CONSENT_DEFAULT_REVOKED",
+            "patient_consent_default",
+            context["patient"]["id"],
+        )
+
+    row = updated[0] if updated else {**context["user"], "name": resolved_name}
     return {
         "id": row["id"],
         "email": row["email"],
-        "name": row.get("name"),
+        "name": resolved_name,
         "role": row.get("role"),
+        "medical_record_consent_default": (
+            payload.medical_record_consent_default
+            if payload.medical_record_consent_default is not None
+            else _patient_default_consent_state(context["patient"]["id"])["granted"]
+        ),
     }
 
 
@@ -1262,6 +1319,7 @@ def create_appointment(
 ):
     context = _require_patient_context(authorization)
     patient = context["patient"]
+    default_consent = _patient_default_consent_state(patient["id"])
 
     # Get slot
     slot = (
@@ -1390,11 +1448,27 @@ def create_appointment(
         "appointments",
         appointment["id"]
     )
+    _log_audit_action(
+        context["user_id"],
+        "CONSENT_GRANTED" if default_consent["granted"] else "CONSENT_REVOKED",
+        "appointment_consent",
+        appointment["id"],
+    )
 
     doctor_lookup = _doctor_map({appointment["doctor_id"]})
     organisation_lookup = _organisation_map({appointment["organisation_id"]})
 
-    return _format_appointment(appointment, doctor_lookup, organisation_lookup)
+    return _format_appointment_with_consent(
+        appointment,
+        doctor_lookup,
+        organisation_lookup,
+        {
+            appointment["id"]: {
+                "granted": bool(default_consent["granted"]),
+                "last_updated": datetime.now().astimezone().isoformat(),
+            }
+        },
+    )
 
 
 @router.patch("/appointments/{appointment_id}", dependencies=[Depends(RoleChecker(["patient"]))])
