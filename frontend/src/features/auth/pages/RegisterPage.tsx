@@ -16,13 +16,14 @@ import {
   Upload,
   UserRound,
 } from "lucide-react";
-import { AlertMessage, Button, InputField } from "../../../components/ui";
+import { AlertMessage, Button, CustomSelectField, InputField } from "../../../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { PortalFooter, PortalTopNav } from "../components";
 import { roleOptions } from "../data/roles";
 import { registrationSchema } from "../schemas/registerSchema";
 import type { RegisterFormValues } from "../types";
 import { calculateAge } from "../utils";
+import { doctorSpecializationOptions } from "../../../lib/constants/doctorSpecializations";
 
 const ROLE_FIELD_ORDER: Record<string, string[]> = {
   PATIENT: ["role", "fullName", "email", "nic", "dob", "gender", "parentNic", "password", "confirmPassword"],
@@ -93,7 +94,7 @@ const ROLE_HELPERS = {
     nic: "Use the patient NIC. Underage patients must also provide a guardian NIC.",
   },
   DOCTOR: {
-    specialization: "Use the specialty label you want displayed in the portal.",
+    specialization: "Pick the closest specialty label you want displayed in the portal.",
     licenseNumber: "Enter the SLMC or professional registration number exactly as issued.",
   },
   PHARMACIST: {
@@ -197,6 +198,7 @@ export function RegisterPage() {
   const selectedRole = watch("role");
   const selectedDob = watch("dob");
   const selectedGender = watch("gender");
+  const selectedSpecialization = watch("specialization");
   const passwordValue = watch("password");
   const credentialFiles = watch("credentialFile");
   const age = calculateAge(selectedDob);
@@ -314,7 +316,7 @@ export function RegisterPage() {
 
   return (
     <div className="portal-page">
-      <PortalTopNav />
+      <PortalTopNav brandVariant="mediconnect" />
 
       <main className="auth-main register-layout">
         <section className="register-card">
@@ -546,10 +548,23 @@ export function RegisterPage() {
 
                 {selectedRole === "DOCTOR" && (
                   <>
-                    <InputField
+                    <CustomSelectField
                       id="specialization"
+                      name="specialization"
                       label="Specialization"
-                      {...register("specialization")}
+                      value={selectedSpecialization ?? ""}
+                      onChange={(value) => {
+                        setValue("specialization", value, {
+                          shouldDirty: true,
+                          shouldTouch: true,
+                          shouldValidate: true,
+                        });
+                      }}
+                      options={doctorSpecializationOptions.map((option) => ({
+                        ...option,
+                        description: `Use ${option.label} as the public-facing doctor specialty label.`,
+                      }))}
+                      placeholder="Select specialization"
                       helperText={ROLE_HELPERS.DOCTOR.specialization}
                       error={errors.specialization?.message}
                     />

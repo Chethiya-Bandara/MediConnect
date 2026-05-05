@@ -2,7 +2,6 @@ import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
-  Bell,
   Bot,
   Building2,
   CheckCircle2,
@@ -16,7 +15,6 @@ import {
   RefreshCcw,
   Save,
   Search,
-  ShieldAlert,
   Stethoscope,
   Sun,
   Trash2,
@@ -25,6 +23,7 @@ import {
   Users,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { AppBrandMark } from "../../../components/ui";
 import { useAuth } from "../../auth/context/AuthContext";
 import { useHealthMinistryAdminDashboard } from "../hooks/useHealthMinistryAdminDashboard";
 import type {
@@ -652,54 +651,9 @@ export function HealthMinistryAdminDashboardPage() {
   return (
     <div className={theme === "dark" ? "dark" : ""}>
       <div className="min-h-screen bg-[#f7fafc] font-body text-[#181c1e] antialiased transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
-        <nav className="fixed inset-x-0 top-0 z-50 flex items-center justify-between border-b border-slate-200 bg-white/85 px-6 py-3 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/85">
-          <div className="flex items-center gap-4">
-            <span className="font-headline text-xl font-extrabold text-blue-950 dark:text-blue-300">
-              National Health Portal
-            </span>
-            <span className="hidden rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.28em] text-blue-900 md:inline-block dark:bg-blue-900/50 dark:text-blue-100">
-              Ministry of Health
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
-              className="rounded-full p-2 text-slate-500 transition-all hover:bg-slate-100 hover:text-blue-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-blue-300"
-              aria-label="Toggle theme"
-            >
-              {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
-            </button>
-            <button
-              type="button"
-              className="rounded-full p-2 text-slate-500 transition-all hover:bg-slate-100 hover:text-blue-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-blue-300"
-            >
-              <Bell size={20} />
-            </button>
-            <button
-              type="button"
-              className="rounded-full p-2 text-slate-500 transition-all hover:bg-slate-100 hover:text-blue-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-blue-300"
-            >
-              <UserCircle2 size={20} />
-            </button>
-          </div>
-        </nav>
-
-        <aside className="fixed left-0 top-14 flex h-[calc(100vh-56px)] w-64 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6 dark:border-slate-800 dark:bg-slate-900">
+        <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6 dark:border-slate-800 dark:bg-slate-900">
           <div className="mb-8 px-2">
-            <div className="mb-2 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#005a9c] text-white shadow-md shadow-blue-900/15 dark:bg-blue-800">
-                <ShieldAlert size={18} />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-blue-900 dark:text-blue-300">
-                  Health Gov
-                </p>
-                <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                  Ministry Admin
-                </p>
-              </div>
-            </div>
+            <AppBrandMark subtitle="Ministry Admin" />
           </div>
 
           <nav className="flex-1 space-y-1 text-sm font-medium">
@@ -736,7 +690,34 @@ export function HealthMinistryAdminDashboardPage() {
           </div>
         </aside>
 
-        <main className="ml-64 min-h-screen px-8 pb-12 pt-20">
+        <header className="fixed left-64 right-0 top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/85 px-8 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/85">
+          <div className="flex items-center gap-4">
+            <span className="font-headline text-xl font-extrabold text-blue-950 dark:text-blue-300">
+              National Health Portal
+            </span>
+            <span className="hidden rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.28em] text-blue-900 md:inline-block dark:bg-blue-900/50 dark:text-blue-100">
+              Ministry of Health
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+              className="rounded-full p-2 text-slate-500 transition-all hover:bg-slate-100 hover:text-blue-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-blue-300"
+              aria-label="Toggle theme"
+            >
+              {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
+            </button>
+            <button
+              type="button"
+              className="rounded-full p-2 text-slate-500 transition-all hover:bg-slate-100 hover:text-blue-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-blue-300"
+            >
+              <UserCircle2 size={20} />
+            </button>
+          </div>
+        </header>
+
+        <main className="ml-64 min-h-screen px-8 pb-12 pt-24">
           {dashboard.dashboardError ? (
             <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
               {dashboard.dashboardError}

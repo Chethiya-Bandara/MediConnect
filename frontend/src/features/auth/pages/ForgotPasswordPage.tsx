@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Mail, ShieldCheck } from "lucide-react";
+import { Mail } from "lucide-react";
 import { z } from "zod";
 import { AlertMessage, Button, InputField } from "../../../components/ui";
 import { PortalFooter, PortalTopNav } from "../components";
@@ -47,7 +47,7 @@ export function ForgotPasswordPage() {
 
   return (
     <div className="portal-page">
-      <PortalTopNav />
+      <PortalTopNav brandVariant="mediconnect" />
 
       <main className="auth-main login-layout">
         <section className="login-hero">
@@ -58,22 +58,6 @@ export function ForgotPasswordPage() {
             password recovery flow through the secure auth service.
           </p>
 
-          <div className="hero-cards">
-            <article>
-              <ShieldCheck size={18} color="#0f3970" />
-              <h3>Secure Recovery</h3>
-              <p>
-                Reset links are sent through the managed authentication layer.
-              </p>
-            </article>
-            <article>
-              <ShieldCheck size={18} color="#0f3970" />
-              <h3>No Data Exposure</h3>
-              <p>
-                The response stays generic so random clowns cannot enumerate accounts.
-              </p>
-            </article>
-          </div>
         </section>
 
         <section className="auth-card">

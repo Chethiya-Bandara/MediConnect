@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { HeartPulse, MoonStar, SunMedium } from "lucide-react";
+import mediConnectLogo from "../../../../logo/logo.png";
 
-export function PortalTopNav() {
+interface PortalTopNavProps {
+  brandVariant?: "default" | "mediconnect";
+}
+
+export function PortalTopNav({ brandVariant = "default" }: PortalTopNavProps) {
   const [theme, setTheme] = useState<"light" | "dark">("dark");
 
   useEffect(() => {
@@ -19,9 +24,24 @@ export function PortalTopNav() {
   return (
     <nav className="portal-nav">
       <div className="portal-nav-inner">
-        <div className="brand-wrap">
-          <HeartPulse size={20} />
-          <span>National Health Ecosystem</span>
+        <div className={`brand-wrap ${brandVariant === "mediconnect" ? "brand-wrap--mediconnect" : ""}`}>
+          {brandVariant === "mediconnect" ? (
+            <>
+              <img src={mediConnectLogo} alt="MediConnect logo" className="brand-wrap__logo" />
+              <div className="brand-wrap__copy">
+                <span className="brand-wrap__title">
+                  <span className="brand-wrap__title-medi">Medi</span>
+                  <span className="brand-wrap__title-connect">Connect</span>
+                </span>
+                <span className="brand-wrap__subtitle">Healthcare Integration Network</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <HeartPulse size={20} />
+              <span>National Health Ecosystem</span>
+            </>
+          )}
         </div>
         <button
           type="button"

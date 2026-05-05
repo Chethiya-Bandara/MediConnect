@@ -1,6 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
-  Bell,
   Building2,
   CalendarDays,
   CheckCircle2,
@@ -20,6 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { AppBrandMark } from "../../../components/ui";
 import { useAuth } from "../../auth/context/AuthContext";
 import { useHospitalAdminDashboard } from "../hooks/useHospitalAdminDashboard";
 import type { AffiliationDecisionStatus, CreateAvailabilityPayload } from "../types";
@@ -517,19 +517,10 @@ export function HospitalAdminDashboardPage() {
       <div className="min-h-screen bg-[#f7fafc] font-body text-[#181c1e] antialiased transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
         <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6 dark:border-slate-800 dark:bg-slate-900">
           <div className="mb-8 px-2">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-700 text-white shadow-md">
-                <Building2 size={18} />
-              </div>
-              <div>
-                <h1 className="font-headline text-lg font-bold text-blue-950 dark:text-blue-100">
-                  Admin Console
-                </h1>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {dashboard.hospital.name ?? "Hospital Workspace"}
-                </p>
-              </div>
-            </div>
+            <AppBrandMark
+              subtitle={dashboard.hospital.name ?? "Hospital Workspace"}
+              subtitleClassName="text-[11px] tracking-[0.16em] normal-case"
+            />
           </div>
 
           <nav className="flex-1 space-y-1">
@@ -590,13 +581,6 @@ export function HospitalAdminDashboardPage() {
                 className="rounded-full p-1 transition-colors hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800 dark:hover:text-blue-400"
               >
                 {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
-              </button>
-              <button
-                type="button"
-                className="relative rounded-full p-1 transition-colors hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800 dark:hover:text-blue-400"
-              >
-                <Bell size={18} />
-                <span className="absolute right-0 top-0 h-2 w-2 rounded-full bg-red-500" />
               </button>
             </div>
             <div className="h-8 w-px bg-slate-200 dark:bg-slate-700" />

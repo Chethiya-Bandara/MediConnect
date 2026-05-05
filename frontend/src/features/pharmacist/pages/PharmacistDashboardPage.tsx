@@ -1,6 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
-  Bell,
   Fingerprint,
   HeartPulse,
   History,
@@ -17,6 +16,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { AppBrandMark } from "../../../components/ui";
 import { cn } from "../../../lib/utils/cn";
 import { formatDate } from "../../../lib/utils/formatDate";
 import { useAuth } from "../../auth/context/AuthContext";
@@ -255,18 +255,8 @@ export function PharmacistDashboardPage() {
   return (
     <div className="min-h-screen bg-surface font-body text-on-background antialiased transition-colors dark:bg-slate-950 dark:text-slate-100">
       <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-100 bg-slate-50 py-6 transition-colors dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-10 flex items-center gap-3 px-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-container shadow-sm dark:bg-blue-800">
-            <Pill className="text-white" size={20} />
-          </div>
-          <div>
-            <h1 className="font-headline text-lg font-bold leading-tight text-blue-900 dark:text-blue-200">
-              Identity
-            </h1>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Verified Pharmacist
-            </p>
-          </div>
+        <div className="mb-10 px-6">
+          <AppBrandMark subtitle="Verified Pharmacist" />
         </div>
 
         <nav className="flex-1 space-y-1 px-2">
@@ -324,13 +314,6 @@ export function PharmacistDashboardPage() {
             className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-blue-300"
           >
             {isDark ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-          <button
-            type="button"
-            className="relative rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-blue-300"
-          >
-            <Bell size={18} />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-error ring-2 ring-white dark:ring-slate-900" />
           </button>
           <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-slate-700" />
           <div className="flex items-center gap-3">

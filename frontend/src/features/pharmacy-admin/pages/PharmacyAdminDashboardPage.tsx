@@ -1,20 +1,18 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
-  Bell,
   Box,
   CheckCircle2,
-  HeartPulse,
   LogOut,
   Moon,
   PackagePlus,
   Search,
-  Settings,
   Sun,
   Trash2,
   UserCog,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { AppBrandMark } from "../../../components/ui";
 import { cn } from "../../../lib/utils/cn";
 import { formatDate } from "../../../lib/utils/formatDate";
 import { useAuth } from "../../auth/context/AuthContext";
@@ -349,18 +347,8 @@ export function PharmacyAdminDashboardPage() {
   return (
     <div className="min-h-screen bg-surface font-body text-on-background antialiased transition-colors dark:bg-slate-950 dark:text-slate-100">
       <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-100 bg-slate-50 py-6 transition-colors dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-8 flex items-center gap-3 px-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-md dark:bg-blue-600">
-            <Box className="text-white" size={20} />
-          </div>
-          <div>
-            <h1 className="font-headline text-lg font-bold leading-tight text-blue-900 dark:text-blue-200">
-              Admin Console
-            </h1>
-            <p className="mt-1 rounded bg-primary/5 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-primary dark:bg-blue-900/30 dark:text-blue-400">
-              Pharmacy Admin
-            </p>
-          </div>
+        <div className="mb-8 px-6">
+          <AppBrandMark subtitle="Pharmacy Admin" />
         </div>
 
         <nav className="flex-1 space-y-1 px-2">
@@ -396,18 +384,6 @@ export function PharmacyAdminDashboardPage() {
           <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
             <button
               type="button"
-              className="flex w-full items-center gap-3 px-4 py-2 text-xs text-slate-500 transition-colors hover:text-primary dark:text-slate-400 dark:hover:text-blue-400"
-              onClick={() =>
-                dashboard.setActionMessage(
-                  "System settings are not exposed as a dedicated backend module yet.",
-                )
-              }
-            >
-              <Settings size={16} />
-              System Settings
-            </button>
-            <button
-              type="button"
               className="flex w-full items-center gap-3 px-4 py-2 text-xs text-slate-500 transition-colors hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400"
               onClick={handleLogout}
             >
@@ -419,20 +395,7 @@ export function PharmacyAdminDashboardPage() {
       </aside>
 
       <header className="fixed left-64 right-0 top-0 z-30 flex h-16 items-center justify-between border-b border-slate-100 bg-white/80 px-8 shadow-sm backdrop-blur-xl transition-colors dark:border-slate-800 dark:bg-slate-950/80">
-        <div className="flex items-center gap-6">
-          <div className="flex h-10 items-center gap-3 border-r border-slate-200 pr-6 dark:border-slate-800">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-900 shadow-inner">
-              <HeartPulse className="text-white" size={18} />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold leading-none text-blue-900 dark:text-blue-200">
-                Health Identity
-              </h2>
-              <p className="text-[9px] font-bold uppercase tracking-tight text-slate-500">
-                Verified Professional
-              </p>
-            </div>
-          </div>
+        <div className="flex items-center">
           <span className="font-headline text-xl font-extrabold tracking-tight text-blue-900 dark:text-blue-400">
             National Health Portal
           </span>
@@ -445,13 +408,6 @@ export function PharmacyAdminDashboardPage() {
             className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-blue-300"
           >
             {isDark ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-          <button
-            type="button"
-            className="relative rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-blue-300"
-          >
-            <Bell size={18} />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-error ring-2 ring-white dark:ring-slate-900" />
           </button>
           <div className="mx-2 h-6 w-px bg-slate-200 dark:bg-slate-700" />
           <div className="flex items-center gap-3">

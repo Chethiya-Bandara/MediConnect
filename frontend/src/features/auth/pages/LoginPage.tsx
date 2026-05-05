@@ -42,7 +42,7 @@ export function LoginPage() {
 
   return (
     <div className="portal-page">
-      <PortalTopNav />
+      <PortalTopNav brandVariant="mediconnect" />
 
       <main className="auth-main login-layout">
         <section className="login-hero">

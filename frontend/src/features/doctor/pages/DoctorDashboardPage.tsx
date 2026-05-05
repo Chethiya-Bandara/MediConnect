@@ -1,11 +1,11 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import {
   AlertTriangle,
-  Bell,
   Building2,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   ClipboardPlus,
   FileArchive,
@@ -37,6 +37,7 @@ import { EmptyState } from "../../../components/feedback/EmptyState";
 import { ErrorState } from "../../../components/feedback/ErrorState";
 import { LoadingState } from "../../../components/feedback/LoadingState";
 import { ToastMessage } from "../../../components/feedback/ToastMessage";
+import { AppBrandMark, CustomSelectField } from "../../../components/ui";
 import { useAuth } from "../../auth/context/AuthContext";
 import {
   askDoctorAssistant,
@@ -60,9 +61,10 @@ import type {
   DoctorMedicineCatalogItem,
   DoctorScheduleItem,
 } from "../types";
+import { doctorSpecializationOptions } from "../../../lib/constants/doctorSpecializations";
 
 type DoctorPage = "overview" | "encounter" | "appointments" | "affiliations" | "settings";
-type DoctorModal = "submit" | "urgent" | "archives" | null;
+type DoctorModal = "submit" | "urgent" | "archives" | "availability" | null;
 type Theme = "light" | "dark";
 
 type DraftPrescriptionItem = {
@@ -76,6 +78,11 @@ type ChatMessage = {
   id: string;
   role: "assistant" | "user";
   text: string;
+};
+
+type DashboardSelectOption = {
+  value: string;
+  label: string;
 };
 
 const navItems = [
@@ -92,6 +99,133 @@ const commonIcdSuggestions = [
   { code: "J00", name: "Acute nasopharyngitis [common cold]" },
   { code: "M54.5", name: "Low back pain" },
 ] as const;
+
+const encounterTypeOptions: DashboardSelectOption[] = [
+  { value: "Routine Follow-up", label: "Routine Follow-up" },
+  { value: "Acute Consultation", label: "Acute Consultation" },
+  { value: "Specialist Referral", label: "Specialist Referral" },
+];
+
+const DOCTOR_THEME_STORAGE_KEY = "doctor-dashboard-theme";
+const LEGACY_PATIENT_THEME_STORAGE_KEY = "patient-dashboard-theme";
+const DOCTOR_CHAT_PANEL_WIDTH_STORAGE_KEY = "doctor-dashboard-chat-panel-width";
+const DOCTOR_CHAT_PANEL_HEIGHT_STORAGE_KEY = "doctor-dashboard-chat-panel-height";
+const DOCTOR_CHAT_PANEL_DEFAULT_WIDTH = 320;
+const DOCTOR_CHAT_PANEL_MIN_WIDTH = 320;
+const DOCTOR_CHAT_PANEL_MAX_WIDTH = 640;
+const DOCTOR_CHAT_PANEL_DEFAULT_HEIGHT = 430;
+const DOCTOR_CHAT_PANEL_MIN_HEIGHT = 320;
+const DOCTOR_CHAT_PANEL_MAX_HEIGHT = 760;
+
+function clampChatPanelWidth(value: number) {
+  if (typeof window === "undefined") {
+    return Math.min(
+      DOCTOR_CHAT_PANEL_MAX_WIDTH,
+      Math.max(DOCTOR_CHAT_PANEL_MIN_WIDTH, value),
+    );
+  }
+
+  const viewportMax = Math.max(
+    DOCTOR_CHAT_PANEL_MIN_WIDTH,
+    Math.min(DOCTOR_CHAT_PANEL_MAX_WIDTH, window.innerWidth - 120),
+  );
+
+  return Math.min(viewportMax, Math.max(DOCTOR_CHAT_PANEL_MIN_WIDTH, value));
+}
+
+function clampChatPanelHeight(value: number) {
+  if (typeof window === "undefined") {
+    return Math.min(
+      DOCTOR_CHAT_PANEL_MAX_HEIGHT,
+      Math.max(DOCTOR_CHAT_PANEL_MIN_HEIGHT, value),
+    );
+  }
+
+  const viewportMax = Math.max(
+    DOCTOR_CHAT_PANEL_MIN_HEIGHT,
+    Math.min(DOCTOR_CHAT_PANEL_MAX_HEIGHT, window.innerHeight - 120),
+  );
+
+  return Math.min(viewportMax, Math.max(DOCTOR_CHAT_PANEL_MIN_HEIGHT, value));
+}
+
+function DashboardCustomSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: DashboardSelectOption[];
+  placeholder: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selected = options.find((option) => option.value === value);
+
+  return (
+    <div
+      ref={rootRef}
+      className={`custom-select ${open ? "custom-select--open" : ""} ${disabled ? "opacity-60" : ""}`}
+    >
+      <button
+        type="button"
+        className="custom-select__trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => {
+          if (!disabled) {
+            setOpen((current) => !current);
+          }
+        }}
+      >
+        <span>{selected?.label ?? placeholder}</span>
+        <ChevronDown
+          size={18}
+          className={`custom-select__chevron ${open ? "custom-select__chevron--open" : ""}`}
+        />
+      </button>
+
+      {open && !disabled ? (
+        <div className="custom-select__menu" role="listbox">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={value === option.value}
+              className={`custom-select__option custom-select__option--compact ${
+                value === option.value ? "custom-select__option--selected" : ""
+              }`}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span className="custom-select__option-label">{option.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function makeDraftMedicine(
   medicine_name: string,
@@ -233,10 +367,21 @@ function buildInitialAssistantMessage(activePatient: DoctorActivePatient | null,
   );
 }
 
+function getInitials(value: string) {
+  const parts = value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (parts.length === 0) return "DR";
+  return parts.map((part) => part[0]?.toUpperCase() ?? "").join("");
+}
+
 export function DoctorDashboardPage() {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [page, setPage] = useState<DoctorPage>("encounter");
+  const [page, setPage] = useState<DoctorPage>("overview");
   const [theme, setTheme] = useState<Theme>("dark");
   const [modal, setModal] = useState<DoctorModal>(null);
   const [toast, setToast] = useState<{
@@ -273,6 +418,7 @@ export function DoctorDashboardPage() {
   const [profileName, setProfileName] = useState("");
   const [profileSpecialization, setProfileSpecialization] = useState("");
   const [profileSlmcNumber, setProfileSlmcNumber] = useState("");
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [availabilityDate, setAvailabilityDate] = useState(todayInputDate);
   const [availabilityStart, setAvailabilityStart] = useState("09:00");
   const [availabilityEnd, setAvailabilityEnd] = useState("12:00");
@@ -282,15 +428,31 @@ export function DoctorDashboardPage() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatPanelWidth, setChatPanelWidth] = useState(DOCTOR_CHAT_PANEL_DEFAULT_WIDTH);
+  const [chatPanelHeight, setChatPanelHeight] = useState(DOCTOR_CHAT_PANEL_DEFAULT_HEIGHT);
+  const [chatResizeMode, setChatResizeMode] = useState<"width" | "height" | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const profilePhotoInputRef = useRef<HTMLInputElement | null>(null);
   const deferredMedicineQuery = useDeferredValue(medName.trim());
 
   const activePatient = dashboard?.active_patient ?? null;
   const doctorName =
     dashboard?.user.name?.trim() ||
+    user?.name?.trim() ||
     dashboard?.user.email ||
+    user?.email ||
     "Doctor";
-  const avatarSeed = encodeURIComponent(doctorName);
+  const doctorInitials = getInitials(doctorName);
+  const profilePreviewName = profileName.trim() || doctorName;
+  const profilePreviewInitials = getInitials(profilePreviewName);
+  const profilePhotoStorageKey = `doctor-dashboard-profile-photo:${dashboard?.user.id || user?.id || dashboard?.user.email || user?.email || "guest"}`;
+  const pageHeaderTitle = {
+    overview: "Overview",
+    encounter: "Encounter Record",
+    appointments: "Schedule",
+    affiliations: "Hospital Access",
+    settings: "Profile Settings",
+  } satisfies Record<DoctorPage, string>;
 
   const filteredCodes = useMemo(() => {
     const query = diagnosisInput.trim().toLowerCase();
@@ -324,6 +486,59 @@ export function DoctorDashboardPage() {
       }),
     [affiliationHospitals],
   );
+
+  const availabilityHospitalOptions = useMemo<DashboardSelectOption[]>(
+    () => [
+      { value: "", label: "Select hospital" },
+      ...approvedHospitalOptions.map((hospital) => ({
+        value: String(hospital.id),
+        label: hospital.name,
+      })),
+    ],
+    [approvedHospitalOptions],
+  );
+
+  const specializationSelectOptions = useMemo(
+    () => {
+      const trimmed = profileSpecialization.trim();
+      if (!trimmed) {
+        return doctorSpecializationOptions;
+      }
+
+      const exists = doctorSpecializationOptions.some((option) => option.value === trimmed);
+      if (exists) {
+        return doctorSpecializationOptions;
+      }
+
+      return [
+        { value: trimmed, label: `${trimmed} (Current)` },
+        ...doctorSpecializationOptions,
+      ];
+    },
+    [profileSpecialization],
+  );
+
+  const isProfileDirty = useMemo(() => {
+    if (!dashboard) {
+      return false;
+    }
+
+    return (
+      profileName.trim() !== (dashboard.user.name ?? "").trim() ||
+      profileSpecialization.trim() !== (dashboard.doctor.specialization ?? "").trim() ||
+      profileSlmcNumber.trim() !== (dashboard.doctor.slmc_number ?? "").trim()
+    );
+  }, [
+    dashboard,
+    profileName,
+    profileSlmcNumber,
+    profileSpecialization,
+  ]);
+
+  const isProfileFormValid =
+    profileName.trim().length >= 2 &&
+    profileSpecialization.trim().length >= 2 &&
+    profileSlmcNumber.trim().length >= 2;
 
   useEffect(() => {
     if (selectedAvailabilityHospitalId || approvedHospitalOptions.length === 0) {
@@ -365,7 +580,9 @@ export function DoctorDashboardPage() {
   };
 
   useEffect(() => {
-    const saved = localStorage.getItem("patient-dashboard-theme");
+    const saved =
+      localStorage.getItem(DOCTOR_THEME_STORAGE_KEY) ??
+      localStorage.getItem(LEGACY_PATIENT_THEME_STORAGE_KEY);
     setTheme(saved === "dark" ? "dark" : "light");
   }, []);
 
@@ -373,8 +590,82 @@ export function DoctorDashboardPage() {
     const root = document.documentElement;
     root.classList.remove("light", "dark");
     root.classList.add(theme);
-    localStorage.setItem("patient-dashboard-theme", theme);
+    localStorage.setItem(DOCTOR_THEME_STORAGE_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    const storedPhoto = localStorage.getItem(profilePhotoStorageKey);
+    setProfilePhoto(storedPhoto || null);
+  }, [profilePhotoStorageKey]);
+
+  useEffect(() => {
+    const storedWidth = Number(localStorage.getItem(DOCTOR_CHAT_PANEL_WIDTH_STORAGE_KEY));
+    if (Number.isFinite(storedWidth) && storedWidth > 0) {
+      setChatPanelWidth(clampChatPanelWidth(storedWidth));
+    }
+
+    const storedHeight = Number(localStorage.getItem(DOCTOR_CHAT_PANEL_HEIGHT_STORAGE_KEY));
+    if (Number.isFinite(storedHeight) && storedHeight > 0) {
+      setChatPanelHeight(clampChatPanelHeight(storedHeight));
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(
+      DOCTOR_CHAT_PANEL_WIDTH_STORAGE_KEY,
+      String(clampChatPanelWidth(chatPanelWidth)),
+    );
+  }, [chatPanelWidth]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      DOCTOR_CHAT_PANEL_HEIGHT_STORAGE_KEY,
+      String(clampChatPanelHeight(chatPanelHeight)),
+    );
+  }, [chatPanelHeight]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setChatPanelWidth((current) => clampChatPanelWidth(current));
+      setChatPanelHeight((current) => clampChatPanelHeight(current));
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!chatResizeMode) {
+      return;
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (chatResizeMode === "width") {
+        const nextWidth = clampChatPanelWidth(window.innerWidth - event.clientX - 24);
+        setChatPanelWidth(nextWidth);
+        return;
+      }
+
+      const nextHeight = clampChatPanelHeight(window.innerHeight - event.clientY - 24);
+      setChatPanelHeight(nextHeight);
+    };
+
+    const handleMouseUp = () => {
+      setChatResizeMode(null);
+    };
+
+    document.body.style.cursor = chatResizeMode === "width" ? "ew-resize" : "ns-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [chatResizeMode]);
 
   useEffect(() => {
     void loadDashboard();
@@ -466,6 +757,45 @@ export function DoctorDashboardPage() {
     navigate("/login");
   };
 
+  const onProfilePhotoSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      showToast("Pick an image file.", "error");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : null;
+      if (!result) {
+        showToast("Could not read that image.", "error");
+        return;
+      }
+
+      localStorage.setItem(profilePhotoStorageKey, result);
+      setProfilePhoto(result);
+      showToast("Profile photo updated.");
+    };
+    reader.onerror = () => showToast("Could not read that image.", "error");
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
+
+  const removeProfilePhoto = () => {
+    localStorage.removeItem(profilePhotoStorageKey);
+    setProfilePhoto(null);
+    showToast("Profile photo removed.");
+  };
+
+  const resetProfileForm = () => {
+    setProfileName(dashboard?.user.name ?? "");
+    setProfileSpecialization(dashboard?.doctor.specialization ?? "");
+    setProfileSlmcNumber(dashboard?.doctor.slmc_number ?? "");
+    showToast("Profile form reset.", "info");
+  };
+
   const handleMedicineNameChange = (value: string) => {
     setMedName(value);
     const exactMatch = medicineSuggestions.find(
@@ -534,6 +864,22 @@ export function DoctorDashboardPage() {
     setPage("encounter");
   };
 
+  const cancelEncounterReview = async () => {
+    setDiagnosisInput("");
+    setClinicalNotes("");
+    setPrescriptionDraft([]);
+    setEditingDraftId(null);
+    setMedName("");
+    setMedDose("");
+    setMedDuration("");
+    setMedicineSuggestions([]);
+    setSelectedMedicineSuggestion(null);
+    setActiveAppointmentId(null);
+    setPage("appointments");
+    await loadDashboard(null);
+    showToast("Encounter review closed.");
+  };
+
   const submitEncounter = async () => {
     if (!activePatient) {
       showToast("No active patient is selected yet.", "error");
@@ -584,6 +930,16 @@ export function DoctorDashboardPage() {
   };
 
   const saveProfile = async () => {
+    if (!isProfileFormValid) {
+      showToast("Name, specialization, and SLMC number need at least 2 characters.", "error");
+      return;
+    }
+
+    if (!isProfileDirty) {
+      showToast("No profile changes to save.", "info");
+      return;
+    }
+
     setSavingProfile(true);
     try {
       await updateDoctorProfile({
@@ -805,15 +1161,7 @@ export function DoctorDashboardPage() {
     <div className="min-h-screen bg-surface text-on-surface transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
       <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-100 bg-slate-50 py-6 dark:border-slate-800 dark:bg-slate-900">
         <div className="mb-8 px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-container text-white shadow-lg">
-              <ShieldCheck size={20} />
-            </div>
-            <div>
-              <p className="font-headline font-bold text-blue-900 dark:text-blue-400">Health Identity</p>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">PRO DOCTOR</p>
-            </div>
-          </div>
+          <AppBrandMark titleClassName="text-xl" logoClassName="h-11" />
         </div>
         <nav className="flex-1 space-y-1 px-2">
           {navItems.map((item) => {
@@ -836,9 +1184,9 @@ export function DoctorDashboardPage() {
             );
           })}
         </nav>
-        <div className="mt-auto space-y-1 px-4">
-          <button type="button" onClick={logoutNow} className="flex w-full items-center gap-3 px-4 py-2 text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400">
-            <LogOut size={14} />
+        <div className="mt-auto space-y-2 px-2">
+          <button type="button" onClick={logoutNow} className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-100 py-3 text-sm font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+            <LogOut size={16} />
             Sign Out
           </button>
         </div>
@@ -847,33 +1195,55 @@ export function DoctorDashboardPage() {
       <header className="fixed left-64 right-0 top-0 z-30 flex items-center justify-between border-b border-slate-100 bg-white/80 px-8 py-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80">
         <div className="flex items-center gap-6">
           <div>
-            <h1 className="font-headline text-xl font-extrabold text-blue-900 dark:text-blue-400">Clinical Workspace</h1>
-            <div className="mt-0.5 flex items-center gap-2">
-              <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">Active Patient:</span>
-              <span className="text-sm font-semibold dark:text-slate-200">
-                {activePatient?.patient.name ?? "No patient selected"}
-              </span>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                {activePatient?.patient.dhid ? `DHID: ${activePatient.patient.dhid}` : "Awaiting booking"}
-              </span>
-            </div>
+            <h1 className="font-headline text-xl font-extrabold text-blue-900 dark:text-blue-400">{pageHeaderTitle[page]}</h1>
+            {page === "encounter" ? (
+              <div className="mt-0.5 flex items-center gap-2">
+                <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">Active Patient:</span>
+                <span className="text-sm font-semibold dark:text-slate-200">
+                  {activePatient?.patient.name ?? "No patient selected"}
+                </span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  {activePatient?.patient.dhid ? `DHID: ${activePatient.patient.dhid}` : "Awaiting booking"}
+                </span>
+              </div>
+            ) : null}
           </div>
-          <div className="hidden h-8 w-px bg-slate-200 lg:block dark:bg-slate-700" />
-          <div className="hidden items-center gap-2 lg:flex">
-            <span className={`h-2 w-2 rounded-full ${activePatient?.appointment.consent.granted ? "animate-pulse bg-green-500" : "bg-amber-500"}`} />
-            <span className="text-xs font-bold uppercase text-green-700 dark:text-green-400">
-              Consent: {activePatient?.appointment.consent.status ?? "Unavailable"}
-            </span>
-          </div>
+          {page === "encounter" ? (
+            <>
+              <div className="hidden h-8 w-px bg-slate-200 lg:block dark:bg-slate-700" />
+              <div className="hidden items-center gap-2 lg:flex">
+                <span className={`h-2 w-2 rounded-full ${activePatient?.appointment.consent.granted ? "animate-pulse bg-green-500" : "bg-amber-500"}`} />
+                <span className="text-xs font-bold uppercase text-green-700 dark:text-green-400">
+                  Consent: {activePatient?.appointment.consent.status ?? "Unavailable"}
+                </span>
+              </div>
+            </>
+          ) : null}
         </div>
         <div className="flex items-center gap-4">
+          {page === "encounter" ? (
+            <button
+              type="button"
+              onClick={() => void cancelEncounterReview()}
+              disabled={!activePatient || submittingEncounter}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <X size={16} />
+              Cancel Review
+            </button>
+          ) : null}
+          {page === "appointments" ? (
+            <button
+              type="button"
+              onClick={() => setModal("availability")}
+              className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-blue-500/20"
+            >
+              Create
+            </button>
+          ) : null}
           <button type="button" onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
             {theme === "dark" ? <SunMedium size={18} /> : <MoonStar size={18} />}
           </button>
-          <div className="relative">
-            <Bell className="text-slate-500 dark:text-slate-400" size={22} />
-            <span className="absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-white bg-red-600 dark:border-slate-900" />
-          </div>
           <div className="flex items-center gap-3 border-l border-slate-200 pl-4 dark:border-slate-700">
             <div className="hidden text-right sm:block">
               <p className="text-sm font-bold dark:text-slate-200">{doctorName}</p>
@@ -881,8 +1251,12 @@ export function DoctorDashboardPage() {
                 {dashboard?.doctor.specialization ?? "Specialization pending"}
               </p>
             </div>
-            <button type="button" onClick={() => setPage("settings")} className="h-10 w-10 overflow-hidden rounded-full border-2 border-white bg-blue-100 shadow-sm dark:border-slate-800 dark:bg-blue-900">
-              <img className="h-full w-full object-cover" src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${avatarSeed}`} alt="Doctor avatar" />
+            <button type="button" onClick={() => setPage("settings")} className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-blue-100 text-sm font-black text-blue-900 shadow-sm dark:border-slate-800 dark:bg-blue-900 dark:text-blue-100">
+              {profilePhoto ? (
+                <img src={profilePhoto} alt={`${doctorName} avatar`} className="h-full w-full object-cover" />
+              ) : (
+                doctorInitials
+              )}
             </button>
           </div>
         </div>
@@ -892,37 +1266,218 @@ export function DoctorDashboardPage() {
         <div className="flex-1 px-8 pb-12 pt-24">
           {page === "overview" ? (
             <section className="animate-fadeIn">
-              <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <h2 className="text-3xl font-extrabold text-blue-900 dark:text-blue-400">Doctor Dashboard</h2>
-                  <p className="mt-1 text-sm text-slate-500">Live clinical summary.</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Today&apos;s Date</p>
-                  <p className="text-lg font-bold dark:text-white">{formatDate(new Date().toISOString())}</p>
-                </div>
-              </div>
-              <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-4">
-                <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><UserRound className="mb-4 text-blue-500" size={28} /><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Patients Seen Today</p><p className="text-3xl font-black dark:text-white">{dashboard?.stats.patients_seen_today ?? 0}</p></div>
-                <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><AlertTriangle className="mb-4 text-orange-500" size={28} /><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Pending Reports</p><p className="text-3xl font-black dark:text-white">{dashboard?.stats.pending_reports ?? 0}</p></div>
-                <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><FileArchive className="mb-4 text-green-500" size={28} /><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Recorded Encounters</p><p className="text-3xl font-black dark:text-white">{dashboard?.stats.recorded_encounters ?? 0}</p></div>
-                <div className="relative overflow-hidden rounded-3xl bg-primary p-6 text-white shadow-xl"><ClipboardPlus className="mb-4" size={28} /><p className="text-[10px] font-bold uppercase tracking-widest text-blue-200">Current Patient</p><p className="text-xl font-bold">{activePatient?.patient.name ?? "No active session"}</p><button type="button" onClick={() => setPage(activePatient ? "encounter" : "appointments")} className="mt-2 text-xs font-bold underline">{activePatient ? "Open Encounter" : "Pick From Schedule"} →</button></div>
-              </div>
-              <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-6 flex items-center justify-between"><h3 className="text-lg font-bold dark:text-white">Upcoming In Queue</h3><button type="button" onClick={() => setPage("appointments")} className="text-sm font-bold text-primary dark:text-blue-400">View Full Schedule</button></div>
-                <div className="space-y-4">
-                  {queueItems.length > 0 ? queueItems.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between rounded-2xl border border-transparent bg-slate-50 p-4 dark:bg-slate-800/50">
-                      <div className="flex items-center gap-4"><div className="flex h-10 w-14 items-center justify-center rounded-xl bg-blue-100 text-xs font-bold text-blue-600 dark:bg-blue-900/50 dark:text-blue-300">{formatDateTime(item.start_time).split(", ").slice(-1)[0]}</div><div><p className="font-bold dark:text-white">{item.patient.name}</p><p className="text-xs text-slate-500">{item.organisation.name} • {item.patient.dhid ?? "DHID pending"}</p></div></div>
-                      <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${getScheduleBadge(item)}`}>{item.status}</span>
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
+                <div className="rounded-[2rem] border border-slate-200 bg-[linear-gradient(135deg,_rgba(248,251,255,0.98),_rgba(239,246,255,0.96))] px-7 py-6 shadow-sm dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.2),_transparent_38%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(15,23,42,0.94))]">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Doctor overview</p>
+                      <h2 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{doctorName}</h2>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                        {dashboard?.doctor.specialization ?? "Specialization pending"} • {formatDate(new Date().toISOString())}
+                      </p>
+                      <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 dark:text-slate-300">
+                        Your live queue, encounter workload, and hospital-linked schedule status are all lined up here without the usual dashboard circus.
+                      </p>
                     </div>
-                  )) : (
-                    <EmptyState
-                      title="No schedule entries yet"
-                      description="Once patients book through your affiliated organisations, upcoming appointments will appear here."
-                      className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
-                    />
-                  )}
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setPage("appointments")}
+                        className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-blue-500/20"
+                      >
+                        Open Schedule
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPage("settings")}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      >
+                        Profile Settings
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 grid gap-4 md:grid-cols-3">
+                    <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Scheduled today</p>
+                      <div className="mt-3 flex items-end justify-between gap-4">
+                        <p className="text-3xl font-black text-slate-900 dark:text-white">{dashboard?.stats.scheduled_today ?? 0}</p>
+                        <CalendarDays className="text-blue-500 dark:text-blue-300" size={22} />
+                      </div>
+                    </div>
+                    <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Approved hospitals</p>
+                      <div className="mt-3 flex items-end justify-between gap-4">
+                        <p className="text-3xl font-black text-slate-900 dark:text-white">{approvedAffiliations.length}</p>
+                        <Building2 className="text-emerald-500 dark:text-emerald-300" size={22} />
+                      </div>
+                    </div>
+                    <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Queue ready</p>
+                      <div className="mt-3 flex items-end justify-between gap-4">
+                        <p className="text-3xl font-black text-slate-900 dark:text-white">{queueItems.length}</p>
+                        <CheckCircle2 className="text-violet-500 dark:text-violet-300" size={22} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-[2rem] border border-blue-200 bg-[linear-gradient(135deg,_#0f3f75,_#0b5d91)] p-6 text-white shadow-[0_24px_50px_rgba(15,63,117,0.18)] dark:border-slate-800 dark:bg-slate-950 dark:shadow-xl dark:shadow-slate-900/20">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-blue-200/70">Current patient</p>
+                      <h3 className="mt-3 text-2xl font-black">{activePatient?.patient.name ?? "No active session"}</h3>
+                    </div>
+                    <div className="rounded-2xl bg-white/15 p-3 text-blue-100 dark:bg-white/10">
+                      <ClipboardPlus size={22} />
+                    </div>
+                  </div>
+                  <div className="mt-5 space-y-3 rounded-[1.4rem] border border-white/15 bg-slate-950/10 p-4 dark:border-white/10 dark:bg-white/5">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-blue-100/80 dark:text-slate-300">DHID</span>
+                      <span className="font-bold text-white">{activePatient?.patient.dhid ?? "Pending"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-blue-100/80 dark:text-slate-300">Consent</span>
+                      <span className="font-bold text-white">{activePatient?.appointment.consent.status ?? "Unavailable"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-blue-100/80 dark:text-slate-300">Last encounter</span>
+                      <span className="font-bold text-white">{activePatient?.summary.last_encounter_at ? formatDate(activePatient.summary.last_encounter_at) : "First review"}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPage(activePatient ? "encounter" : "appointments")}
+                    className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-900 shadow-sm"
+                  >
+                    {activePatient ? "Open Encounter" : "Pick From Schedule"}
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <article className="rounded-[1.6rem] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Patients Seen Today</p>
+                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">{dashboard?.stats.patients_seen_today ?? 0}</p>
+                    </div>
+                    <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
+                      <UserRound size={22} />
+                    </div>
+                  </div>
+                </article>
+
+                <article className="rounded-[1.6rem] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Pending Reports</p>
+                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">{dashboard?.stats.pending_reports ?? 0}</p>
+                    </div>
+                    <div className="rounded-2xl bg-orange-50 p-3 text-orange-500 dark:bg-orange-900/30 dark:text-orange-300">
+                      <AlertTriangle size={22} />
+                    </div>
+                  </div>
+                </article>
+
+                <article className="rounded-[1.6rem] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Recorded Encounters</p>
+                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">{dashboard?.stats.recorded_encounters ?? 0}</p>
+                    </div>
+                    <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
+                      <FileArchive size={22} />
+                    </div>
+                  </div>
+                </article>
+
+                <article className="rounded-[1.6rem] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Active Affiliations</p>
+                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">{dashboard?.stats.active_affiliations ?? 0}</p>
+                    </div>
+                    <div className="rounded-2xl bg-violet-50 p-3 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
+                      <Building2 size={22} />
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
+                <div className="rounded-[1.8rem] border border-slate-100 bg-white p-7 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="mb-6 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xl font-black text-slate-900 dark:text-white">Upcoming In Queue</h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Patients lined up from your affiliated hospitals.</p>
+                    </div>
+                    <button type="button" onClick={() => setPage("appointments")} className="text-sm font-bold text-primary dark:text-blue-400">View Full Schedule</button>
+                  </div>
+                  <div className="space-y-4">
+                    {queueItems.length > 0 ? queueItems.map((item) => (
+                      <div key={item.id} className="rounded-[1.45rem] border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="flex h-14 min-w-14 items-center justify-center rounded-2xl bg-blue-100 px-3 text-sm font-black text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                              {formatDateTime(item.start_time).split(", ").slice(-1)[0]}
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-900 dark:text-white">{item.patient.name}</p>
+                              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.organisation.name}</p>
+                              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                                {item.patient.dhid ?? "DHID pending"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${getScheduleBadge(item)}`}>{item.status}</span>
+                            <button
+                              type="button"
+                              onClick={() => void openAppointmentEncounter(item.id)}
+                              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                            >
+                              {item.encounter ? "Review" : "Open"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )) : (
+                      <EmptyState
+                        title="No schedule entries yet"
+                        description="Once patients book through your affiliated organisations, upcoming appointments will appear here."
+                        className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="rounded-[1.8rem] border border-slate-200 bg-slate-50 p-7 shadow-sm dark:border-slate-800 dark:bg-slate-800/50">
+                    <h3 className="text-xl font-black text-slate-900 dark:text-white">Clinical pulse</h3>
+                    <div className="mt-5 space-y-4">
+                      <div className="rounded-[1.2rem] bg-white px-5 py-4 dark:bg-slate-900">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Latest saved record</p>
+                        <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
+                          {activePatient?.summary.last_encounter_at ? formatDate(activePatient.summary.last_encounter_at) : "No recent encounter"}
+                        </p>
+                      </div>
+                      <div className="rounded-[1.2rem] bg-white px-5 py-4 dark:bg-slate-900">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Queue status</p>
+                        <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
+                          {queueItems.length > 0 ? `${queueItems.length} patient(s) waiting` : "Queue is clear"}
+                        </p>
+                      </div>
+                      <div className="rounded-[1.2rem] bg-white px-5 py-4 dark:bg-slate-900">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Access state</p>
+                        <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
+                          {approvedAffiliations.length > 0 ? "Hospital access approved" : "Waiting for hospital approvals"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
@@ -955,11 +1510,12 @@ export function DoctorDashboardPage() {
                         </div>
                         <div className="space-y-2">
                           <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Encounter Type</label>
-                          <select value={encounterType} onChange={(event) => setEncounterType(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white">
-                            <option>Routine Follow-up</option>
-                            <option>Acute Consultation</option>
-                            <option>Specialist Referral</option>
-                          </select>
+                          <DashboardCustomSelect
+                            value={encounterType}
+                            onChange={setEncounterType}
+                            options={encounterTypeOptions}
+                            placeholder="Select encounter type"
+                          />
                         </div>
                       </div>
                       <div className="mb-8 space-y-2">
@@ -1150,10 +1706,20 @@ export function DoctorDashboardPage() {
                 </div>
 
                 <div className="sticky bottom-6 z-10 bg-surface pb-2 pt-4 dark:bg-slate-950">
-                  <button type="button" onClick={() => setModal("submit")} disabled={!activePatient || submittingEncounter} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-4 font-bold text-white shadow-lg shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-60">
-                    {submittingEncounter ? <LoaderCircle className="animate-spin" size={18} /> : <Lock size={18} />}
-                    Finish & Submit
-                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void cancelEncounterReview()}
+                      disabled={!activePatient || submittingEncounter}
+                      className="flex-1 rounded-2xl border border-slate-200 bg-white py-4 text-sm font-bold text-slate-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    >
+                      Cancel Review
+                    </button>
+                    <button type="button" onClick={() => setModal("submit")} disabled={!activePatient || submittingEncounter} className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary py-4 font-bold text-white shadow-lg shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-60">
+                      {submittingEncounter ? <LoaderCircle className="animate-spin" size={18} /> : <Lock size={18} />}
+                      Finish & Submit
+                    </button>
+                  </div>
                   <p className="mt-3 text-center text-[9px] italic text-slate-400">On submit, the  encounter is saved and the appointment is marked completed.</p>
                 </div>
               </div>
@@ -1161,119 +1727,25 @@ export function DoctorDashboardPage() {
           ) : null}
 
           {page === "appointments" ? (
-            <section className="mx-auto max-w-4xl animate-fadeIn">
-              <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div><h2 className="text-3xl font-extrabold text-blue-900 dark:text-blue-400">Clinical Schedule</h2><p className="mt-1 text-sm text-slate-500">Appointments and live doctor availability slots.</p></div>
-                <div className="flex items-center gap-4"><div className="flex items-center gap-2 rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"><CalendarDays className="text-slate-400" size={18} /><span className="text-sm font-bold dark:text-slate-200">{formatDate(new Date().toISOString())}</span></div></div>
-              </div>
-              <div className="mb-8 rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <section className="animate-fadeIn">
+              <div className="mb-8 rounded-[2rem] border border-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.14),_transparent_34%),linear-gradient(135deg,_rgba(255,255,255,0.98),_rgba(241,245,249,0.96))] px-7 py-6 shadow-sm dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_34%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(15,23,42,0.94))]">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <h3 className="text-lg font-bold text-primary dark:text-blue-400">Availability Management</h3>
-                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Pick a hospital, choose the clinic date, then publish a time period.</p>
+                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Schedule</p>
+                    <h3 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">Today's consultation timeline</h3>
+                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                      Review booked patients, consent status, and jump straight into encounter work.
+                    </p>
                   </div>
-                </div>
-                {approvedHospitalOptions.length === 0 ? (
-                  <AlertBanner tone="info" message="No approved hospital access yet. Open the Hospital Access tab and send a join request before you publish availability." />
-                ) : null}
-                <div className="grid gap-4 md:grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_auto]">
-                  <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Hospital</label>
-                    <select
-                      value={selectedAvailabilityHospitalId}
-                      onChange={(event) => setSelectedAvailabilityHospitalId(event.target.value ? Number(event.target.value) : "")}
-                      className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
-                    >
-                      <option value="">Select hospital</option>
-                      {approvedHospitalOptions.map((hospital) => (
-                        <option key={hospital.id} value={hospital.id}>
-                          {hospital.name}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="flex items-center gap-3 rounded-[1.4rem] border border-white/70 bg-white/80 px-5 py-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                    <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
+                      <CalendarDays size={22} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Live date</p>
+                      <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">{formatDate(new Date().toISOString())}</p>
+                    </div>
                   </div>
-                  <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Date</label>
-                    <input type="date" value={availabilityDate} onChange={(event) => setAvailabilityDate(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Start</label>
-                    <input type="time" value={availabilityStart} onChange={(event) => setAvailabilityStart(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">End</label>
-                    <input type="time" value={availabilityEnd} onChange={(event) => setAvailabilityEnd(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
-                  </div>
-                  <button type="button" onClick={() => void saveAvailability()} disabled={savingAvailability || approvedHospitalOptions.length === 0} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md disabled:cursor-not-allowed disabled:opacity-60 md:self-end">
-                    {savingAvailability ? "Saving..." : "Create Slots"}
-                  </button>
-                </div>
-                {availabilityError ? (
-                  <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
-                    {availabilityError}
-                  </div>
-                ) : null}
-                <div className="mt-5 grid gap-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-sm font-bold dark:text-slate-200">Published Slots For {formatDate(`${availabilityDate}T00:00:00`)}</h4>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                      {availabilitySlots.length} slot(s)
-                    </span>
-                  </div>
-                  {availabilitySlots.length ? availabilitySlots.map((slot) => {
-                    const isEditing = editingAvailabilityId === slot.id;
-                    const isBusy = deletingAvailabilityId === slot.id || reschedulingAvailabilityId === slot.id;
-
-                    return (
-                      <div key={slot.id} className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50 md:flex-row md:items-center md:justify-between">
-                        <div className="min-w-0">
-                          <p className="font-bold dark:text-slate-200">{formatDate(slot.start_time)}</p>
-                          {isEditing ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              <input type="time" value={editingAvailabilityStart} onChange={(event) => setEditingAvailabilityStart(event.target.value)} className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white" />
-                              <input type="time" value={editingAvailabilityEnd} onChange={(event) => setEditingAvailabilityEnd(event.target.value)} className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white" />
-                            </div>
-                          ) : (
-                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{formatTimeWindow(slot.start_time, slot.end_time)}</p>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${slot.is_booked ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
-                            {slot.is_booked ? "Booked" : "Open"}
-                          </span>
-                          {isEditing ? (
-                            <>
-                              <button type="button" onClick={() => void saveRescheduledAvailability(slot.id)} disabled={isBusy} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
-                                <CheckCircle2 size={14} />
-                                {reschedulingAvailabilityId === slot.id ? "Saving..." : "Save"}
-                              </button>
-                              <button type="button" onClick={cancelReschedulingAvailability} disabled={isBusy} className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:text-slate-200">
-                                <X size={14} />
-                                Cancel
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button type="button" onClick={() => startReschedulingAvailability(slot)} disabled={Boolean(slot.is_booked) || isBusy} className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-blue-900/20 dark:text-blue-300">
-                                <PencilLine size={14} />
-                                Reschedule
-                              </button>
-                              <button type="button" onClick={() => void removeAvailability(slot.id)} disabled={Boolean(slot.is_booked) || isBusy} className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300">
-                                <Trash2 size={14} />
-                                {deletingAvailabilityId === slot.id ? "Removing..." : "Remove"}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  }) : (
-                    <EmptyState
-                      title="No availability published yet"
-                      description="Add a valid slot above to make your schedule bookable from the patient side."
-                      className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
-                    />
-                  )}
                 </div>
               </div>
               <div className="relative rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1310,14 +1782,26 @@ export function DoctorDashboardPage() {
 
           {page === "affiliations" ? (
             <section className="animate-fadeIn">
-              <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <h2 className="text-3xl font-extrabold text-blue-900 dark:text-blue-400">Hospital Access</h2>
-                  <p className="mt-1 text-sm text-slate-500">Request to join approved hospitals before you open live clinic time.</p>
-                </div>
-                <div className="rounded-2xl border border-slate-100 bg-white px-5 py-4 text-right shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Approved Access</p>
-                  <p className="mt-1 text-2xl font-black dark:text-white">{approvedAffiliations.length}</p>
+              <div className="mb-8 rounded-[2rem] border border-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),linear-gradient(135deg,_rgba(255,255,255,0.98),_rgba(241,245,249,0.96))] px-7 py-6 shadow-sm dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_34%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(15,23,42,0.94))]">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Hospital access</p>
+                    <h3 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">Organisation access control</h3>
+                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                      Track approvals, send join requests, and keep only ready hospitals in your scheduling flow.
+                    </p>
+                  </div>
+                  <div className="min-w-[260px] rounded-[1.6rem] border border-white/70 bg-white/80 px-5 py-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">Approved Access</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-500 dark:text-slate-400">Hospitals ready for scheduling</p>
+                      </div>
+                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-2xl font-black text-emerald-600 shadow-sm dark:bg-emerald-900/30 dark:text-emerald-300">
+                        {approvedAffiliations.length}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1445,14 +1929,244 @@ export function DoctorDashboardPage() {
           ) : null}
 
           {page === "settings" ? (
-            <section className="mx-auto max-w-3xl animate-fadeIn">
-              <h2 className="mb-8 text-3xl font-extrabold text-blue-900 dark:text-blue-400">Doctor Profile & Settings</h2>
-              <div className="space-y-8 rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Professional Identity</h3><div className="grid grid-cols-1 gap-5 md:grid-cols-2"><div><label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Full Name & Title</label><input type="text" value={profileName} onChange={(event) => setProfileName(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" /></div><div><label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">SLMC Reg Number</label><input type="text" value={profileSlmcNumber} onChange={(event) => setProfileSlmcNumber(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" /></div><div className="md:col-span-2"><label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Specialization</label><input type="text" value={profileSpecialization} onChange={(event) => setProfileSpecialization(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" /></div></div></div>
-                <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Hospital Access</h3><div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"><p className="text-sm font-semibold dark:text-slate-200">Use the dedicated Hospital Access tab</p><p className="mt-1 text-xs text-slate-500">Join requests and approval tracking moved out of settings so this screen stops behaving like a junk drawer.</p><button type="button" onClick={() => setPage("affiliations")} className="mt-4 rounded-xl bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-white">Open Hospital Access</button></div></div>
-                <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">Credential Document</h3><div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400"><div className="flex items-start gap-3"><Upload size={16} className="mt-0.5" /><div><p className="font-semibold text-slate-700 dark:text-slate-200">Credential replacement is unavailable in this workspace</p><p className="mt-1 text-xs">Use the onboarding flow for credential submission until post-registration upload support is available.</p></div></div></div></div>
-                <div><h3 className="mb-4 border-b border-slate-100 pb-2 text-lg font-bold dark:border-slate-800 dark:text-white">System Preferences</h3><div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50"><div><p className="text-sm font-bold dark:text-slate-200">Dark Mode Interface</p><p className="text-xs text-slate-500">Same shared theme as the rest of the portal.</p></div><button type="button" onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white">Toggle Theme</button></div></div>
-                <div className="border-t border-slate-100 pt-6 text-right dark:border-slate-800"><button type="button" onClick={() => void saveProfile()} disabled={savingProfile} className="rounded-xl bg-green-600 px-8 py-3 font-bold text-white shadow-lg shadow-green-600/20 disabled:cursor-not-allowed disabled:opacity-60">{savingProfile ? "Saving..." : "Save Configuration"}</button></div>
+            <section className="animate-fadeIn">
+              <div className="mb-8 rounded-[2rem] border border-slate-100 bg-gradient-to-r from-blue-100/80 via-white to-slate-100/80 px-8 py-7 shadow-sm dark:border-slate-800 dark:from-blue-950/50 dark:via-slate-900 dark:to-slate-800">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-3xl border border-white/60 bg-white/70 text-2xl font-black text-blue-900 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-blue-100">
+                      {profilePhoto ? (
+                        <img src={profilePhoto} alt={`${profilePreviewName} avatar`} className="h-full w-full object-cover" />
+                      ) : (
+                        profilePreviewInitials
+                      )}
+                    </div>
+                    <div>
+                      <p className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-1 text-[10px] font-black uppercase tracking-[0.3em] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                        Doctor Profile
+                      </p>
+                      <h2 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{profilePreviewName}</h2>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        {profileSpecialization.trim() || "Specialization pending"}
+                      </p>
+                    </div>
+                  </div>
+                  <button type="button" onClick={logoutNow} className="rounded-2xl border border-white/60 bg-white/60 px-6 py-3 text-sm font-bold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+                <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="mb-6 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Editable Profile</p>
+                      <h3 className="mt-2 text-2xl font-extrabold dark:text-white">Identity settings</h3>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                        Update the doctor-facing profile details patients and hospitals see.
+                      </p>
+                    </div>
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-300">
+                      <UserRound size={22} />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Full Name & Title</span>
+                      <input
+                        type="text"
+                        value={profileName}
+                        onChange={(event) => setProfileName(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
+                        placeholder="Dr. Jane Silva"
+                      />
+                    </label>
+
+                    <CustomSelectField
+                      id="doctor-specialization"
+                      name="doctor-specialization"
+                      label="Specialization"
+                      value={profileSpecialization}
+                      onChange={setProfileSpecialization}
+                      options={specializationSelectOptions}
+                      placeholder="Select specialization"
+                      helperText="Choose the closest official specialty label for the doctor profile."
+                      triggerClassName="shadow-inner dark:bg-slate-800"
+                    />
+                  </div>
+
+                  <div className="mt-5 grid gap-5 md:grid-cols-[1fr_auto]">
+                    <label className="block">
+                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">SLMC Registration Number</span>
+                      <input
+                        type="text"
+                        value={profileSlmcNumber}
+                        onChange={(event) => setProfileSlmcNumber(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
+                        placeholder="SLMC-12345"
+                      />
+                    </label>
+
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300 md:min-w-[14rem]">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Profile status</p>
+                      <p className="mt-2 font-semibold">
+                        {isProfileDirty ? "Unsaved changes" : "Everything saved"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50/80 p-5 dark:border-slate-800 dark:bg-slate-800/50">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-lg font-black tracking-[0.08em] text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+                          {profilePhoto ? (
+                            <img src={profilePhoto} alt={`${profilePreviewName} avatar`} className="h-full w-full object-cover" />
+                          ) : (
+                            profilePreviewInitials
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Profile photo</p>
+                          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                            Upload a photo or keep the initials badge.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <input
+                          ref={profilePhotoInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={onProfilePhotoSelected}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => profilePhotoInputRef.current?.click()}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          <Upload size={16} />
+                          Upload photo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={removeProfilePhoto}
+                          className="rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/70">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Workspace theme</p>
+                        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                          Stored on this browser for the doctor workspace only.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTheme("light")}
+                          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                            theme === "light"
+                              ? "bg-primary text-white shadow-md shadow-primary/20"
+                              : "border border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                          }`}
+                        >
+                          <SunMedium size={16} />
+                          Light
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTheme("dark")}
+                          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                            theme === "dark"
+                              ? "bg-primary text-white shadow-md shadow-primary/20"
+                              : "border border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                          }`}
+                        >
+                          <MoonStar size={16} />
+                          Dark
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void saveProfile()}
+                      disabled={savingProfile || !isProfileDirty || !isProfileFormValid}
+                      className="rounded-xl bg-green-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-green-600/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {savingProfile ? "Saving..." : "Save Settings"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetProfileForm}
+                      disabled={savingProfile || !isProfileDirty}
+                      className="rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    >
+                      Reset Changes
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="mb-6 flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Read Only</p>
+                        <h3 className="mt-2 text-2xl font-extrabold dark:text-white">Doctor details</h3>
+                      </div>
+                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-300">
+                        <ShieldCheck size={22} />
+                      </div>
+                    </div>
+
+                    <div className="overflow-hidden rounded-3xl border border-slate-100 dark:border-slate-800">
+                      <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Primary Email</p>
+                        <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">{dashboard?.user.email ?? "No email saved"}</p>
+                      </div>
+                      <div className="border-b border-slate-100 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">SLMC Reg Number</p>
+                        <p className="mt-2 text-xl font-black text-blue-900 dark:text-blue-300">{profileSlmcNumber || "Unavailable"}</p>
+                      </div>
+                      <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Specialization</p>
+                        <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">{profileSpecialization || "Pending"}</p>
+                      </div>
+                      <div className="bg-white px-5 py-4 dark:bg-slate-900">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Approved Hospitals</p>
+                        <p className="mt-2 text-lg font-black text-slate-900 dark:text-white">{approvedAffiliations.length}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Account summary</p>
+                    <div className="mt-6 space-y-4">
+                      <div className="rounded-2xl border border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Current theme</p>
+                        <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
+                          {theme === "dark" ? "Dark mode" : "Light mode"}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Doctor record created</p>
+                        <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
+                          {dashboard?.doctor.created_at ? formatDate(dashboard.doctor.created_at) : "Unavailable"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </section>
           ) : null}
@@ -1467,9 +2181,9 @@ export function DoctorDashboardPage() {
       </main>
 
       {modal ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={(event) => event.target === event.currentTarget && setModal(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-md" onClick={(event) => event.target === event.currentTarget && setModal(null)}>
           {modal === "submit" ? (
-            <div className="w-full max-w-sm rounded-3xl bg-white p-8 text-center shadow-2xl dark:bg-slate-900">
+            <div className="w-full max-w-sm rounded-3xl border border-slate-200/70 bg-white/96 p-8 text-center shadow-[0_32px_80px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900/96 dark:shadow-[0_36px_90px_rgba(2,6,23,0.7)]">
               <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"><Lock size={28} /></div>
               <h3 className="mb-2 text-xl font-bold dark:text-white">Finalize & Lock?</h3>
               <p className="mb-8 text-sm leading-relaxed text-slate-500 dark:text-slate-400">This saves the encounter and pushes the prescription into the actual patient record.</p>
@@ -1478,7 +2192,7 @@ export function DoctorDashboardPage() {
           ) : null}
 
           {modal === "urgent" ? (
-            <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl dark:bg-slate-900">
+            <div className="w-full max-w-md rounded-3xl border border-slate-200/70 bg-white/96 p-8 shadow-[0_32px_80px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900/96 dark:shadow-[0_36px_90px_rgba(2,6,23,0.7)]">
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"><ShieldAlert size={28} /></div>
               <h3 className="mb-2 text-xl font-bold dark:text-white">Activate Emergency Protocol?</h3>
               <p className="mb-6 text-sm leading-relaxed text-slate-500 dark:text-slate-400">Emergency escalation controls are not available in this portal. Use your hospital emergency workflow for live urgent escalation.</p>
@@ -1487,7 +2201,7 @@ export function DoctorDashboardPage() {
           ) : null}
 
           {modal === "archives" ? (
-            <div className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-3xl bg-white p-8 shadow-2xl dark:bg-slate-900">
+            <div className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-3xl border border-slate-200/70 bg-white/96 p-8 shadow-[0_32px_80px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900/96 dark:shadow-[0_36px_90px_rgba(2,6,23,0.7)]">
               <div className="mb-6 flex items-center justify-between">
                 <div><h3 className="text-2xl font-bold dark:text-white">{activePatient?.patient.name ?? "Patient"} archives</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Saved encounters and prescriptions only.</p></div>
                 <button type="button" onClick={() => setModal(null)} className="rounded-full bg-slate-100 p-2 dark:bg-slate-800"><X size={18} /></button>
@@ -1502,21 +2216,163 @@ export function DoctorDashboardPage() {
               </div>
             </div>
           ) : null}
+
+          {modal === "availability" ? (
+            <div className="flex max-h-[84vh] w-full max-w-5xl flex-col rounded-3xl border border-slate-200 bg-white p-8 shadow-2xl dark:border-slate-800 dark:bg-slate-950 dark:shadow-[0_28px_70px_rgba(2,6,23,0.55)]">
+              <div className="mb-6 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Availability Management</p>
+                  <h3 className="mt-2 text-2xl font-extrabold dark:text-white">Create clinic slots</h3>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Pick a hospital, choose the clinic date, then publish a time period.</p>
+                </div>
+                <button type="button" onClick={() => setModal(null)} className="rounded-full bg-slate-100 p-2 dark:bg-slate-900">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-5 overflow-y-auto pr-2">
+                {approvedHospitalOptions.length === 0 ? (
+                  <AlertBanner tone="info" message="No approved hospital access yet. Open the Hospital Access tab and send a join request before you publish availability." />
+                ) : null}
+                <div className="grid gap-4 md:grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_auto]">
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Hospital</label>
+                    <DashboardCustomSelect
+                      value={selectedAvailabilityHospitalId ? String(selectedAvailabilityHospitalId) : ""}
+                      onChange={(value) => setSelectedAvailabilityHospitalId(value ? Number(value) : "")}
+                      options={availabilityHospitalOptions}
+                      placeholder="Select hospital"
+                      disabled={approvedHospitalOptions.length === 0}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Date</label>
+                    <input type="date" value={availabilityDate} onChange={(event) => setAvailabilityDate(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Start</label>
+                    <input type="time" value={availabilityStart} onChange={(event) => setAvailabilityStart(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">End</label>
+                    <input type="time" value={availabilityEnd} onChange={(event) => setAvailabilityEnd(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                  </div>
+                  <button type="button" onClick={() => void saveAvailability()} disabled={savingAvailability || approvedHospitalOptions.length === 0} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md disabled:cursor-not-allowed disabled:opacity-60 md:self-end">
+                    {savingAvailability ? "Saving..." : "Create Slots"}
+                  </button>
+                </div>
+
+                {availabilityError ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+                    {availabilityError}
+                  </div>
+                ) : null}
+
+                <div className="grid gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-bold dark:text-slate-200">Published Slots For {formatDate(`${availabilityDate}T00:00:00`)}</h4>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                      {availabilitySlots.length} slot(s)
+                    </span>
+                  </div>
+                  {availabilitySlots.length ? availabilitySlots.map((slot) => {
+                    const isEditing = editingAvailabilityId === slot.id;
+                    const isBusy = deletingAvailabilityId === slot.id || reschedulingAvailabilityId === slot.id;
+
+                    return (
+                      <div key={slot.id} className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50 md:flex-row md:items-center md:justify-between">
+                        <div className="min-w-0">
+                          <p className="font-bold dark:text-slate-200">{formatDate(slot.start_time)}</p>
+                          {isEditing ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <input type="time" value={editingAvailabilityStart} onChange={(event) => setEditingAvailabilityStart(event.target.value)} className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white" />
+                              <input type="time" value={editingAvailabilityEnd} onChange={(event) => setEditingAvailabilityEnd(event.target.value)} className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white" />
+                            </div>
+                          ) : (
+                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{formatTimeWindow(slot.start_time, slot.end_time)}</p>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${slot.is_booked ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
+                            {slot.is_booked ? "Booked" : "Open"}
+                          </span>
+                          {isEditing ? (
+                            <>
+                              <button type="button" onClick={() => void saveRescheduledAvailability(slot.id)} disabled={isBusy} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                                <CheckCircle2 size={14} />
+                                {reschedulingAvailabilityId === slot.id ? "Saving..." : "Save"}
+                              </button>
+                              <button type="button" onClick={cancelReschedulingAvailability} disabled={isBusy} className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:text-slate-200">
+                                <X size={14} />
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => startReschedulingAvailability(slot)} disabled={Boolean(slot.is_booked) || isBusy} className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-blue-900/20 dark:text-blue-300">
+                                <PencilLine size={14} />
+                                Reschedule
+                              </button>
+                              <button type="button" onClick={() => void removeAvailability(slot.id)} disabled={Boolean(slot.is_booked) || isBusy} className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300">
+                                <Trash2 size={14} />
+                                {deletingAvailabilityId === slot.id ? "Removing..." : "Remove"}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }) : (
+                    <EmptyState
+                      title="No availability published yet"
+                      description="Add a valid slot above to make your schedule bookable from the patient side."
+                      className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
       <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
-        <div className={`${chatOpen ? "flex" : "hidden"} mb-4 w-80 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900`}>
-          <div className="flex items-center justify-between bg-primary p-4 text-white"><div className="flex items-center gap-2"><Sparkles size={18} /><span className="text-sm font-bold">Clinical AI</span></div><button type="button" onClick={() => setChatOpen(false)}><X size={16} /></button></div>
-          <div className="border-b border-amber-100 bg-amber-50 p-2 text-center dark:border-amber-900 dark:bg-amber-900/30"><p className="text-[8px] font-bold uppercase tracking-widest text-amber-700 dark:text-amber-400">Disclaimer: AI is advisory only, not diagnostic.</p></div>
-          <div ref={chatScrollRef} className="flex h-64 flex-col gap-3 overflow-y-auto bg-slate-50/50 p-4 dark:bg-slate-800/30">
+        <div
+          className={`${chatOpen ? "flex" : "hidden"} relative mb-4 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900`}
+          style={{ width: `${chatPanelWidth}px`, height: `${chatPanelHeight}px` }}
+        >
+          <button
+            type="button"
+            aria-label="Resize AI panel height"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setChatResizeMode("height");
+            }}
+            className="absolute inset-x-0 top-0 z-20 hidden h-3 cursor-ns-resize bg-transparent transition hover:bg-blue-500/10 lg:block"
+          >
+            <span className="mx-auto mt-1 block h-px w-full bg-slate-200/70 dark:bg-slate-700/70" />
+          </button>
+          <button
+            type="button"
+            aria-label="Resize AI panel width"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setChatResizeMode("width");
+            }}
+            className="absolute inset-y-0 left-0 z-10 hidden w-3 cursor-ew-resize bg-transparent transition hover:bg-blue-500/10 lg:block"
+          >
+            <span className="mx-auto block h-full w-px bg-slate-200/80 dark:bg-slate-700/80" />
+          </button>
+          <div className="flex items-center justify-between bg-primary p-4 text-white"><div className="flex items-center gap-2"><Sparkles size={18} /><span className="text-base font-bold">Clinical AI</span></div><button type="button" onClick={() => setChatOpen(false)}><X size={18} /></button></div>
+          <div className="border-b border-amber-100 bg-amber-50 px-3 py-2 text-center dark:border-amber-900 dark:bg-amber-900/30"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-400">Disclaimer: AI is advisory only, not diagnostic.</p></div>
+          <div ref={chatScrollRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-slate-50/50 p-4 dark:bg-slate-800/30">
             {chatMessages.map((message) => (
-              <div key={message.id} className={`max-w-[85%] rounded-xl p-3 text-[11px] leading-relaxed shadow-sm ${message.role === "assistant" ? "self-start bg-blue-100 text-blue-900 dark:bg-blue-900/50 dark:text-blue-100" : "self-end bg-white dark:bg-slate-700 dark:text-white"}`}>{message.text}</div>
+              <div key={message.id} className={`max-w-[85%] rounded-xl p-3.5 text-sm leading-6 shadow-sm ${message.role === "assistant" ? "self-start bg-blue-100 text-blue-900 dark:bg-blue-900/50 dark:text-blue-100" : "self-end bg-white dark:bg-slate-700 dark:text-white"}`}>{message.text}</div>
             ))}
-            {chatLoading ? <div className="self-start rounded-xl bg-blue-100 p-3 text-[11px] text-blue-900 shadow-sm dark:bg-blue-900/50 dark:text-blue-100">Thinking...</div> : null}
+            {chatLoading ? <div className="self-start rounded-xl bg-blue-100 p-3.5 text-sm text-blue-900 shadow-sm dark:bg-blue-900/50 dark:text-blue-100">Thinking...</div> : null}
           </div>
-          <div className="border-t border-slate-100 px-4 py-2 dark:border-slate-800"><button type="button" onClick={() => void sendMessage("Summarize the active patient history for me.")} className="w-full rounded-md bg-slate-100 py-1.5 text-center text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Summarize Medical History</button></div>
-          <div className="flex gap-2 border-t border-slate-100 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"><input value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={onChatKeyDown} className="flex-1 rounded-lg border-0 bg-slate-50 px-3 py-2 text-xs focus:ring-1 focus:ring-primary dark:bg-slate-800 dark:text-white" placeholder="Ask AI clinical advice..." /><button type="button" onClick={() => void sendMessage()} className="text-primary dark:text-blue-400"><SendHorizontal size={18} /></button></div>
+          <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800"><button type="button" onClick={() => void sendMessage("Summarize the active patient history for me.")} className="w-full rounded-md bg-slate-100 py-2 text-center text-sm font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Summarize Medical History</button></div>
+          <div className="flex gap-2 border-t border-slate-100 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"><input value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={onChatKeyDown} className="flex-1 rounded-lg border-0 bg-slate-50 px-3 py-2.5 text-sm focus:ring-1 focus:ring-primary dark:bg-slate-800 dark:text-white" placeholder="Ask AI clinical advice..." /><button type="button" onClick={() => void sendMessage()} className="text-primary dark:text-blue-400"><SendHorizontal size={20} /></button></div>
         </div>
         <button type="button" onClick={() => setChatOpen((current) => !current)} className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg shadow-primary/30">{chatOpen ? <X size={24} /> : <MessageCircle size={24} />}</button>
       </div>

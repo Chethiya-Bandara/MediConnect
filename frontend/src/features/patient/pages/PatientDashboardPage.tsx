@@ -31,6 +31,7 @@ import { EmptyState } from "../../../components/feedback/EmptyState";
 import { ErrorState } from "../../../components/feedback/ErrorState";
 import { LoadingState } from "../../../components/feedback/LoadingState";
 import { ToastMessage } from "../../../components/feedback/ToastMessage";
+import { AppBrandMark } from "../../../components/ui";
 import { useAuth } from "../../auth/context/AuthContext";
 import {
   askHealthAssistant,
@@ -961,14 +962,8 @@ export function PatientDashboardPage() {
   return (
     <div className="min-h-screen bg-surface text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6 dark:border-slate-800 dark:bg-slate-900 md:flex">
-        <div className="mb-8 flex items-center gap-3 px-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-white shadow-lg">
-            <ShieldPlus size={20} />
-          </div>
-          <div>
-            <p className="font-headline text-lg font-bold leading-none text-blue-900 dark:text-blue-400">Health Identity</p>
-            <p className="text-[10px] uppercase tracking-[0.28em] text-slate-500">Patient Console</p>
-          </div>
+        <div className="mb-8 px-2">
+          <AppBrandMark subtitle="Patient Console" />
         </div>
 
         <nav className="flex-1 space-y-1 px-2">
