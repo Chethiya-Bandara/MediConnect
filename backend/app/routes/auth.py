@@ -29,12 +29,6 @@ def register(user: RegisterRequest):
         )
     
     role = user.role
-    if role == "health_ministry_admin":
-        raise HTTPException(
-            status_code=403,
-            detail="Health Ministry admin accounts must be provisioned manually.",
-        )
-
     auth_res = supabase.auth.sign_up({
         "email": user.email,
         "password": user.password
