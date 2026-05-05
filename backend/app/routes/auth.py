@@ -10,7 +10,6 @@ from app.schemas.auth_schema import (
 )
 from app.utils.helpers import hash_nic, generate_dhid, is_valid_password, get_password_errors, validate_dhid
 from supabase_auth.errors import AuthApiError
-from app.utils.helpers import validate_dhid, is_valid_nic
 
 
 router = APIRouter()
@@ -29,10 +28,6 @@ def register(user: RegisterRequest):
             }
         )
     
-    # NIC Validity check
-    if not is_valid_nic(user.nic):
-        raise HTTPException(400, "Invalid NIC")
-
     role = user.role
     auth_res = supabase.auth.sign_up({
         "email": user.email,
@@ -48,6 +43,7 @@ def register(user: RegisterRequest):
         user_metadata = {
             "full_name": user.fullName,
             "dob": user.dob,
+            "gender": user.gender,
             "role": role,
         }
         if role == "patient" and user.parentNic:
@@ -74,11 +70,14 @@ def register(user: RegisterRequest):
             if not validate_dhid(dhid):
                 raise HTTPException(status_code=400, detail="Invalid DHID generated")
             
-            supabase_admin.table("patients").insert({
+            patient_record = {
                 "user_id": user_id,
-                "nic": hash_nic(user.nic),
                 "dhid": dhid
-            }).execute()
+            }
+            if user.nic:
+                patient_record["nic"] = hash_nic(user.nic)
+
+            supabase_admin.table("patients").insert(patient_record).execute()
 
         elif role == "doctor":
             supabase_admin.table("doctors").insert({

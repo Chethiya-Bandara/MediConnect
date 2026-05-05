@@ -2,7 +2,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { BadgeCheck, Upload } from "lucide-react";
+import {
+  Building2,
+  Check,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Lock,
+  Pill,
+  X,
+  ShieldPlus,
+  Stethoscope,
+  Upload,
+  UserRound,
+} from "lucide-react";
 import { AlertMessage, Button, InputField } from "../../../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { PortalFooter, PortalTopNav } from "../components";
@@ -12,13 +25,14 @@ import type { RegisterFormValues } from "../types";
 import { calculateAge } from "../utils";
 
 const ROLE_FIELD_ORDER: Record<string, string[]> = {
-  PATIENT: ["role", "fullName", "email", "nic", "dob", "parentNic", "password", "confirmPassword"],
+  PATIENT: ["role", "fullName", "email", "nic", "dob", "gender", "parentNic", "password", "confirmPassword"],
   DOCTOR: [
     "role",
     "fullName",
     "email",
     "nic",
     "dob",
+    "gender",
     "specialization",
     "licenseNumber",
     "password",
@@ -31,6 +45,7 @@ const ROLE_FIELD_ORDER: Record<string, string[]> = {
     "email",
     "nic",
     "dob",
+    "gender",
     "pharmacyId",
     "password",
     "confirmPassword",
@@ -42,6 +57,7 @@ const ROLE_FIELD_ORDER: Record<string, string[]> = {
     "email",
     "nic",
     "dob",
+    "gender",
     "organisationId",
     "password",
     "confirmPassword",
@@ -53,6 +69,7 @@ const ROLE_FIELD_ORDER: Record<string, string[]> = {
     "email",
     "nic",
     "dob",
+    "gender",
     "organisationId",
     "password",
     "confirmPassword",
@@ -64,6 +81,7 @@ const ROLE_FIELD_ORDER: Record<string, string[]> = {
     "email",
     "nic",
     "dob",
+    "gender",
     "password",
     "confirmPassword",
     "credentialFile",
@@ -92,13 +110,61 @@ const ROLE_HELPERS = {
   },
 } as const;
 
+const ROLE_ICONS = {
+  PATIENT: UserRound,
+  DOCTOR: Stethoscope,
+  PHARMACIST: Pill,
+  HOSPITAL_ADMIN: Building2,
+  PHARMACY_ADMIN: ShieldPlus,
+  HEALTH_MINISTRY_ADMIN: Building2,
+} as const;
+
+const PASSWORD_RULES = [
+  {
+    id: "length",
+    label: "At least 10 characters",
+    test: (value: string) => value.length >= 10,
+  },
+  {
+    id: "uppercase",
+    label: "One uppercase letter",
+    test: (value: string) => /[A-Z]/.test(value),
+  },
+  {
+    id: "lowercase",
+    label: "One lowercase letter",
+    test: (value: string) => /[a-z]/.test(value),
+  },
+  {
+    id: "number",
+    label: "One number",
+    test: (value: string) => /\d/.test(value),
+  },
+  {
+    id: "special",
+    label: "One special character",
+    test: (value: string) => /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(value),
+  },
+  {
+    id: "spaces",
+    label: "No spaces",
+    test: (value: string) => !/\s/.test(value),
+  },
+] as const;
+
 export function RegisterPage() {
   const navigate = useNavigate();
   const { register: registerUser } = useAuth();
+  const roleSelectRef = useRef<HTMLDivElement | null>(null);
+  const genderSelectRef = useRef<HTMLDivElement | null>(null);
   const [submitMessage, setSubmitMessage] = useState<{
     type: "error" | "success";
     text: string;
   } | null>(null);
+  const [isRoleMenuOpen, setIsRoleMenuOpen] = useState(false);
+  const [isGenderMenuOpen, setIsGenderMenuOpen] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const redirectTimeoutRef = useRef<number | null>(null);
 
   const {
@@ -107,6 +173,7 @@ export function RegisterPage() {
     handleSubmit,
     clearErrors,
     resetField,
+    setValue,
     setFocus,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormValues>({
@@ -117,6 +184,7 @@ export function RegisterPage() {
       email: "",
       nic: "",
       dob: "",
+      gender: "",
       parentNic: "",
       specialization: "",
       licenseNumber: "",
@@ -128,6 +196,8 @@ export function RegisterPage() {
 
   const selectedRole = watch("role");
   const selectedDob = watch("dob");
+  const selectedGender = watch("gender");
+  const passwordValue = watch("password");
   const credentialFiles = watch("credentialFile");
   const age = calculateAge(selectedDob);
   const showParentNic =
@@ -144,6 +214,11 @@ export function RegisterPage() {
     [selectedRole],
   );
   const selectedCredentialName = credentialFiles?.item(0)?.name;
+  const isVerificationStage = submitMessage?.type === "success";
+  const passwordRuleStates = PASSWORD_RULES.map((rule) => ({
+    ...rule,
+    passed: rule.test(passwordValue ?? ""),
+  }));
 
   useEffect(() => {
     setSubmitMessage(null);
@@ -175,6 +250,28 @@ export function RegisterPage() {
     if (redirectTimeoutRef.current) {
       window.clearTimeout(redirectTimeoutRef.current);
     }
+  }, []);
+
+  useEffect(() => {
+    setIsRoleMenuOpen(false);
+  }, [selectedRole]);
+
+  useEffect(() => {
+    setIsGenderMenuOpen(false);
+  }, [selectedGender]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!roleSelectRef.current?.contains(event.target as Node)) {
+        setIsRoleMenuOpen(false);
+      }
+      if (!genderSelectRef.current?.contains(event.target as Node)) {
+        setIsGenderMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
   }, []);
 
   const onSubmit = async (values: RegisterFormValues) => {
@@ -223,28 +320,23 @@ export function RegisterPage() {
         <section className="register-card">
           <aside className="register-side">
             <div>
-              <p className="side-kicker">Vitalis Nexus</p>
               <h2>Secure Health Identity</h2>
               <p>
                 Join the centralized national framework for seamless healthcare
                 delivery. One ID, a lifetime of care.
               </p>
             </div>
-
-            <div className="side-badge">
-              <BadgeCheck size={18} />
-              <div>
-                <strong>Encrypted Vault</strong>
-                <small>Healthcare-grade compliance workflow.</small>
-              </div>
-            </div>
           </aside>
 
           <section className="register-form-wrap">
             <div className="step-strip">
-              <div className="active">1 Account Setup</div>
+              <div className={isVerificationStage ? "step-strip__step" : "step-strip__step active"}>
+                1 Account Setup
+              </div>
               <div className="line" />
-              <div>2 Verification</div>
+              <div className={isVerificationStage ? "step-strip__step active step-strip__step--verification" : "step-strip__step"}>
+                2 Verification
+              </div>
             </div>
 
             <form
@@ -261,13 +353,68 @@ export function RegisterPage() {
 
               <label className="field-wrapper">
                 <span className="field-label">Portal Role</span>
-                <select className="field-input field-select" {...register("role")}>
-                  {roleOptions.map((role) => (
-                    <option key={role.value} value={role.value}>
-                      {role.label}
-                    </option>
-                  ))}
-                </select>
+                <input type="hidden" {...register("role")} />
+                <div
+                  ref={roleSelectRef}
+                  className={`custom-select ${errors.role ? "custom-select--error" : ""} ${
+                    isRoleMenuOpen ? "custom-select--open" : ""
+                  }`}
+                >
+                  <button
+                    id="role"
+                    name="role"
+                    type="button"
+                    className="custom-select__trigger"
+                    aria-haspopup="listbox"
+                    aria-expanded={isRoleMenuOpen}
+                    onClick={() => setIsRoleMenuOpen((current) => !current)}
+                  >
+                    <span>{selectedRoleOption?.label ?? "Select role"}</span>
+                    <ChevronDown
+                      size={18}
+                      className={`custom-select__chevron ${
+                        isRoleMenuOpen ? "custom-select__chevron--open" : ""
+                      }`}
+                    />
+                  </button>
+
+                  {isRoleMenuOpen && (
+                    <div className="custom-select__menu" role="listbox" aria-labelledby="role">
+                      {roleOptions.map((role) => (
+                        (() => {
+                          const RoleIcon = ROLE_ICONS[role.value];
+
+                          return (
+                            <button
+                              key={role.value}
+                              type="button"
+                              role="option"
+                              aria-selected={selectedRole === role.value}
+                              className={`custom-select__option custom-select__option--compact ${
+                                selectedRole === role.value ? "custom-select__option--selected" : ""
+                              }`}
+                              onClick={() => {
+                                setValue("role", role.value, {
+                                  shouldDirty: true,
+                                  shouldTouch: true,
+                                  shouldValidate: true,
+                                });
+                                setIsRoleMenuOpen(false);
+                              }}
+                            >
+                              <span className="custom-select__option-row">
+                                <span className="custom-select__option-icon">
+                                  <RoleIcon size={16} />
+                                </span>
+                                <span className="custom-select__option-label">{role.label}</span>
+                              </span>
+                            </button>
+                          );
+                        })()
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {errors.role?.message && (
                   <span className="field-error">{errors.role.message}</span>
                 )}
@@ -292,13 +439,21 @@ export function RegisterPage() {
                   error={errors.email?.message}
                 />
 
-                <InputField
-                  id="nic"
-                  label="NIC"
-                  {...register("nic")}
-                  helperText={ROLE_HELPERS.PATIENT.nic}
-                  error={errors.nic?.message}
-                />
+                {!showParentNic ? (
+                  <InputField
+                    id="nic"
+                    label="NIC"
+                    {...register("nic")}
+                    error={errors.nic?.message}
+                  />
+                ) : (
+                  <InputField
+                    id="parentNic"
+                    label="Guardian NIC"
+                    {...register("parentNic")}
+                    error={errors.parentNic?.message}
+                  />
+                )}
 
                 <InputField
                   id="dob"
@@ -308,14 +463,85 @@ export function RegisterPage() {
                   error={errors.dob?.message}
                 />
 
+                <label className="field-wrapper" htmlFor="gender">
+                  <span className="field-label">Gender</span>
+                  <input type="hidden" {...register("gender")} />
+                  <div
+                    ref={genderSelectRef}
+                    className={`custom-select ${errors.gender ? "custom-select--error" : ""} ${
+                      isGenderMenuOpen ? "custom-select--open" : ""
+                    }`}
+                  >
+                    <button
+                      id="gender"
+                      name="gender"
+                      type="button"
+                      className="custom-select__trigger"
+                      aria-haspopup="listbox"
+                      aria-expanded={isGenderMenuOpen}
+                      onClick={() => setIsGenderMenuOpen((current) => !current)}
+                    >
+                      <span>
+                        {selectedGender === "MALE"
+                          ? "Male"
+                          : selectedGender === "FEMALE"
+                            ? "Female"
+                            : "Select gender"}
+                      </span>
+                      <ChevronDown
+                        size={18}
+                        className={`custom-select__chevron ${
+                          isGenderMenuOpen ? "custom-select__chevron--open" : ""
+                        }`}
+                      />
+                    </button>
+
+                    {isGenderMenuOpen && (
+                      <div className="custom-select__menu" role="listbox" aria-labelledby="gender">
+                        {[
+                          { value: "MALE", label: "Male" },
+                          { value: "FEMALE", label: "Female" },
+                        ].map((gender) => (
+                          <button
+                            key={gender.value}
+                            type="button"
+                            role="option"
+                            aria-selected={selectedGender === gender.value}
+                            className={`custom-select__option custom-select__option--compact ${
+                              selectedGender === gender.value ? "custom-select__option--selected" : ""
+                            }`}
+                            onClick={() => {
+                              setValue("gender", gender.value, {
+                                shouldDirty: true,
+                                shouldTouch: true,
+                                shouldValidate: true,
+                              });
+                              setIsGenderMenuOpen(false);
+                            }}
+                          >
+                            <span className="custom-select__option-label">{gender.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {errors.gender?.message && (
+                    <span className="field-error">{errors.gender.message}</span>
+                  )}
+                </label>
+
+                {selectedRole === "PATIENT" && showParentNic && (
+                  <div className="grid-full">
+                    <span className="field-helper">{ROLE_HELPERS.PATIENT.nic}</span>
+                  </div>
+                )}
+
                 {showParentNic && (
-                  <InputField
-                    id="parentNic"
-                    label="Guardian NIC"
-                    {...register("parentNic")}
-                    helperText="Required only when the patient is under 18 years old."
-                    error={errors.parentNic?.message}
-                  />
+                  <div className="grid-full">
+                    <span className="field-helper">
+                      Required for patients under 18 years old.
+                    </span>
+                  </div>
                 )}
 
                 {selectedRole === "DOCTOR" && (
@@ -362,22 +588,83 @@ export function RegisterPage() {
                   />
                 )}
 
-                <InputField
-                  id="password"
-                  type="password"
-                  label="Password"
-                  {...register("password")}
-                  error={errors.password?.message}
-                />
-
-                <InputField
-                  id="confirmPassword"
-                  type="password"
-                  label="Confirm Password"
-                  {...register("confirmPassword")}
-                  error={errors.confirmPassword?.message}
-                />
               </div>
+
+              <section className="password-section">
+                <div className="password-section__grid">
+                  <label className="field-wrapper" htmlFor="password">
+                    <span className="field-label">Password</span>
+                    <div className="field-control">
+                      <span className="field-icon">
+                        <Lock size={18} />
+                      </span>
+                      <input
+                        id="password"
+                        className={`field-input field-input--with-icon field-input--with-toggle ${
+                          errors.password ? "field-input--error" : ""
+                        }`}
+                        type={showPassword ? "text" : "password"}
+                        placeholder="Create a strong password"
+                        {...register("password")}
+                      />
+                      <button
+                        className="password-toggle"
+                        type="button"
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        onClick={() => setShowPassword((current) => !current)}
+                      >
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                    {errors.password?.message && (
+                      <span className="field-error">{errors.password.message}</span>
+                    )}
+                  </label>
+
+                  <label className="field-wrapper" htmlFor="confirmPassword">
+                    <span className="field-label">Confirm Password</span>
+                    <div className="field-control">
+                      <span className="field-icon">
+                        <Lock size={18} />
+                      </span>
+                      <input
+                        id="confirmPassword"
+                        className={`field-input field-input--with-icon field-input--with-toggle ${
+                          errors.confirmPassword ? "field-input--error" : ""
+                        }`}
+                        type={showConfirmPassword ? "text" : "password"}
+                        placeholder="Re-enter your password"
+                        {...register("confirmPassword")}
+                      />
+                      <button
+                        className="password-toggle"
+                        type="button"
+                        aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                        onClick={() => setShowConfirmPassword((current) => !current)}
+                      >
+                        {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                    {errors.confirmPassword?.message && (
+                      <span className="field-error">{errors.confirmPassword.message}</span>
+                    )}
+                  </label>
+                </div>
+
+                <ul className="password-requirements">
+                  {passwordRuleStates.map((rule) => (
+                    <li
+                      key={rule.id}
+                      className={rule.passed ? "password-requirements__item is-met" : "password-requirements__item"}
+                    >
+                      <span className="password-requirements__icon" aria-hidden="true">
+                        {rule.passed ? <Check size={14} /> : <X size={14} />}
+                      </span>
+                      <span>{rule.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
 
               {showCredentialUpload && (
                 <section className="upload-box">

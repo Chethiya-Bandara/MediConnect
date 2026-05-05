@@ -6,6 +6,8 @@ export type UserRole =
   | "PHARMACIST"
   | "PHARMACY_ADMIN";
 
+export type Gender = "MALE" | "FEMALE";
+
 export interface AuthUser {
   id: string;
   name: string;
@@ -13,6 +15,7 @@ export interface AuthUser {
   role: UserRole;
   nic?: string;
   dob?: string;
+  gender?: Gender;
   organisationId?: number | null;
   adminRole?: string | null;
   doctorId?: number | null;
@@ -31,6 +34,7 @@ export interface RegisterFormValues {
   role: UserRole;
   nic: string;
   dob: string;
+  gender: string;
   parentNic?: string | undefined;
   password: string;
   confirmPassword: string;

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { AlertMessage, Button, InputField } from "../../../components/ui";
 import { getRoleLandingPath } from "../../../lib/auth/roleRedirect";
 import { PortalFooter, PortalTopNav } from "../components";
@@ -54,24 +54,6 @@ export function LoginPage() {
             Access your unified health record, manage clinical appointments,
             and connect with healthcare providers across the nation.
           </p>
-
-          <div className="hero-cards">
-            <article>
-              <ShieldCheck size={18} color="#0f3970" />
-              <h3>Encrypted Vault</h3>
-              <p>
-                AES-256 bit healthcare-grade security for records and identity
-                exchange.
-              </p>
-            </article>
-            <article>
-              <ShieldCheck size={18} color="#0f3970" />
-              <h3>Verified ID</h3>
-              <p>
-                Seamless integration with trusted national identity workflows.
-              </p>
-            </article>
-          </div>
         </section>
 
         <section className="auth-card">

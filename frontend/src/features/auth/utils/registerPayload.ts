@@ -7,6 +7,7 @@ type RegisterRequestPayload = {
   fullName: string;
   nic: string;
   dob: string;
+  gender: "MALE" | "FEMALE";
   parentNic?: string;
   specialization?: string;
   licenseNumber?: string;
@@ -39,6 +40,7 @@ export function buildRegisterPayload(
     fullName: payload.fullName.trim(),
     nic: payload.nic.trim(),
     dob: normalizeDob(payload.dob),
+    gender: payload.gender as "MALE" | "FEMALE",
   };
 
   if (role === "PATIENT") {

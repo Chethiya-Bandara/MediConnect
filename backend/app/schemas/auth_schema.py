@@ -1,10 +1,11 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import re
 from typing import Optional
 
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 NIC_PATTERN = re.compile(r"^(?:\d{9}[VvXx]|\d{12})$")
+SUPPORTED_GENDERS = {"male", "female"}
 SUPPORTED_ROLES = {
     "patient",
     "doctor",
@@ -13,6 +14,34 @@ SUPPORTED_ROLES = {
     "pharmacist",
     "pharmacy_admin",
 }
+
+
+def _is_leap_year(year: int) -> bool:
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+
+
+def _parse_nic_birth_details(nic: str):
+    normalized = nic.strip().upper()
+    is_old_nic = bool(re.match(r"^\d{9}[VX]$", normalized))
+    is_new_nic = bool(re.match(r"^\d{12}$", normalized))
+
+    if not is_old_nic and not is_new_nic:
+        return None
+
+    year = int(normalized[:2]) + 1900 if is_old_nic else int(normalized[:4])
+    raw_day_value = int(normalized[2:5]) if is_old_nic else int(normalized[4:7])
+    gender = "female" if raw_day_value > 500 else "male"
+    day_of_year = raw_day_value - 500 if raw_day_value > 500 else raw_day_value
+    max_days = 366 if _is_leap_year(year) else 365
+
+    if day_of_year < 1 or day_of_year > max_days:
+        return None
+
+    birth_date = date(year, 1, 1) + timedelta(days=day_of_year - 1)
+    return {
+        "birth_date": birth_date,
+        "gender": gender,
+    }
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -23,6 +52,7 @@ class RegisterRequest(BaseModel):
     fullName: Optional[str] = None
     nic: Optional[str] = None
     dob: Optional[str] = None
+    gender: Optional[str] = None
 
     specialization: Optional[str] = None
     licenseNumber: Optional[str] = None
@@ -42,15 +72,20 @@ class RegisterRequest(BaseModel):
             raise ValueError("Invalid role")
         return normalized
 
-    @field_validator("nic", "parentNic")
+    @field_validator("nic")
     @classmethod
     def validate_nic(cls, value: Optional[str]):
         if value is None or not value.strip():
             return None
         cleaned = value.strip()
-        if not NIC_PATTERN.match(cleaned):
-            raise ValueError("NIC format is invalid")
         return cleaned
+
+    @field_validator("parentNic")
+    @classmethod
+    def normalize_parent_nic(cls, value: Optional[str]):
+        if value is None or not value.strip():
+            return None
+        return value.strip()
 
     @field_validator("dob")
     @classmethod
@@ -67,6 +102,17 @@ class RegisterRequest(BaseModel):
             raise ValueError("Date of birth cannot be in the future")
 
         return value
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, value: Optional[str]):
+        if value is None or not value.strip():
+            return None
+
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_GENDERS:
+            raise ValueError("Gender is invalid")
+        return normalized
 
     @field_validator("credentialFileSize")
     @classmethod
@@ -100,8 +146,6 @@ class RegisterRequest(BaseModel):
         )
 
         if role == "patient":
-            if not self.nic:
-                raise ValueError("NIC is required for patients")
             if dob_value is None:
                 raise ValueError("Date of birth is required for patients")
             age = date.today().year - dob_value.year - (
@@ -110,6 +154,32 @@ class RegisterRequest(BaseModel):
             )
             if age < 18 and not self.parentNic:
                 raise ValueError("Guardian NIC is required for underage patients")
+            if age >= 18 and not self.nic:
+                raise ValueError("NIC is required for adult patients")
+
+        if self.nic and not self.gender:
+            raise ValueError("Gender is required when NIC is provided")
+
+        should_validate_nic = True
+        if role == "patient" and dob_value is not None:
+            age = date.today().year - dob_value.year - (
+                (date.today().month, date.today().day)
+                < (dob_value.month, dob_value.day)
+            )
+            should_validate_nic = age >= 18
+
+        if should_validate_nic and self.nic:
+            if not NIC_PATTERN.match(self.nic):
+                raise ValueError("NIC format is invalid")
+
+        if should_validate_nic and self.nic and dob_value and self.gender:
+            nic_details = _parse_nic_birth_details(self.nic)
+            if nic_details is None:
+                raise ValueError("NIC contains an invalid birth-date sequence")
+            if nic_details["birth_date"] != dob_value:
+                raise ValueError("NIC does not match the supplied date of birth")
+            if nic_details["gender"] != self.gender:
+                raise ValueError("NIC does not match the supplied gender")
 
         if role == "doctor":
             if not self.specialization or not self.specialization.strip():

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { calculateAge } from "../utils";
+import { calculateAge, parseSriLankanNic } from "../utils";
 
 const userRoleSchema = z.enum([
   "PATIENT",
@@ -10,20 +10,21 @@ const userRoleSchema = z.enum([
   "PHARMACY_ADMIN",
 ]);
 
-const nicSchema = z
+const genderSchema = z
   .string()
-  .trim()
-  .regex(
-    /^(?:\d{9}[VvXx]|\d{12})$/,
-    "Enter a valid NIC (9 digits + V/X or 12 digits).",
-  );
+  .min(1, "Select a gender.")
+  .refine((value) => value === "MALE" || value === "FEMALE", {
+    message: "Select a valid gender.",
+  });
+
+const nicSchema = z.string().trim();
 
 export const registrationSchema = z
   .object({
     fullName: z.string().trim().min(3, "Name must be at least 3 characters."),
     email: z.string().trim().email("Enter a valid email."),
     role: userRoleSchema,
-    nic: nicSchema,
+    nic: z.string().trim(),
     dob: z
       .string()
       .min(1, "Date of birth is required.")
@@ -33,6 +34,7 @@ export const registrationSchema = z
       .refine((value) => new Date(value) <= new Date(), {
         message: "Date of birth cannot be in the future.",
       }),
+    gender: genderSchema,
     parentNic: z.string().trim().optional(),
     specialization: z.string().trim().optional(),
     licenseNumber: z.string().trim().optional(),
@@ -63,23 +65,64 @@ export const registrationSchema = z
 
     const age = calculateAge(values.dob);
     if (values.role === "PATIENT" && age !== null && age < 18) {
-      if (!values.parentNic) {
+      if (!values.parentNic?.trim()) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["parentNic"],
           message: "Guardian NIC is required for underage patients.",
         });
-        return;
       }
+      return;
+    }
 
-      const nicResult = nicSchema.safeParse(values.parentNic);
-      if (!nicResult.success) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["parentNic"],
-          message: "Guardian NIC format is invalid.",
-        });
-      }
+    if (!values.nic.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nic"],
+        message: "NIC is required.",
+      });
+      return;
+    }
+
+    const nicResult = nicSchema
+      .refine((value) => /^(?:\d{9}[VvXx]|\d{12})$/.test(value), {
+        message: "Enter a valid NIC (9 digits + V/X or 12 digits).",
+      })
+      .safeParse(values.nic);
+
+    if (!nicResult.success) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nic"],
+        message: "Enter a valid NIC (9 digits + V/X or 12 digits).",
+      });
+      return;
+    }
+
+    const nicDetails = parseSriLankanNic(values.nic);
+    if (!nicDetails) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nic"],
+        message: "NIC contains an invalid birth-date sequence.",
+      });
+      return;
+    }
+
+    if (nicDetails.birthDate !== values.dob) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nic"],
+        message: "NIC does not match the selected date of birth.",
+      });
+    }
+
+    if (nicDetails.gender !== values.gender) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["gender"],
+        message: "Gender does not match the selected NIC.",
+      });
     }
 
     if (values.role === "DOCTOR") {
