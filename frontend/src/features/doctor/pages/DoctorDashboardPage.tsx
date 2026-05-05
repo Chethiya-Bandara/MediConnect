@@ -1276,7 +1276,7 @@ export function DoctorDashboardPage() {
                         {dashboard?.doctor.specialization ?? "Specialization pending"} • {formatDate(new Date().toISOString())}
                       </p>
                       <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-                        Your live queue, encounter workload, and hospital-linked schedule status are all lined up here without the usual dashboard circus.
+                        Your live queue, encounter workload, and hospital-linked schedule status are all lined up here.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-3">
@@ -1917,10 +1917,10 @@ export function DoctorDashboardPage() {
                   <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     <h3 className="text-lg font-bold text-primary dark:text-blue-400">Scheduling rule</h3>
                     <p className="mt-3 text-sm leading-7 text-slate-500 dark:text-slate-400">
-                      Doctors now need at least one approved hospital before publishing live availability. That kills the orphan-slot nonsense.
+                      You need at least one approved hospital before publishing live availability.
                     </p>
                     <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
-                      Exact per-slot hospital selection still depends on the current slot schema. Hospital access is enforced now, but slot-to-hospital binding is still on the legacy contract.
+                      Affiliate yourself with at least one hospital before publishing availability slots.
                     </div>
                   </div>
                 </div>
@@ -1960,7 +1960,7 @@ export function DoctorDashboardPage() {
                 <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="mb-6 flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Editable Profile</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Profile</p>
                       <h3 className="mt-2 text-2xl font-extrabold dark:text-white">Identity settings</h3>
                       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                         Update the doctor-facing profile details patients and hospitals see.
@@ -2065,7 +2065,7 @@ export function DoctorDashboardPage() {
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Workspace theme</p>
                         <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                          Stored on this browser for the doctor workspace only.
+                          Select preferred theme for your workspace.
                         </p>
                       </div>
                       <div className="flex gap-2">

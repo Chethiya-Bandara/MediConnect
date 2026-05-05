@@ -533,7 +533,7 @@ export function PharmacyAdminDashboardPage() {
                   <div>
                     <h3 className="text-lg font-bold">Live Inventory Health</h3>
                     <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                      Straight from current inventory rows, with no guessed or fabricated metrics.
+                      Live summary of inventory.
                     </p>
                   </div>
                   <CheckCircle2 className="text-emerald-500 dark:text-emerald-400" size={22} />
@@ -561,10 +561,10 @@ export function PharmacyAdminDashboardPage() {
                     Pharmacy ID in scope: <span className="font-bold">{activePharmacyId || "Not assigned"}</span>
                   </div>
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    Dashboard summary source: <span className="font-bold">{activeSummary ? "Live backend summary" : "Inventory-only fallback"}</span>
+                    Dashboard summary source: <span className="font-bold">{activeSummary ? "Live summary" : "Inventory-only"}</span>
                   </div>
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    Staff action module: <span className="font-bold">Currently unavailable</span>, so permission updates remain disabled until backend support is available.
+                    Staff action module: <span className="font-bold">Currently unavailable</span>, so permission updates remain disabled until support is available.
                   </div>
                 </div>
               </div>
@@ -850,7 +850,7 @@ export function PharmacyAdminDashboardPage() {
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight">Pharmacist Management</h1>
                 <p className="mt-2 text-slate-500 dark:text-slate-400">
-                  Live pharmacist accounts under this pharmacy organisation, with real backend permission control.
+                  Live pharmacist accounts under this pharmacy organisation, with permission control.
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -889,7 +889,7 @@ export function PharmacyAdminDashboardPage() {
                   <div className="mb-5">
                     <h3 className="text-lg font-bold">Register New Pharmacist</h3>
                     <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                      Creates the auth user, users row, and pharmacists row in one shot instead of this page pretending to help.
+                      Creates the auth user, users row, and pharmacists row in one shot.
                     </p>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
@@ -1082,7 +1082,7 @@ export function PharmacyAdminDashboardPage() {
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight">Commercial Insights</h1>
                 <p className="mt-2 text-slate-500 dark:text-slate-400">
-                  Tracked dispensing trends and financial performance from backend event data.
+                  Tracked dispensing trends and financial performance.
                 </p>
               </div>
               <div className="flex gap-4">
@@ -1178,7 +1178,7 @@ export function PharmacyAdminDashboardPage() {
               </div>
 
               <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300">
-                Export actions use the live backend summary already loaded on this page. If charts look sparse, the source data itself is limited.
+                Export actions use the live summary already loaded on this page. If charts look sparse, the source data itself is limited.
               </div>
             </div>
           </div>

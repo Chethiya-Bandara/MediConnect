@@ -1163,7 +1163,7 @@ export function HealthMinistryAdminDashboardPage() {
                     Organisation Registry
                   </h1>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    Create organisations centrally and flip them between active and suspended without wrecking the rest of the ecosystem.
+                    Create organisations centrally and flip them between active and suspended states.
                   </p>
                 </div>
                 <button
@@ -1440,7 +1440,7 @@ export function HealthMinistryAdminDashboardPage() {
                     <div>
                       <h2 className="font-headline text-lg font-bold">Add Medicine</h2>
                       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                        Add a clean catalog row here so doctors, pharmacists, and pharmacy admins all stop inventing their own spellings and prices.
+                        Ensure correct spelling and valid prices are entered.
                       </p>
                     </div>
                     <PackagePlus className="text-blue-700 dark:text-blue-400" size={20} />
@@ -1554,13 +1554,13 @@ export function HealthMinistryAdminDashboardPage() {
                     <table className="w-full text-left text-sm">
                       <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                         <tr>
-                          <th className="px-4 py-3 font-semibold">Medicine</th>
+                          <th className="px-4 py-3 font-semibold w-[35%]">Medicine</th>
                           <th className="px-4 py-3 font-semibold">Unit</th>
-                          <th className="px-4 py-3 font-semibold">Wholesale</th>
-                          <th className="px-4 py-3 font-semibold">Retail</th>
-                          <th className="px-4 py-3 font-semibold">Inventory links</th>
-                          <th className="px-4 py-3 font-semibold">Created</th>
-                          <th className="px-4 py-3 text-right font-semibold">Action</th>
+                          <th className="px-4 py-3 font-semibold w-[120px]">Wholesale</th>
+                          <th className="px-4 py-3 font-semibold w-[120px]">Retail</th>
+                          {/* <th className="px-4 py-3 font-semibold">Inventory links</th> removed for table clarity */}
+                          <th className="px-4 py-3 font-semibold w-[120px]">Created</th>
+                          <th className="px-4 py-3 text-right font-semibold w-[180px]">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -1575,30 +1575,30 @@ export function HealthMinistryAdminDashboardPage() {
 
                             return (
                               <tr key={row.id}>
-                                <td className="px-4 py-4 align-top">
+                                <td className="px-4 py-4 align-top w-[35%]">
                                   <input
                                     type="text"
                                     value={draft.name}
                                     onChange={(event) =>
                                       updateMedicineDraft(row.id, "name", event.target.value)
                                     }
-                                    className="w-full rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                                    className="w-full min-w-[240px] rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                                   />
                                   <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                     ID: {row.id}
                                   </div>
                                 </td>
-                                <td className="px-4 py-4 align-top">
+                                <td className="px-4 py-4 align-top w-[150px]">
                                   <input
                                     type="text"
                                     value={draft.unit}
                                     onChange={(event) =>
                                       updateMedicineDraft(row.id, "unit", event.target.value)
                                     }
-                                    className="w-full rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                                    className="w-full min-w-[60px] rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                                   />
                                 </td>
-                                <td className="px-4 py-4 align-top">
+                                <td className="px-4 py-4 align-top w-[150px]">
                                   <input
                                     type="number"
                                     min="0"
@@ -1611,7 +1611,7 @@ export function HealthMinistryAdminDashboardPage() {
                                         event.target.value,
                                       )
                                     }
-                                    className="w-full rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                                    className="w-full min-w-[20px] rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                                   />
                                   <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                     {formatLkr(Number(draft.wholesalePrice))}
@@ -1636,37 +1636,27 @@ export function HealthMinistryAdminDashboardPage() {
                                     {formatLkr(Number(draft.retailPrice))}
                                   </div>
                                 </td>
-                                <td className="px-4 py-4 align-top text-slate-500 dark:text-slate-400">
+                                {/* <td className="px-4 py-4 align-top text-slate-500 dark:text-slate-400">
                                   {row.inventoryLinks > 0 ? `${row.inventoryLinks} stock row(s)` : "Not linked"}
-                                </td>
+                                </td> */}
                                 <td className="px-4 py-4 align-top text-slate-500 dark:text-slate-400">
                                   {formatDisplayDate(row.createdAt)}
                                 </td>
-                                <td className="px-4 py-4 align-top">
-                                  <div className="flex justify-end gap-2">
+                                <td className="px-4 py-4 align-top w-[180px] text-right">
+                                  <div className="flex flex-col items-end gap-2">
                                     <button
                                       type="button"
                                       onClick={() => void handleMedicineSave(row)}
-                                      disabled={
-                                        dashboard.isSubmittingMedicine ||
-                                        !draft.name.trim() ||
-                                        !draft.unit.trim()
-                                      }
-                                      className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white hover:opacity-90 disabled:opacity-60 dark:bg-blue-600"
+                                      className="w-[110px] inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white hover:opacity-90 disabled:opacity-60 dark:bg-blue-600"
                                     >
                                       <Save size={14} />
                                       Save
                                     </button>
+
                                     <button
                                       type="button"
                                       onClick={() => void handleMedicineDelete(row)}
-                                      disabled={dashboard.isSubmittingMedicine || row.inventoryLinks > 0}
-                                      className="inline-flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30"
-                                      title={
-                                        row.inventoryLinks > 0
-                                          ? "This medicine is already linked to pharmacy inventory and cannot be deleted until those rows are removed."
-                                          : "Delete medicine"
-                                      }
+                                      className="w-[110px] inline-flex items-center justify-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30"
                                     >
                                       <Trash2 size={14} />
                                       Delete
@@ -1701,7 +1691,7 @@ export function HealthMinistryAdminDashboardPage() {
                     Analytics & Gov Reporting
                   </h1>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    Live analytics where data exists, and honest empty states where the backend has no diagnosis telemetry yet.
+                    Live analytics of diseases and healthcare workflowa.
                   </p>
                 </div>
                 <button
@@ -1843,7 +1833,7 @@ export function HealthMinistryAdminDashboardPage() {
                     <div>
                       <h3 className="font-headline text-lg font-bold">Analytics Integrity Notes</h3>
                       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                        These cards stay tied to whatever the backend actually returned for the active district and date range.
+                        System overview analytics.
                       </p>
                     </div>
                     <Bot className="text-cyan-600 dark:text-cyan-400" size={20} />
@@ -1892,7 +1882,7 @@ export function HealthMinistryAdminDashboardPage() {
                   </div>
                 </div>
                 <div className="mt-5 rounded-2xl bg-slate-50 p-5 text-sm leading-relaxed text-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                  {dashboard.report ?? "No report generated yet. Hit the button and the backend will summarise the live registry data it actually has."}
+                  {dashboard.report ?? "No report generated yet. Hit the button to generate a summary of the live registry data."}
                 </div>
                 {analyticsExportMessage ? (
                   <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(analyticsExportMessage)}`}>

@@ -150,7 +150,7 @@ export function PharmacistDashboardPage() {
   );
   const dispenseGuardMessage = useMemo(() => {
     if (!selectedPrescription) return "Select a live prescription before trying to dispense anything.";
-    if (!dashboard.pharmacyId.trim()) return "Enter the pharmacy organisation ID before the backend will accept a dispense request.";
+    if (!dashboard.pharmacyId.trim()) return "Enter the pharmacy organisation ID.";
     if (dashboard.unsupportedSelections.length > 0) {
       return "Cancelled and expired item transitions are not supported by the current pharmacist endpoint.";
     }
@@ -219,7 +219,7 @@ export function PharmacistDashboardPage() {
         tone: "error",
         title: "Pharmacy ID required",
         description:
-          "Current backend dispense endpoint needs the pharmacy organisation ID before it will process stock reduction.",
+          "Pharmacy organisation ID is required before stock reduction is processed.",
       });
     }
 
@@ -472,7 +472,7 @@ export function PharmacistDashboardPage() {
                         Live Queue Matches
                       </h3>
                       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                        Pick the exact prescription before dispensing so the selected queue item matches the live backend record.
+                        Pick the exact prescription before dispensing.
                       </p>
                     </div>
                     {lookupQuery ? (

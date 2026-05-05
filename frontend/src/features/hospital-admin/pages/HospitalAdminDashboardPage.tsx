@@ -1029,7 +1029,7 @@ export function HospitalAdminDashboardPage() {
                 <aside className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <h2 className="font-headline text-lg font-bold">Invite Doctor</h2>
                   <p className="text-sm text-slate-500 dark:text-slate-400">
-                    Send an invite against the exact hospital organisation ID. If the backend rejects the org mapping, the error below will explain the failure clearly.
+                    Send an invite to a doctor to join the selected hospital.
                   </p>
                   <div className="space-y-4">
                     <input
@@ -1060,8 +1060,8 @@ export function HospitalAdminDashboardPage() {
                     </p>
                     <ul className="mt-3 space-y-2">
                       <li>Use the doctor&apos;s login email, not a personal alias.</li>
-                      <li>Hospital ID must match the backend organisation record exactly.</li>
-                      <li>Pending invites will stay pending until the doctor accepts from their side.</li>
+                      <li>Hospital ID must match the ID given to this hospital.</li>
+                      <li>Pending invites will remain pending until the doctor accepts the invitation. After which, the doctor will join the hospital.</li>
                     </ul>
                   </div>
 
@@ -1108,7 +1108,7 @@ export function HospitalAdminDashboardPage() {
                     Scheduling & Availability
                   </h1>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    Generate real availability slots and load live schedule data for affiliated doctors.
+                    Generate availability slots and load live schedule data for affiliated doctors.
                   </p>
                 </div>
                 {generatedSlotSummary ? (
@@ -1127,7 +1127,7 @@ export function HospitalAdminDashboardPage() {
                     </p>
                     <h3 className="mt-2 text-lg font-extrabold">Doctor and day</h3>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      Selecting a doctor or date now loads that day automatically.
+                      Selecting a doctor and date to load data.
                     </p>
                   </div>
                   <div className="space-y-4">
@@ -1314,7 +1314,7 @@ export function HospitalAdminDashboardPage() {
                       <div>
                         <h4 className="text-sm font-bold">Existing Slots For {formatShortDate(slotDate)}</h4>
                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Edit or delete open slots. Booked slots stay locked.
+                          Edit or delete open slots. Booked slots cannot be cancelled.
                         </p>
                       </div>
                       <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:bg-slate-900 dark:text-slate-400">
