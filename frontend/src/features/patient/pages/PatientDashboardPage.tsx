@@ -166,6 +166,7 @@ function getInitials(value: string) {
 type DashboardSelectOption = {
   value: string;
   label: string;
+  description?: string;
 };
 
 function DashboardCustomSelect({
@@ -238,6 +239,9 @@ function DashboardCustomSelect({
               }}
             >
               <span className="custom-select__option-label">{option.label}</span>
+              {option.description ? (
+                <span className="custom-select__option-copy">{option.description}</span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -354,6 +358,7 @@ export function PatientDashboardPage() {
   const [assistantHistoryLoaded, setAssistantHistoryLoaded] = useState(false);
   const [isAssistantLoading, setIsAssistantLoading] = useState(false);
   const [profileName, setProfileName] = useState("");
+  const [medicalRecordConsentDefault, setMedicalRecordConsentDefault] = useState(true);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [toast, setToast] = useState<{ message: string; tone: "success" | "error" | "info" } | null>(null);
@@ -543,6 +548,10 @@ export function PatientDashboardPage() {
   useEffect(() => {
     setProfileName(displayName);
   }, [displayName]);
+
+  useEffect(() => {
+    setMedicalRecordConsentDefault(overview?.patient.medical_record_consent_default ?? true);
+  }, [overview?.patient.medical_record_consent_default]);
 
   useEffect(() => {
     const storedPhoto = localStorage.getItem(profilePhotoStorageKey);
@@ -909,14 +918,17 @@ export function PatientDashboardPage() {
 
   const saveProfile = async () => {
     const cleaned = profileName.trim();
-    if (cleaned.length < 3) {
+    if (!cleaned || cleaned.length < 3) {
       showToast("Name must be at least 3 characters.", "error");
       return;
     }
 
     setIsSavingProfile(true);
     try {
-      await updatePatientProfile({ name: cleaned });
+      await updatePatientProfile({
+        name: cleaned,
+        medical_record_consent_default: medicalRecordConsentDefault,
+      });
       showToast("Profile updated.");
       await loadDashboard();
     } catch (error) {
@@ -999,7 +1011,7 @@ export function PatientDashboardPage() {
               <Menu size={20} />
             </button>
             <div>
-              <h2 className="font-headline text-lg font-extrabold text-blue-900 dark:text-blue-400 sm:text-xl">{currentHeaderTitle}</h2>
+              <h2 className="font-headline text-[1.45rem] font-extrabold uppercase tracking-[0.08em] text-blue-900 dark:text-blue-400 sm:text-[1.75rem]">{currentHeaderTitle}</h2>
             </div>
           </div>
 
@@ -1699,6 +1711,60 @@ export function PatientDashboardPage() {
                       </div>
                     </div>
 
+                    <div className="mt-6 rounded-[1.35rem] border border-slate-200 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-900/70">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="max-w-xl">
+                          <div className="flex items-center gap-3">
+                            <div className="rounded-2xl border border-slate-200 bg-slate-100 p-3 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                              <ShieldPlus size={16} />
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Medical record consent</p>
+                              <h4 className="mt-1 text-sm font-bold text-slate-900 dark:text-white">Default access for new appointments</h4>
+                            </div>
+                          </div>
+                          <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                            Keep this enabled to grant doctors default access to your medical history on future bookings.
+                            You can still revoke or grant consent per appointment later.
+                          </p>
+                          {overview.patient.medical_record_consent_last_updated ? (
+                            <p className="mt-3 text-xs font-medium uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                              Last changed {formatDateTime(overview.patient.medical_record_consent_last_updated)}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={medicalRecordConsentDefault}
+                          onClick={() => setMedicalRecordConsentDefault((current) => !current)}
+                          className={`inline-flex items-center gap-3 rounded-full border px-3 py-2 transition ${
+                            medicalRecordConsentDefault
+                              ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-200"
+                              : "border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                        >
+                          <span
+                            className={`relative h-7 w-12 rounded-full transition ${
+                              medicalRecordConsentDefault
+                                ? "bg-emerald-500/90 dark:bg-emerald-500"
+                                : "bg-slate-300 dark:bg-slate-600"
+                            }`}
+                          >
+                            <span
+                              className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition ${
+                                medicalRecordConsentDefault ? "left-6" : "left-1"
+                              }`}
+                            />
+                          </span>
+                          <span className="min-w-[88px] text-left text-sm font-bold">
+                            {medicalRecordConsentDefault ? "Default On" : "Default Off"}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                       <button
                         type="button"
@@ -1780,7 +1846,7 @@ export function PatientDashboardPage() {
       </main>
       {modal === "digital-id" && overview ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-md" onClick={(event) => event.target === event.currentTarget && setModal(null)}>
-          <div className="w-full max-w-md rounded-[2.2rem] border border-slate-200/80 bg-white p-7 shadow-[0_32px_90px_rgba(2,6,23,0.45)] dark:border-slate-700/90 dark:bg-slate-900 sm:p-8">
+          <div className="w-full max-w-[70rem] rounded-[2.2rem] border border-slate-200/80 bg-white p-6 shadow-[0_32px_90px_rgba(2,6,23,0.45)] dark:border-slate-700/90 dark:bg-slate-900 sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Patient identity</p>
@@ -1794,13 +1860,54 @@ export function PatientDashboardPage() {
                 <X size={18} />
               </button>
             </div>
-            <div className="mt-6 rounded-[1.8rem] bg-slate-100 p-6 dark:bg-slate-800">
-              <p className="text-center text-xs uppercase tracking-[0.22em] text-slate-400">DHID</p>
-              <p className="mt-3 text-center font-headline text-[2rem] font-extrabold tracking-[0.16em] text-primary dark:text-blue-300">{overview.patient.dhid}</p>
-              <div className="mt-5 flex justify-center rounded-[1.6rem] bg-white p-5 shadow-inner dark:bg-slate-900">
-                <img src={qrCodeUrl} alt={`QR code for ${overview.patient.dhid}`} className="h-56 w-56 rounded-xl bg-white p-2" />
+            <div className="mt-6 overflow-hidden rounded-[1.9rem] bg-slate-100 p-4 dark:bg-slate-800 sm:p-5">
+              <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
+                <div className="rounded-[1.6rem] bg-slate-950 px-6 py-6 text-white shadow-inner shadow-black/20">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-100/70">Patient identity</p>
+                  <div className="mt-6 rounded-[1.4rem] border border-white/10 bg-white/5 px-5 py-5">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-100/60">DHID</p>
+                    <div className="mt-3 space-y-2">
+                      {overview.patient.dhid.match(/.{1,12}/g)?.map((segment, index) => (
+                        <p
+                          key={`${segment}-${index}`}
+                          className="font-headline text-[2rem] font-extrabold tracking-[0.14em] text-blue-200 sm:text-[2.25rem]"
+                        >
+                          {segment}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-[1.25rem] bg-white/8 px-4 py-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-100/65">Issued</p>
+                      <p className="mt-2 text-sm text-blue-50/85">{formatDateTime(overview.patient.created_at)}</p>
+                    </div>
+                    <div className="rounded-[1.25rem] bg-white/8 px-4 py-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-100/65">Usage</p>
+                      <p className="mt-2 text-sm text-blue-50/85">
+                        Present this ID or QR code at registration, pharmacy, and verified hospital touchpoints.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col rounded-[1.6rem] bg-white p-5 shadow-inner dark:bg-slate-900">
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">QR access card</p>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      Scan this code to retrieve the linked digital patient identity.
+                    </p>
+                  </div>
+                  <div className="flex min-h-[24rem] flex-1 items-center justify-center rounded-[1.5rem] bg-slate-100 p-4 dark:bg-slate-800">
+                    <img
+                      src={qrCodeUrl}
+                      alt={`QR code for ${overview.patient.dhid}`}
+                      className="aspect-square w-full max-w-[21rem] rounded-xl bg-white p-3 shadow-sm"
+                    />
+                  </div>
+                </div>
               </div>
-              <p className="mt-4 text-center text-sm text-slate-500 dark:text-slate-400">Created {formatDateTime(overview.patient.created_at)}</p>
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               <button type="button" onClick={() => void copyDhid()} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3.5 font-bold text-white dark:bg-blue-600">
@@ -1970,7 +2077,7 @@ export function PatientDashboardPage() {
 
       {modal === "appointment" ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-md" onClick={(event) => event.target === event.currentTarget && setModal(null)}>
-          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-[2rem] border border-slate-200/80 bg-white shadow-[0_32px_90px_rgba(2,6,23,0.48)] dark:border-slate-700/90 dark:bg-slate-900">
+          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[2rem] border border-slate-200/80 bg-white shadow-[0_32px_90px_rgba(2,6,23,0.48)] dark:border-slate-700/90 dark:bg-slate-900">
             <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-8 pb-6 pt-8 dark:border-slate-800">
               <div>
                 <h3 className="text-2xl font-bold">{editingAppointment ? "Reschedule Appointment" : "Book Appointment"}</h3>
@@ -1986,7 +2093,7 @@ export function PatientDashboardPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-8 py-6">
-              <div className="space-y-5">
+              <div className="space-y-6">
                 {editingAppointment ? (
                   <>
                     <div className="grid gap-4 md:grid-cols-3">
@@ -2021,8 +2128,11 @@ export function PatientDashboardPage() {
                   </>
                 ) : (
                   <>
-                    <div className="grid gap-4 md:grid-cols-3">
-                      <div>
+                    <div className="rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950/30">
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
+                        <div className="space-y-4">
+                          <div className="grid gap-4 md:grid-cols-3">
+                            <div>
                         <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Organisation</label>
                         <DashboardCustomSelect
                           value={appointmentForm.organisationId}
@@ -2040,11 +2150,12 @@ export function PatientDashboardPage() {
                           options={organisationOptions.map((item) => ({
                             value: String(item.id),
                             label: item.name,
+                            description: "Verified booking organisation",
                           }))}
                         />
-                      </div>
+                            </div>
 
-                      <div>
+                            <div>
                         <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Doctor</label>
                         <DashboardCustomSelect
                           value={appointmentForm.doctorId}
@@ -2063,11 +2174,12 @@ export function PatientDashboardPage() {
                           options={doctorOptions.map((item) => ({
                             value: String(item.id),
                             label: item.name,
+                            description: item.specialization || "Specialization not set",
                           }))}
                         />
-                      </div>
+                            </div>
 
-                      <div>
+                            <div>
                         <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Date</label>
                         <input
                           type="date"
@@ -2084,14 +2196,55 @@ export function PatientDashboardPage() {
                           disabled={!appointmentForm.doctorId}
                           className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         />
+                            </div>
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div>
+                              <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected Start Time</label>
+                              <input type="datetime-local" value={appointmentForm.startTime} readOnly className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                            </div>
+                            <div>
+                              <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected End Time</label>
+                              <input type="datetime-local" value={appointmentForm.endTime} readOnly className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-[1.45rem] bg-white p-5 shadow-sm dark:bg-slate-900">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Selected doctor profile</p>
+                          {selectedOption ? (
+                            <div className="mt-4 space-y-4">
+                              <div className="rounded-[1.25rem] bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
+                                <p className="text-lg font-bold text-slate-900 dark:text-white">{selectedOption.doctor_name}</p>
+                                <p className="mt-2 inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                                  {selectedOption.specialization || "Specialization not set"}
+                                </p>
+                                <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+                                  Practising at {selectedOption.organisation_name}
+                                </p>
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900/70">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Organisation</p>
+                                  <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">{selectedOption.organisation_name}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900/70">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Booking state</p>
+                                  <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
+                                    {appointmentForm.appointmentDate ? "Date selected" : "Awaiting date"}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-4 rounded-[1.25rem] border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
+                              Pick an organisation and doctor to preview the specialization and booking context here.
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-
-                    {selectedOption ? (
-                      <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">
-                        {selectedOption.doctor_name} • {selectedOption.specialization || "Specialization not set"} • {selectedOption.organisation_name}
-                      </div>
-                    ) : null}
 
                     <div>
                       <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Available Slots</label>
@@ -2111,8 +2264,20 @@ export function PatientDashboardPage() {
                           message="No open slots are published for this doctor on the selected date. Try another date or doctor."
                         />
                       ) : (
-                        <div className="max-h-72 overflow-y-auto pr-2">
-                          <div className="grid gap-3">
+                        <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/30">
+                          <div className="mb-4 flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Published slots</p>
+                              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                Choose the appointment window that best matches your visit.
+                              </p>
+                            </div>
+                            <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                              {visibleSlots.length} slot{visibleSlots.length === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                          <div className="max-h-72 overflow-y-auto pr-2">
+                            <div className="grid gap-3 md:grid-cols-2">
                             {visibleSlots.map((slot) => {
                               const active = appointmentForm.slotId === String(slot.id);
                               return (
@@ -2134,24 +2299,15 @@ export function PatientDashboardPage() {
                                   }`}
                                 >
                                   <p className="text-sm font-bold">{formatDateTime(slot.start_time)}</p>
-                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ends {formatDateTime(slot.end_time)}</p>
+                                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">Ends</p>
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{formatDateTime(slot.end_time)}</p>
                                 </button>
                               );
                             })}
+                            </div>
                           </div>
                         </div>
                       )}
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected Start Time</label>
-                        <input type="datetime-local" value={appointmentForm.startTime} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
-                      </div>
-                      <div>
-                        <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">Selected End Time</label>
-                        <input type="datetime-local" value={appointmentForm.endTime} readOnly className="w-full rounded-xl border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
-                      </div>
                     </div>
                   </>
                 )}
