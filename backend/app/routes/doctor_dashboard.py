@@ -775,9 +775,9 @@ def _build_dashboard_payload(context, active_appointment_id: Optional[int] = Non
         .select("*")
         .eq("doctor_id", doctor_id)
         .order("start_time")
+        .limit(100)
         .execute()
-        .data
-        or []
+        .data or []
     )
     affiliations = _doctor_affiliation_rows(doctor_id)
     encounters = (
@@ -785,9 +785,9 @@ def _build_dashboard_payload(context, active_appointment_id: Optional[int] = Non
         .select("*")
         .eq("doctor_id", doctor_id)
         .order("created_at", desc=True)
+        .limit(100)
         .execute()
-        .data
-        or []
+        .data or []
     )
 
     patient_lookup = _patient_map({row["patient_id"] for row in appointments if row.get("patient_id")})

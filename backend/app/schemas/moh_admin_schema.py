@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, Field
 
 
 class OrganizationApprovalRequest(BaseModel):
@@ -80,8 +80,8 @@ class OrganizationCreateRequest(BaseModel):
 class MedicineUpsertRequest(BaseModel):
     name: str
     unit: str
-    wholesale_price: float
-    retail_price: float
+    wholesale_price: float = Field(..., gt=0)
+    retail_price: float = Field(..., gt=0)
 
     @field_validator("name", "unit")
     @classmethod
