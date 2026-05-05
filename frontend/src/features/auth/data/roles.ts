@@ -32,4 +32,9 @@ export const roleOptions: RoleOption[] = [
     label: "Pharmacy Admin",
     description: "Control stock, medicine pricing, and inventory workflow.",
   },
+  {
+    value: "HEALTH_MINISTRY_ADMIN",
+    label: "Health Ministry Admin",
+    description: "Oversee approvals, analytics, and governance metrics.",
+  },
 ];
