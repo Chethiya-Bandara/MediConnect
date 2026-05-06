@@ -96,3 +96,49 @@ export interface HealthMinistryAuditLog {
   action: string | null;
   details: string | null;
 }
+
+export type DeletionEntityType =
+  | "patient"
+  | "doctor"
+  | "pharmacist"
+  | "hospital_admin"
+  | "medicine"
+  | "hospital"
+  | "pharmacy"
+  | "organisation";
+
+export type DeletionRequestStatus = "pending" | "approved" | "expired" | "cancelled";
+
+export interface DeletionRequest {
+  id: string;
+  entityType: DeletionEntityType;
+  entityId: string;
+  entityDisplayName: string | null;
+  status: DeletionRequestStatus;
+  reason: string | null;
+  requestedAt: string | null;
+  expiresAt: string | null;
+  approvedAt: string | null;
+  requestedByName: string | null;
+  approvedByName: string | null;
+  canApprove: boolean;
+}
+
+export interface RegistryPersonItem {
+  id: string;
+  userId: string | null;
+  name: string | null;
+  email: string | null;
+  status: string | null;
+  createdAt: string | null;
+  // doctor-specific
+  slmcNumber?: string | null;
+  specialization?: string | null;
+  // patient-specific
+  dhid?: string | null;
+  // pharmacist-specific
+  licenseNo?: string | null;
+  // hospital admin-specific
+  adminRole?: string | null;
+  organisationId?: number | string | null;
+}

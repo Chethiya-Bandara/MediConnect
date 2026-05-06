@@ -6,6 +6,7 @@ import {
   Building2,
   CheckCircle2,
   ClipboardList,
+  Clock,
   Download,
   LayoutDashboard,
   LogOut,
@@ -15,12 +16,14 @@ import {
   RefreshCcw,
   Save,
   Search,
+  ShieldAlert,
   Stethoscope,
   Sun,
   Trash2,
   UserCircle2,
   UserRoundCheck,
   Users,
+  XCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { AppBrandMark } from "../../../components/ui";
@@ -28,10 +31,13 @@ import { useAuth } from "../../auth/context/AuthContext";
 import { useHealthMinistryAdminDashboard } from "../hooks/useHealthMinistryAdminDashboard";
 import type {
   ApprovalStatus,
+  DeletionEntityType,
+  DeletionRequest,
   GovernanceAction,
   GovernanceTargetType,
   ManagedMedicineItem,
   ManagedOrganisationItem,
+  RegistryPersonItem,
 } from "../types";
 
 type DashboardView =
@@ -40,7 +46,8 @@ type DashboardView =
   | "organisations"
   | "medicines"
   | "analytics"
-  | "audit";
+  | "audit"
+  | "deletions";
 type ThemeMode = "light" | "dark";
 type ApprovalEntityFilter = "all" | "organisations" | "doctors";
 
@@ -51,6 +58,7 @@ const views = [
   { id: "medicines", label: "Medicine Registry", icon: Pill },
   { id: "analytics", label: "Analytics & Reports", icon: BarChart3 },
   { id: "audit", label: "Audit Logs", icon: ClipboardList },
+  { id: "deletions", label: "Deletion Requests", icon: ShieldAlert },
 ] satisfies Array<{
   id: DashboardView;
   label: string;
@@ -188,6 +196,370 @@ function downloadCsv(filename: string, rows: string[][]) {
   link.download = filename;
   link.click();
   window.URL.revokeObjectURL(url);
+}
+
+type DashboardHook = ReturnType<typeof useHealthMinistryAdminDashboard>;
+
+function statusBadge(status: string | null) {
+  const s = (status ?? "").toLowerCase();
+  if (s === "pending") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
+  if (s === "approved") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (s === "expired") return "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400";
+  if (s === "deactivated") return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
+  return "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300";
+}
+
+function timeRemaining(expiresAt: string | null): string {
+  if (!expiresAt) return "";
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  if (diff <= 0) return "Expired";
+  const hours = Math.floor(diff / 3_600_000);
+  const mins = Math.floor((diff % 3_600_000) / 60_000);
+  return `${hours}h ${mins}m remaining`;
+}
+
+type PersonTab = "patients" | "doctors" | "pharmacists" | "hospital_admins";
+
+function DeletionsView({
+  dashboard,
+  onPersonDeleteRequest,
+  formatDisplayDate,
+}: {
+  dashboard: DashboardHook;
+  onPersonDeleteRequest: (person: RegistryPersonItem, entityType: DeletionEntityType) => void;
+  formatDisplayDate: (v: string | null | undefined) => string;
+}) {
+  const [personTab, setPersonTab] = useState<PersonTab>("patients");
+  const [personSearch, setPersonSearch] = useState("");
+  const [requestSearch, setRequestSearch] = useState("");
+
+  const personList: RegistryPersonItem[] = (() => {
+    if (personTab === "patients") return dashboard.patientsRegistry;
+    if (personTab === "doctors") return dashboard.doctorsRegistry;
+    if (personTab === "pharmacists") return dashboard.pharmacistsRegistry;
+    return dashboard.hospitalAdminsRegistry;
+  })();
+
+  const entityTypeForTab: DeletionEntityType = (() => {
+    if (personTab === "patients") return "patient";
+    if (personTab === "doctors") return "doctor";
+    if (personTab === "pharmacists") return "pharmacist";
+    return "hospital_admin";
+  })();
+
+  const filtered = personList.filter((p) => {
+    const q = personSearch.trim().toLowerCase();
+    if (!q) return true;
+    return [p.name, p.email, p.id, (p as RegistryPersonItem).dhid, (p as RegistryPersonItem).slmcNumber, (p as RegistryPersonItem).licenseNo]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  });
+
+  const filteredRequests = dashboard.deletionRequests.filter((r) => {
+    const q = requestSearch.trim().toLowerCase();
+    if (!q) return true;
+    return [r.entityDisplayName, r.entityType, r.entityId, r.requestedByName, r.status]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  });
+
+  const pendingCount = dashboard.deletionRequests.filter((r) => r.status === "pending").length;
+
+  return (
+    <section className="space-y-10">
+      <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="font-headline text-3xl font-extrabold tracking-tight">
+            Deletion Requests
+          </h1>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            All deactivations require a second Ministry admin to approve within 48 hours. Records are never removed — only access is revoked.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            void dashboard.refreshDeletionRequests();
+            void dashboard.refreshPeopleRegistries();
+          }}
+          className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:opacity-90 dark:bg-slate-700"
+        >
+          <RefreshCcw size={16} />
+          Refresh
+        </button>
+      </header>
+
+      {pendingCount > 0 ? (
+        <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 dark:border-amber-800/40 dark:bg-amber-900/20 dark:text-amber-300">
+          <Clock size={16} className="shrink-0" />
+          <span>
+            <span className="font-bold">{pendingCount} pending deletion request{pendingCount !== 1 ? "s" : ""}</span> awaiting a second admin's approval.
+          </span>
+        </div>
+      ) : null}
+
+      {dashboard.deletionMessage ? (
+        <div className={`rounded-2xl border px-5 py-4 text-sm ${
+          dashboard.deletionMessage.toLowerCase().includes("fail") || dashboard.deletionMessage.toLowerCase().includes("error") || dashboard.deletionMessage.toLowerCase().includes("cannot")
+            ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-300"
+        }`}>
+          {dashboard.deletionMessage}
+        </div>
+      ) : null}
+
+      {/* Pending requests table */}
+      <section className="rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-5 dark:border-slate-700 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="font-headline text-lg font-bold">All Deletion Requests</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Pending requests can only be approved by a <span className="font-semibold">different</span> Ministry admin from the one who submitted them.
+            </p>
+          </div>
+          <div className="relative w-full max-w-xs">
+            <input
+              type="text"
+              value={requestSearch}
+              onChange={(e) => setRequestSearch(e.target.value)}
+              placeholder="Search entity, status, admin…"
+              className="w-full rounded-xl border-0 bg-slate-100 px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+            />
+            <Search className="absolute right-3 top-3 text-slate-400" size={16} />
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+              <tr>
+                <th className="px-5 py-4 font-semibold">Entity</th>
+                <th className="px-5 py-4 font-semibold">Requested By</th>
+                <th className="px-5 py-4 font-semibold">Submitted</th>
+                <th className="px-5 py-4 font-semibold">Window</th>
+                <th className="px-5 py-4 font-semibold">Status</th>
+                <th className="px-5 py-4 font-semibold">Approved By</th>
+                <th className="px-5 py-4 text-right font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+              {filteredRequests.length > 0 ? (
+                filteredRequests.map((req: DeletionRequest) => (
+                  <tr key={req.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="px-5 py-4">
+                      <div className="font-semibold">{req.entityDisplayName ?? req.entityId}</div>
+                      <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] uppercase dark:bg-slate-700">
+                          {req.entityType}
+                        </span>{" "}
+                        #{req.entityId}
+                      </div>
+                      {req.reason ? (
+                        <div className="mt-1 text-xs italic text-slate-500 dark:text-slate-400">
+                          "{req.reason}"
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
+                      {req.requestedByName ?? "Unknown"}
+                    </td>
+                    <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
+                      {formatDisplayDate(req.requestedAt)}
+                    </td>
+                    <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
+                      {req.status === "pending" ? (
+                        <span className="text-amber-700 dark:text-amber-400">{timeRemaining(req.expiresAt)}</span>
+                      ) : (
+                        <span className="text-slate-400 dark:text-slate-500">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(req.status)}`}>
+                        {req.status}
+                      </span>
+                    </td>
+                    <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
+                      {req.approvedByName
+                        ? <>{req.approvedByName}<div className="text-xs">{formatDisplayDate(req.approvedAt)}</div></>
+                        : "—"}
+                    </td>
+                    <td className="px-5 py-4">
+                      {req.status === "pending" ? (
+                        <div className="flex justify-end gap-2">
+                          {req.canApprove ? (
+                            <button
+                              type="button"
+                              disabled={dashboard.isSubmittingDeletion}
+                              onClick={() => void dashboard.submitDeletionApproval(req.id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:opacity-90 disabled:opacity-60"
+                            >
+                              <CheckCircle2 size={13} />
+                              Approve
+                            </button>
+                          ) : (
+                            <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                              Your request
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            disabled={dashboard.isSubmittingDeletion}
+                            onClick={() => void dashboard.submitDeletionCancel(req.id)}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200 disabled:opacity-60 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+                          >
+                            <XCircle size={13} />
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex justify-end">
+                          <span className="text-xs text-slate-400 dark:text-slate-500">No action</span>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="px-5 py-10 text-center text-slate-500 dark:text-slate-400">
+                    {dashboard.isLoadingDeletions
+                      ? "Loading deletion requests…"
+                      : requestSearch
+                        ? "No requests matched your search."
+                        : "No deletion requests yet."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* People registry — request deletion of users */}
+      <section className="rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+        <div className="border-b border-slate-200 px-6 py-5 dark:border-slate-700">
+          <h2 className="font-headline text-lg font-bold">Request Deactivation — People</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Select a person and click the trash icon to initiate a deletion request. Deactivated users cannot log in but all their records remain intact.
+          </p>
+        </div>
+
+        <div className="flex gap-1 border-b border-slate-200 px-6 pt-4 dark:border-slate-700">
+          {(["patients", "doctors", "pharmacists", "hospital_admins"] as PersonTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => { setPersonTab(tab); setPersonSearch(""); }}
+              className={`rounded-t-lg px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${
+                personTab === tab
+                  ? "bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200"
+                  : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+              }`}
+            >
+              {tab.replace("_", " ")}
+            </button>
+          ))}
+          <div className="ml-auto pb-2">
+            <button
+              type="button"
+              onClick={() => void dashboard.refreshPeopleRegistries()}
+              disabled={dashboard.isLoadingRegistry}
+              className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-300"
+            >
+              {dashboard.isLoadingRegistry ? "Loading…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+
+        <div className="px-6 py-4">
+          <div className="relative w-full max-w-sm">
+            <input
+              type="text"
+              value={personSearch}
+              onChange={(e) => setPersonSearch(e.target.value)}
+              placeholder="Search name, email, ID…"
+              className="w-full rounded-xl border-0 bg-slate-100 px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+            />
+            <Search className="absolute right-3 top-3 text-slate-400" size={16} />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+              <tr>
+                <th className="px-5 py-3 font-semibold">Name / Email</th>
+                <th className="px-5 py-3 font-semibold">ID</th>
+                <th className="px-5 py-3 font-semibold">Details</th>
+                <th className="px-5 py-3 font-semibold">Status</th>
+                <th className="px-5 py-3 font-semibold">Joined</th>
+                <th className="px-5 py-3 text-right font-semibold">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+              {filtered.length > 0 ? (
+                filtered.map((person) => {
+                  const isDeactivated = (person.status ?? "").toLowerCase() === "deactivated";
+                  return (
+                    <tr key={person.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isDeactivated ? "opacity-60" : ""}`}>
+                      <td className="px-5 py-4">
+                        <div className="font-semibold">{person.name ?? "No name"}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{person.email ?? "—"}</div>
+                      </td>
+                      <td className="px-5 py-4 font-mono text-xs text-slate-500 dark:text-slate-400">
+                        {person.id}
+                      </td>
+                      <td className="px-5 py-4 text-xs text-slate-500 dark:text-slate-400">
+                        {personTab === "patients" && person.dhid ? `DHID: ${person.dhid}` : null}
+                        {personTab === "doctors" ? (
+                          <>{person.specialization ?? "—"}{person.slmcNumber ? ` · SLMC: ${person.slmcNumber}` : ""}</>
+                        ) : null}
+                        {personTab === "pharmacists" && person.licenseNo ? `Lic: ${person.licenseNo}` : null}
+                        {personTab === "hospital_admins" ? `Role: ${person.adminRole ?? "—"}` : null}
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(person.status)}`}>
+                          {person.status ?? "active"}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
+                        {formatDisplayDate(person.createdAt)}
+                      </td>
+                      <td className="px-5 py-4 text-right">
+                        <button
+                          type="button"
+                          disabled={dashboard.isSubmittingDeletion || isDeactivated}
+                          onClick={() => onPersonDeleteRequest(person, entityTypeForTab)}
+                          title={isDeactivated ? "Already deactivated" : "Request deactivation"}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30"
+                        >
+                          <Trash2 size={13} />
+                          {isDeactivated ? "Deactivated" : "Request Deletion"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="px-5 py-10 text-center text-slate-500 dark:text-slate-400">
+                    {dashboard.isLoadingRegistry
+                      ? "Loading registry…"
+                      : personSearch
+                        ? "No records matched your search."
+                        : `No ${personTab.replace("_", " ")} found. Click Refresh to load.`}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  );
 }
 
 export function HealthMinistryAdminDashboardPage() {
@@ -587,10 +959,52 @@ export function HealthMinistryAdminDashboardPage() {
 
   const handleMedicineDelete = async (row: ManagedMedicineItem) => {
     const confirmed = window.confirm(
-      `Delete ${row.name ?? `medicine ${row.id}`} from the national catalog?`,
+      `Request deactivation of ${row.name ?? `medicine ${row.id}`}?\n\nThis will create a pending deletion request that requires a second Ministry admin to approve within 48 hours. The record will not be removed from the database.`,
     );
     if (!confirmed) return;
-    await dashboard.submitMedicineDelete(row.id);
+    await dashboard.submitDeletionRequest({
+      entityType: "medicine",
+      entityId: row.id,
+      entityDisplayName: row.name ?? `Medicine #${row.id}`,
+    });
+    setView("deletions");
+    void dashboard.refreshDeletionRequests();
+  };
+
+  const handleOrganisationDeleteRequest = async (row: ManagedOrganisationItem) => {
+    const orgType = (row.linkedTable === "hospitals" ? "hospital" : row.linkedTable === "pharmacies" ? "pharmacy" : "organisation") as DeletionEntityType;
+    const entityId = orgType !== "organisation" && row.linkedRecordId != null
+      ? String(row.linkedRecordId)
+      : row.id;
+    const confirmed = window.confirm(
+      `Request deactivation of ${row.name ?? `organisation ${row.id}`}?\n\nThis will create a pending deletion request that requires a second Ministry admin to approve within 48 hours. All records are preserved.`,
+    );
+    if (!confirmed) return;
+    await dashboard.submitDeletionRequest({
+      entityType: orgType,
+      entityId,
+      entityDisplayName: row.name ?? `${orgType} #${entityId}`,
+    });
+    setView("deletions");
+    void dashboard.refreshDeletionRequests();
+  };
+
+  const handlePersonDeleteRequest = async (
+    person: RegistryPersonItem,
+    entityType: DeletionEntityType,
+  ) => {
+    const displayName = person.name ?? person.email ?? `${entityType} #${person.id}`;
+    const confirmed = window.confirm(
+      `Request deactivation of ${displayName}?\n\nThis will revoke their access and create a pending deletion request that requires a second Ministry admin to approve within 48 hours. All records are preserved.`,
+    );
+    if (!confirmed) return;
+    await dashboard.submitDeletionRequest({
+      entityType,
+      entityId: person.id,
+      entityDisplayName: displayName,
+    });
+    setView("deletions");
+    void dashboard.refreshDeletionRequests();
   };
 
   const exportAuditLogs = () => {
@@ -1355,7 +1769,7 @@ export function HealthMinistryAdminDashboardPage() {
                                   {formatDisplayDate(row.createdAt)}
                                 </td>
                                 <td className="px-4 py-4">
-                                  <div className="flex justify-end">
+                                  <div className="flex justify-end gap-2">
                                     <button
                                       type="button"
                                       onClick={() => void handleOrganisationStatusToggle(row)}
@@ -1363,6 +1777,15 @@ export function HealthMinistryAdminDashboardPage() {
                                       className={`rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${actionClassName}`}
                                     >
                                       {actionLabel}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleOrganisationDeleteRequest(row)}
+                                      disabled={dashboard.isSubmittingDeletion}
+                                      title="Request deactivation (dual-admin approval)"
+                                      className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                                    >
+                                      <Trash2 size={15} />
                                     </button>
                                   </div>
                                 </td>
@@ -2051,6 +2474,14 @@ export function HealthMinistryAdminDashboardPage() {
                 ) : null}
               </div>
             </section>
+          ) : null}
+
+          {view === "deletions" ? (
+            <DeletionsView
+              dashboard={dashboard}
+              onPersonDeleteRequest={handlePersonDeleteRequest}
+              formatDisplayDate={formatDisplayDate}
+            />
           ) : null}
         </main>
 

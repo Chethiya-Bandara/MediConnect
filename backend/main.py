@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import auth, doctor_dashboard, patient_dashboard, pharmacist_dashboard, pharmacy_admin_dashboard, moh_admin_dashboard, hospital_admin_dashboard, admin_router
+from app.routes import auth, doctor_dashboard, patient_dashboard, pharmacist_dashboard, pharmacy_admin_dashboard, moh_admin_dashboard, hospital_admin_dashboard, admin_router, deletion_requests
 
 app = FastAPI()
 
@@ -89,3 +89,4 @@ app.include_router(pharmacist_dashboard.router)
 app.include_router(pharmacy_admin_dashboard.router)
 app.include_router(hospital_admin_dashboard.router)
 app.include_router(moh_admin_dashboard.router)
+app.include_router(deletion_requests.router)

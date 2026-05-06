@@ -194,14 +194,16 @@ def _list_all_medicines(search: str | None = None) -> list[dict[str, Any]]:
     medicine_rows = _fetch_rows_with_query(
         lambda: (
             supabase_admin.table("medicines")
-            .select("id, created_at, name, unit, wholesale_price, retail_price")
+            .select("id, created_at, name, unit, wholesale_price, retail_price, status")
+            .neq("status", "deactivated")
             .ilike("name", f"%{normalized_search}%")
             .order("name")
         )
         if normalized_search
         else (
             supabase_admin.table("medicines")
-            .select("id, created_at, name, unit, wholesale_price, retail_price")
+            .select("id, created_at, name, unit, wholesale_price, retail_price, status")
+            .neq("status", "deactivated")
             .order("name")
         )
     )
@@ -249,121 +251,6 @@ def _get_organisation_registry_item(organisation_id: int) -> dict[str, Any]:
     return organisation
 
 
-def _resolve_linked_registry_record(organisation_id: int) -> tuple[str | None, int | None]:
-    hospital = _fetch_single_with_query(
-        lambda: supabase_admin.table("hospitals")
-        .select("id")
-        .eq("organisation_id", organisation_id)
-    )
-    if hospital and hospital.get("id") is not None:
-        return "hospitals", int(hospital["id"])
-
-    pharmacy = _fetch_single_with_query(
-        lambda: supabase_admin.table("pharmacies")
-        .select("id")
-        .eq("organisation_id", organisation_id)
-    )
-    if pharmacy and pharmacy.get("id") is not None:
-        return "pharmacies", int(pharmacy["id"])
-
-    return None, None
-
-
-def _delete_organisation_bundle(organisation_id: int, current_user: dict) -> dict[str, str]:
-    organisation = _get_organisation_registry_item(organisation_id)
-    linked_table, linked_record_id = _resolve_linked_registry_record(organisation_id)
-
-    if linked_table == "hospitals" and linked_record_id is not None:
-        linked_affiliations = _fetch_rows_with_query(
-            lambda: supabase_admin.table("doctor_affiliations")
-            .select("id")
-            .eq("hospital_id", linked_record_id)
-            .limit(1)
-        )
-        linked_appointments = _fetch_rows_with_query(
-            lambda: supabase_admin.table("appointments")
-            .select("id")
-            .eq("organisation_id", organisation_id)
-            .limit(1)
-        )
-        if linked_affiliations or linked_appointments:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "This hospital still has linked affiliations or appointments. "
-                    "Clear those operational records before deleting the hospital entry."
-                ),
-            )
-
-        execute_with_retry(
-            lambda: supabase_admin.table("hospitals")
-            .delete()
-            .eq("id", linked_record_id)
-            .execute()
-        )
-        _log_audit_action(
-            user_id=current_user["user_id"],
-            action="HOSPITAL_DELETED",
-            entity="hospitals",
-            entity_id=linked_record_id,
-        )
-
-    if linked_table == "pharmacies" and linked_record_id is not None:
-        linked_inventory = _fetch_rows_with_query(
-            lambda: supabase_admin.table("inventory")
-            .select("id")
-            .eq("pharmacy_id", linked_record_id)
-            .limit(1)
-        )
-        linked_dispensing = _fetch_rows_with_query(
-            lambda: supabase_admin.table("dispensing")
-            .select("id")
-            .eq("pharmacy_id", linked_record_id)
-            .limit(1)
-        )
-        linked_billing = _fetch_rows_with_query(
-            lambda: supabase_admin.table("billing")
-            .select("id")
-            .eq("pharmacy_id", linked_record_id)
-            .limit(1)
-        )
-        if linked_inventory or linked_dispensing or linked_billing:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "This pharmacy still has inventory, dispensing, or billing activity. "
-                    "Clear those records before deleting the pharmacy entry."
-                ),
-            )
-
-        execute_with_retry(
-            lambda: supabase_admin.table("pharmacies")
-            .delete()
-            .eq("id", linked_record_id)
-            .execute()
-        )
-        _log_audit_action(
-            user_id=current_user["user_id"],
-            action="PHARMACY_DELETED",
-            entity="pharmacies",
-            entity_id=linked_record_id,
-        )
-
-    execute_with_retry(
-        lambda: supabase_admin.table("organisations")
-        .delete()
-        .eq("id", organisation_id)
-        .execute()
-    )
-    _log_audit_action(
-        user_id=current_user["user_id"],
-        action="ORGANISATION_DELETED",
-        entity="organisations",
-        entity_id=organisation_id,
-    )
-
-    organisation_name = _clean_medicine_text(organisation.get("name")) or f"Organisation #{organisation_id}"
-    return {"message": f"{organisation_name} removed from the registry."}
 
 
 def _get_medicine_or_404(medicine_id: int) -> dict[str, Any]:
@@ -711,37 +598,13 @@ def delete_medicine(
     medicine_id: int,
     current_user: dict = Depends(HealthMinistryOnly),
 ):
-    medicine = _get_medicine_or_404(medicine_id)
-    linked_inventory_rows = _fetch_rows_with_query(
-        lambda: supabase_admin.table("inventory")
-        .select("id")
-        .eq("medicine_id", medicine_id)
-        .limit(1)
+    raise HTTPException(
+        status_code=405,
+        detail=(
+            "Direct deletion is disabled. Use POST /moh-admin/deletion-requests "
+            "with entity_type='medicine' to initiate the dual-admin approval workflow."
+        ),
     )
-    if linked_inventory_rows:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This medicine is still linked to pharmacy inventory rows. "
-                "Remove those stock records first, then delete the catalog item."
-            ),
-        )
-
-    execute_with_retry(
-        lambda: supabase_admin.table("medicines")
-        .delete()
-        .eq("id", medicine_id)
-        .execute()
-    )
-    _log_audit_action(
-        user_id=current_user["user_id"],
-        action="MEDICINE_DELETED",
-        entity="medicines",
-        entity_id=medicine_id,
-    )
-    return {
-        "message": f"{_clean_medicine_text(medicine.get('name')) or f'Medicine #{medicine_id}'} removed from the registry.",
-    }
 
 
 @router.delete("/organisations/{organisation_id}")
@@ -749,7 +612,13 @@ def delete_organisation(
     organisation_id: int,
     current_user: dict = Depends(HealthMinistryOnly),
 ):
-    return _delete_organisation_bundle(organisation_id, current_user)
+    raise HTTPException(
+        status_code=405,
+        detail=(
+            "Direct deletion is disabled. Use POST /moh-admin/deletion-requests "
+            "with entity_type='organisation' to initiate the dual-admin approval workflow."
+        ),
+    )
 
 
 @router.delete("/hospitals/{hospital_id}")
@@ -757,14 +626,13 @@ def delete_hospital(
     hospital_id: int,
     current_user: dict = Depends(HealthMinistryOnly),
 ):
-    hospital = _fetch_single_with_query(
-        lambda: supabase_admin.table("hospitals")
-        .select("id, organisation_id")
-        .eq("id", hospital_id)
+    raise HTTPException(
+        status_code=405,
+        detail=(
+            "Direct deletion is disabled. Use POST /moh-admin/deletion-requests "
+            "with entity_type='hospital' to initiate the dual-admin approval workflow."
+        ),
     )
-    if not hospital or hospital.get("organisation_id") is None:
-        raise HTTPException(status_code=404, detail="Hospital not found.")
-    return _delete_organisation_bundle(int(hospital["organisation_id"]), current_user)
 
 
 @router.delete("/pharmacies/{pharmacy_id}")
@@ -772,14 +640,13 @@ def delete_pharmacy(
     pharmacy_id: int,
     current_user: dict = Depends(HealthMinistryOnly),
 ):
-    pharmacy = _fetch_single_with_query(
-        lambda: supabase_admin.table("pharmacies")
-        .select("id, organisation_id")
-        .eq("id", pharmacy_id)
+    raise HTTPException(
+        status_code=405,
+        detail=(
+            "Direct deletion is disabled. Use POST /moh-admin/deletion-requests "
+            "with entity_type='pharmacy' to initiate the dual-admin approval workflow."
+        ),
     )
-    if not pharmacy or pharmacy.get("organisation_id") is None:
-        raise HTTPException(status_code=404, detail="Pharmacy not found.")
-    return _delete_organisation_bundle(int(pharmacy["organisation_id"]), current_user)
 
 
 @router.delete("/patients/{patient_id}")
@@ -787,71 +654,13 @@ def delete_patient(
     patient_id: int,
     current_user: dict = Depends(HealthMinistryOnly),
 ):
-    patient = _fetch_single_with_query(
-        lambda: supabase_admin.table("patients")
-        .select("id, user_id, dhid")
-        .eq("id", patient_id)
+    raise HTTPException(
+        status_code=405,
+        detail=(
+            "Direct deletion is disabled. Use POST /moh-admin/deletion-requests "
+            "with entity_type='patient' to initiate the dual-admin approval workflow."
+        ),
     )
-    if not patient:
-        raise HTTPException(status_code=404, detail="Patient not found.")
-
-    linked_appointments = _fetch_rows_with_query(
-        lambda: supabase_admin.table("appointments")
-        .select("id")
-        .eq("patient_id", patient_id)
-        .limit(1)
-    )
-    linked_encounters = _fetch_rows_with_query(
-        lambda: supabase_admin.table("encounters")
-        .select("id")
-        .eq("patient_id", patient_id)
-        .limit(1)
-    )
-    linked_prescriptions = _fetch_rows_with_query(
-        lambda: supabase_admin.table("prescriptions")
-        .select("id")
-        .eq("patient_id", patient_id)
-        .limit(1)
-    )
-    if linked_appointments or linked_encounters or linked_prescriptions:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This patient still has linked appointments, encounters, or prescriptions. "
-                "Archive or clear those clinical records before deleting the patient entry."
-            ),
-        )
-
-    execute_with_retry(
-        lambda: supabase_admin.table("audit_logs")
-        .delete()
-        .eq("entity", "patient_consent_default")
-        .eq("entity_id", patient_id)
-        .execute()
-    )
-    execute_with_retry(
-        lambda: supabase_admin.table("patients")
-        .delete()
-        .eq("id", patient_id)
-        .execute()
-    )
-    if patient.get("user_id"):
-        execute_with_retry(
-            lambda: supabase_admin.table("users")
-            .delete()
-            .eq("id", patient["user_id"])
-            .execute()
-        )
-
-    _log_audit_action(
-        user_id=current_user["user_id"],
-        action="PATIENT_DELETED",
-        entity="patients",
-        entity_id=patient_id,
-    )
-    return {
-        "message": f"Patient {patient.get('dhid') or f'#{patient_id}'} removed from the registry.",
-    }
 
 
 @router.put("/organizations/approve")

@@ -109,7 +109,7 @@ def build_user_context(
     }
 
     user_status = str(db_user.get("status") or "active").strip().lower()
-    if user_status in {"suspended", "inactive", "disabled", "blocked"}:
+    if user_status in {"suspended", "inactive", "disabled", "blocked", "deactivated"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account is currently suspended. Contact your administrator.",

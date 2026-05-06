@@ -14,9 +14,21 @@ import {
   suspendEntity,
   updateManagedMedicine,
 } from "../api/healthMinistryAdminApi";
+import {
+  approveDeletionRequest,
+  cancelDeletionRequest,
+  createDeletionRequest,
+  getDoctorsRegistry,
+  getHospitalAdminsRegistry,
+  getPatientsRegistry,
+  getPharmacistsRegistry,
+  listDeletionRequests,
+} from "../api/deletionRequestsApi";
 import type {
   AnalyticsFilters,
   ApprovalStatus,
+  DeletionEntityType,
+  DeletionRequest,
   DiagnosisMetric,
   GovernanceAction,
   GovernanceTargetType,
@@ -28,6 +40,7 @@ import type {
   ManagedOrganisationItem,
   PendingDoctorItem,
   PendingOrganisationItem,
+  RegistryPersonItem,
 } from "../types";
 
 function formatInputDate(date: Date) {
@@ -97,6 +110,19 @@ export function useHealthMinistryAdminDashboard() {
   const [isCreatingOrganisation, setIsCreatingOrganisation] = useState(false);
   const [isSubmittingMedicine, setIsSubmittingMedicine] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+
+  // ── Deletion Requests ──────────────────────────────────────────────────────
+  const [deletionRequests, setDeletionRequests] = useState<DeletionRequest[]>([]);
+  const [deletionMessage, setDeletionMessage] = useState<string | null>(null);
+  const [isLoadingDeletions, setIsLoadingDeletions] = useState(false);
+  const [isSubmittingDeletion, setIsSubmittingDeletion] = useState(false);
+
+  // ── People Registries ──────────────────────────────────────────────────────
+  const [patientsRegistry, setPatientsRegistry] = useState<RegistryPersonItem[]>([]);
+  const [doctorsRegistry, setDoctorsRegistry] = useState<RegistryPersonItem[]>([]);
+  const [pharmacistsRegistry, setPharmacistsRegistry] = useState<RegistryPersonItem[]>([]);
+  const [hospitalAdminsRegistry, setHospitalAdminsRegistry] = useState<RegistryPersonItem[]>([]);
+  const [isLoadingRegistry, setIsLoadingRegistry] = useState(false);
 
   const refreshDashboard = async () => {
     setIsLoadingDashboard(true);
@@ -338,6 +364,103 @@ export function useHealthMinistryAdminDashboard() {
     }
   };
 
+  const refreshDeletionRequests = async () => {
+    setIsLoadingDeletions(true);
+    setDeletionMessage(null);
+    try {
+      const items = await listDeletionRequests();
+      setDeletionRequests(items);
+      return true;
+    } catch (error) {
+      setDeletionRequests([]);
+      setDeletionMessage(
+        error instanceof Error ? error.message : "Deletion requests could not be loaded.",
+      );
+      return false;
+    } finally {
+      setIsLoadingDeletions(false);
+    }
+  };
+
+  const refreshPeopleRegistries = async () => {
+    setIsLoadingRegistry(true);
+    try {
+      const [patients, doctors, pharmacists, hospitalAdmins] = await Promise.all([
+        getPatientsRegistry(),
+        getDoctorsRegistry(),
+        getPharmacistsRegistry(),
+        getHospitalAdminsRegistry(),
+      ]);
+      setPatientsRegistry(patients);
+      setDoctorsRegistry(doctors);
+      setPharmacistsRegistry(pharmacists);
+      setHospitalAdminsRegistry(hospitalAdmins);
+    } catch {
+      // silently fail — individual lists degrade gracefully
+    } finally {
+      setIsLoadingRegistry(false);
+    }
+  };
+
+  const submitDeletionRequest = async (payload: {
+    entityType: DeletionEntityType;
+    entityId: string;
+    entityDisplayName?: string;
+    reason?: string;
+  }) => {
+    setIsSubmittingDeletion(true);
+    setDeletionMessage(null);
+    try {
+      const response = await createDeletionRequest(payload);
+      setDeletionMessage(response.message ?? "Deletion request submitted.");
+      await refreshDeletionRequests();
+      return true;
+    } catch (error) {
+      setDeletionMessage(
+        error instanceof Error ? error.message : "Deletion request failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingDeletion(false);
+    }
+  };
+
+  const submitDeletionApproval = async (requestId: string) => {
+    setIsSubmittingDeletion(true);
+    setDeletionMessage(null);
+    try {
+      const response = await approveDeletionRequest(requestId);
+      setDeletionMessage(response.message ?? "Entity deactivated successfully.");
+      await refreshDeletionRequests();
+      return true;
+    } catch (error) {
+      setDeletionMessage(
+        error instanceof Error ? error.message : "Approval failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingDeletion(false);
+    }
+  };
+
+  const submitDeletionCancel = async (requestId: string) => {
+    setIsSubmittingDeletion(true);
+    setDeletionMessage(null);
+    try {
+      const response = await cancelDeletionRequest(requestId);
+      setDeletionMessage(response.message ?? "Request cancelled.");
+      await refreshDeletionRequests();
+      return true;
+    } catch (error) {
+      setDeletionMessage(
+        error instanceof Error ? error.message : "Cancellation failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingDeletion(false);
+    }
+  };
+
   const requestMonthlyReport = async () => {
     setIsGeneratingReport(true);
     setReportMessage(null);
@@ -388,10 +511,23 @@ export function useHealthMinistryAdminDashboard() {
     isCreatingOrganisation,
     isSubmittingMedicine,
     isGeneratingReport,
+    // deletion requests
+    deletionRequests,
+    deletionMessage,
+    isLoadingDeletions,
+    isSubmittingDeletion,
+    // people registries
+    patientsRegistry,
+    doctorsRegistry,
+    pharmacistsRegistry,
+    hospitalAdminsRegistry,
+    isLoadingRegistry,
     setFilters,
     refreshDashboard,
     refreshAnalytics,
     refreshMedicines,
+    refreshDeletionRequests,
+    refreshPeopleRegistries,
     submitOrganizationApproval,
     submitDoctorApproval,
     submitUserAction,
@@ -399,6 +535,9 @@ export function useHealthMinistryAdminDashboard() {
     submitMedicineCreate,
     submitMedicineUpdate,
     submitMedicineDelete,
+    submitDeletionRequest,
+    submitDeletionApproval,
+    submitDeletionCancel,
     requestMonthlyReport,
   };
 }
