@@ -368,20 +368,29 @@ from fastapi import Query as _Query
     dependencies=[Depends(HealthMinistryOnly)]
 )
 def get_audit_logs(
-    current_user: dict = Depends(HealthMinistryOnly),
-    action:       str  = _Query(default=None, description="Filter by action e.g. CONSENT_GRANTED"),
-    entity:       str  = _Query(default=None, description="Filter by entity e.g. appointments"),
-    user_id:      str  = _Query(default=None, description="Filter by user ID"),
-    from_date:    str  = _Query(default=None, description="Start date ISO format e.g. 2026-01-01"),
-    to_date:      str  = _Query(default=None, description="End date ISO format e.g. 2026-12-31"),
-    limit:        int  = _Query(default=50, le=200, description="Max results (200 max)"),
-    offset:       int  = _Query(default=0, description="Pagination offset"),
+    current_user:    dict = Depends(HealthMinistryOnly),
+    action:          str  = _Query(default=None, description="Filter by action e.g. CONSENT_GRANTED"),
+    entity:          str  = _Query(default=None, description="Filter by entity e.g. appointments"),
+    user_id:         str  = _Query(default=None, description="Filter by user ID"),
+    organisation_id: str  = _Query(default=None, description="Filter by organisation ID (NFR-7.5)"),
+    from_date:       str  = _Query(default=None, description="Start date ISO format e.g. 2026-01-01"),
+    to_date:         str  = _Query(default=None, description="End date ISO format e.g. 2026-12-31"),
+    limit:           int  = _Query(default=50, le=200, description="Max results (200 max)"),
+    offset:          int  = _Query(default=0, description="Pagination offset"),
 ):
     """
     Returns paginated audit logs.
     Health Ministry Admins only — any other role gets 403.
     Access to this endpoint is itself logged for accountability.
     """
+
+    # ── Validate organisation_id before query ─────────────────────
+    org_id_int: int | None = None
+    if organisation_id:
+        try:
+            org_id_int = int(organisation_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="organisation_id must be an integer")
 
     # ── Build query with filters ──────────────────────────────────
     try:
@@ -399,6 +408,9 @@ def get_audit_logs(
 
         if user_id:
             query = query.eq("user_id", user_id)
+
+        if org_id_int is not None:
+            query = query.eq("organisation_id", org_id_int)
 
         if from_date:
             query = query.gte("timestamp", from_date)
@@ -431,11 +443,12 @@ def get_audit_logs(
         "offset":  offset,
         "limit":   limit,
         "filters": {
-            "action":    action,
-            "entity":    entity,
-            "user_id":   user_id,
-            "from_date": from_date,
-            "to_date":   to_date,
+            "action":          action,
+            "entity":          entity,
+            "user_id":         user_id,
+            "organisation_id": organisation_id,
+            "from_date":       from_date,
+            "to_date":         to_date,
         },
         "logs": logs,
     }
