@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { AnomaliesSection } from "../sections/AnomaliesSection";
 import {
   AlertTriangle,
   BarChart3,
@@ -47,7 +48,8 @@ type DashboardView =
   | "medicines"
   | "analytics"
   | "audit"
-  | "deletions";
+  | "deletions"
+  | "anomalies";
 type ThemeMode = "light" | "dark";
 type ApprovalEntityFilter = "all" | "organisations" | "doctors";
 
@@ -59,6 +61,7 @@ const views = [
   { id: "analytics", label: "Analytics & Reports", icon: BarChart3 },
   { id: "audit", label: "Audit Logs", icon: ClipboardList },
   { id: "deletions", label: "Deletion Requests", icon: ShieldAlert },
+  { id: "anomalies", label: "Anomaly Flags", icon: AlertTriangle },
 ] satisfies Array<{
   id: DashboardView;
   label: string;
@@ -2483,6 +2486,8 @@ export function HealthMinistryAdminDashboardPage() {
               formatDisplayDate={formatDisplayDate}
             />
           ) : null}
+
+          {view === "anomalies" ? <AnomaliesSection /> : null}
         </main>
 
         <footer className="ml-64 mt-12 border-t border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900">

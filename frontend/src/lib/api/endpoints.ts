@@ -58,6 +58,7 @@ export const endpoints = {
     analyticsIncidence: "/moh-admin/analytics/incidence",
     analyticsTopDiagnoses: "/moh-admin/analytics/top-diagnoses",
     monthlyReport: "/moh-admin/reports/monthly",
+    anomalies: "/moh-admin/anomalies",
     deletionRequestsBase: "/moh-admin/deletion-requests",
     patientsRegistry: "/moh-admin/patients-registry",
     doctorsRegistry: "/moh-admin/doctors-registry",

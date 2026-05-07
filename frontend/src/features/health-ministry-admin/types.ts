@@ -4,6 +4,7 @@ export type HealthMinistryAdminSection =
   | "medicines"
   | "analytics"
   | "users"
+  | "anomalies"
   | "settings";
 
 export type ApprovalStatus = "approved" | "rejected";
@@ -95,6 +96,21 @@ export interface HealthMinistryAuditLog {
   organisationName: string | null;
   action: string | null;
   details: string | null;
+}
+
+export type AnomalyFlagStatus = "open" | "resolved" | "dismissed";
+
+export interface AnomalyFlag {
+  id: number;
+  eventType: string;
+  sourceIp: string | null;
+  eventCount: number;
+  windowSeconds: number;
+  threshold: number;
+  flaggedAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  status: AnomalyFlagStatus;
 }
 
 export type DeletionEntityType =

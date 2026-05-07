@@ -4,6 +4,7 @@ import re
 from typing import Any, Iterable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.config.supabase import execute_with_retry, supabase_admin
 from app.middleware.role_checker import HealthMinistryOnly
@@ -782,6 +783,72 @@ def top_diagnoses(current_user: dict = Depends(HealthMinistryOnly)):
     _ = current_user
     counter = _build_diagnosis_counter()
     return counter.most_common(10)
+
+
+@router.get("/anomalies")
+def list_anomaly_flags(
+    status: str | None = Query(None, description="Filter by status: open, resolved, dismissed"),
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    _ = current_user
+
+    def _query():
+        q = supabase_admin.table("anomaly_flags").select("*").order("flagged_at", desc=True).limit(200)
+        if status:
+            q = q.eq("status", status)
+        return q
+
+    rows = _fetch_rows_with_query(_query)
+
+    flags = [
+        {
+            "id": row.get("id"),
+            "event_type": row.get("event_type"),
+            "source_ip": row.get("source_ip"),
+            "event_count": row.get("event_count"),
+            "window_seconds": row.get("window_seconds"),
+            "threshold": row.get("threshold"),
+            "flagged_at": row.get("flagged_at"),
+            "resolved_at": row.get("resolved_at"),
+            "resolved_by": row.get("resolved_by"),
+            "status": row.get("status"),
+        }
+        for row in rows
+    ]
+
+    open_count = sum(1 for f in flags if f["status"] == "open")
+    return {"flags": flags, "total": len(flags), "open_count": open_count}
+
+
+class ResolveFlagRequest(BaseModel):
+    action: str = "resolved"  # "resolved" or "dismissed"
+
+
+@router.put("/anomalies/{flag_id}/resolve")
+def resolve_anomaly_flag(
+    flag_id: int,
+    data: ResolveFlagRequest,
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    valid_actions = {"resolved", "dismissed"}
+    if data.action not in valid_actions:
+        raise HTTPException(status_code=400, detail="action must be 'resolved' or 'dismissed'.")
+
+    existing = _fetch_single_with_query(
+        lambda: supabase_admin.table("anomaly_flags").select("id, status").eq("id", flag_id)
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Anomaly flag not found.")
+
+    execute_with_retry(
+        lambda: supabase_admin.table("anomaly_flags").update({
+            "status": data.action,
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+            "resolved_by": current_user.get("user_id"),
+        }).eq("id", flag_id).execute(),
+        attempts=2,
+    )
+    return {"message": f"Flag marked as {data.action}."}
 
 
 @router.post("/reports/monthly")

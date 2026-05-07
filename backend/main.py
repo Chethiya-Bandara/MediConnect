@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, doctor_dashboard, patient_dashboard, pharmacist_dashboard, pharmacy_admin_dashboard, moh_admin_dashboard, hospital_admin_dashboard, admin_router, deletion_requests
+from app.middleware import anomaly_detector
 
 app = FastAPI()
 
@@ -32,6 +33,14 @@ _ENDPOINT_LIMITS: dict[str, tuple[int, int]] = {
     "/patient/dashboard/lookup": (3, 60),     # 3 per minute
 }
 _DEFAULT_LIMIT = (90, 60)            # 90 per minute for all other routes
+
+# Map request paths to anomaly event types for spike tracking (NFR-1.9)
+_ANOMALY_EVENT_MAP: dict[str, str] = {
+    "/login":                              "LOGIN_SPIKE",
+    "/forgot-password":                    "PASSWORD_RESET_ABUSE",  # pragma: allowlist secret
+    "/patient/dashboard/lookup":           "DHID_ENUMERATION",
+    "/pharmacist/dashboard/prescriptions": "DHID_ENUMERATION",
+}
 
 
 @app.middleware("http")
@@ -68,6 +77,11 @@ async def rate_limit_middleware(request: Request, call_next):
 
     # Record this request
     bucket.append(now)
+
+    # Anomaly spike detection (NFR-1.9) — runs async, never blocks
+    event_type = _ANOMALY_EVENT_MAP.get(path, "REQUEST_FLOOD")
+    anomaly_detector.record(client_ip, event_type)
+
     return await call_next(request)
 
 
