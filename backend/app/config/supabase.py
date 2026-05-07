@@ -76,11 +76,6 @@ def execute_with_retry(
                 raise
             time.sleep(retry_delay * attempt)
 
-    if default is not _UNSET:
-        return default() if callable(default) else default
-
-    raise last_error
-
 
 supabase = _create_supabase_client(anon_key)  # for auth
 supabase_admin = _create_supabase_client(service_key)  # for admin

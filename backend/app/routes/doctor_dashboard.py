@@ -1780,7 +1780,15 @@ async def upload(
     file_id = str(uuid.uuid4())
     path = f"attachments/{file_id}_{file.filename}"
 
-    supabase_admin.storage.from_("records").upload(path, await file.read())
+    try:
+        contents = await file.read()
+        supabase_admin.storage.from_("records").upload(
+            path,
+            contents,
+            file_options={"content-type": file.content_type or "application/octet-stream"},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="File upload failed") from exc
 
     url = supabase_admin.storage.from_("records").get_public_url(path)
 
