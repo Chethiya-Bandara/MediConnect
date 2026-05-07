@@ -1146,7 +1146,6 @@ def list_appointments(authorization: Optional[str] = Header(None)):
             supabase_admin.table("appointments")
             .select("*")
             .eq("patient_id", patient["id"])
-            .order("start_time")
             .limit(50)
             .execute()
             .data
@@ -1154,6 +1153,17 @@ def list_appointments(authorization: Optional[str] = Header(None)):
         ),
         default=[],
     )
+
+    # Custom status priority
+    status_priority = {
+        "pending": 0,
+        "missed": 1,
+        "completed": 2,
+        "cancelled": 3,
+    }
+
+    rows.sort(key=lambda row: status_priority.get(row["status"], 99))
+
     doctor_lookup = _doctor_map({row["doctor_id"] for row in rows})
     organisation_lookup = _organisation_map({row["organisation_id"] for row in rows})
     consent_lookup = _consent_state_map({row["id"] for row in rows})
@@ -1166,7 +1176,6 @@ def list_appointments(authorization: Optional[str] = Header(None)):
             for row in rows
         ]
     }
-
 
 @router.patch("/profile", dependencies=[Depends(RoleChecker(["patient"]))])
 def update_profile(

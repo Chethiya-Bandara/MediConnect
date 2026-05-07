@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, doctor_dashboard, patient_dashboard, pharmacist_dashboard, pharmacy_admin_dashboard, moh_admin_dashboard, hospital_admin_dashboard, admin_router, deletion_requests
 from app.middleware import anomaly_detector
 from app.middleware.performance import measure_ms, record_request
+from app.utils.scheduler import scheduler
 
 app = FastAPI()
 
@@ -98,6 +99,14 @@ async def rate_limit_middleware(request: Request, call_next):
 
     return response
 
+@app.on_event("startup")
+def startup_event():
+    scheduler.start()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    scheduler.shutdown()
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
