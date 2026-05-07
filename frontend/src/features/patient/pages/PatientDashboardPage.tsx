@@ -996,7 +996,7 @@ export function PatientDashboardPage() {
 
   return (
     <div className="min-h-screen bg-surface text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6 dark:border-slate-800 dark:bg-slate-900 md:flex">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-62 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6 dark:border-slate-800 dark:bg-slate-900 md:flex">
         <div className="mb-8 px-2">
           <AppBrandMark subtitle="Patient Console" />
         </div>
@@ -1091,50 +1091,153 @@ export function PatientDashboardPage() {
 
         <div className="w-full flex-1 px-4 pb-28 pt-24 md:px-8 md:pb-12">
           {!isLoading && !dashboardError && page === "home" && (
-          <section className="relative -m-4 flex min-h-[calc(100vh-6rem)] items-center justify-center overflow-hidden rounded-[2.5rem] md:-m-8">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 flex flex-col gap-12 pb-16">
             
-            {/* Background Slideshow Layer */}
-            <div className="absolute inset-0 z-0">
-              {WELCOME_IMAGES.map((src, index) => (
-                <div
-                  key={src}
-                  className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out ${
-                    index === bgIndex ? "opacity-100" : "opacity-0"
-                  }`}
-                  style={{ backgroundImage: `url(${src})` }}
-                >
-                  {/* Dark overlay to make text readable */}
-                  <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" />
-                </div>
-              ))}
-            </div>
+            {/* 1. HERO SECTION (Slideshow) */}
+            <section className="relative -mx-4 md:-mx-8 -mt-4 md:-mt-8 flex min-h-[70vh] items-center justify-center overflow-hidden shadow-2xl shadow-blue-900/10">
+              {/* Background Slideshow Layer */}
+              <div className="absolute inset-0 z-0">
+                {WELCOME_IMAGES.map((src, index) => (
+                  <div
+                    key={src}
+                    className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out ${
+                      index === bgIndex ? "opacity-100" : "opacity-0"
+                    }`}
+                    style={{ backgroundImage: `url(${src})` }}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-b from-slate-900/40 via-slate-900/20 to-white/10 backdrop-blur-[1px]" />
+                  </div>
+                ))}
+              </div>
 
-            {/* Content Layer */}
-            <div className="relative z-10 max-w-2xl px-6 text-center text-white">
-              <h1 className="font-headline text-4xl font-extrabold sm:text-6xl drop-shadow-md">
-                Welcome, {displayName}!
-              </h1>
-              <p className="mt-6 text-xl text-slate-100/90 drop-shadow-sm">
-                We're glad to have you back. Manage your health records and connect 
-                with your care team all in one place.
-              </p>
-              
-              <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
-                <button 
-                  onClick={() => setPage("overview")}
-                  className="rounded-2xl bg-white px-8 py-4 font-bold text-blue-900 shadow-xl transition-transform hover:scale-105"
-                >
-                  Go to Dashboard
-                </button>
+              {/* Content Layer */}
+              <div className="relative z-10 max-w-4xl px-6 text-center text-white">
+                <span className="mb-4 inline-block rounded-full bg-blue-500/20 px-4 py-1.5 text-sm font-bold tracking-wide text-Blue-300 backdrop-blur-md border border-emerald-400/30">
+                  State Healthcare Portal
+                </span>
+                <h1 className="font-headline text-5xl font-extrabold tracking-tight sm:text-7xl drop-shadow-xl">
+                  Welcome, <span className="text-blue-600">{displayName}</span>
+                </h1>
+                <p className="mx-auto mt-6 max-w-xl text-lg text-slate-100/90 drop-shadow-md sm:text-xl">
+                  Your unified health ecosystem. Access medical records, manage clinical appointments, and connect with providers nationwide.
+                </p>
+                
+                <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
+                  <button 
+                    onClick={() => setPage("overview")}
+                    className="group flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-8 py-4 font-bold text-white shadow-xl transition-all hover:bg-blue-700 hover:scale-105 active:scale-95"
+                  >
+                    <Activity className="h-5 w-5" />
+                    Launch Dashboard
+                  </button>
+                  <button 
+                    onClick={() => setPage("appointments")}
+                    className="flex items-center justify-center gap-2 rounded-2xl border border-white/30 bg-white/10 px-8 py-4 font-bold text-white backdrop-blur-md transition-all hover:bg-white/20 hover:scale-105 active:scale-95"
+                  >
+                    <CalendarDays className="h-5 w-5" />
+                    Book Appointment
+                  </button>
+                </div>
+              </div>
+
+            </section>
+
+            {/* 2. AT-A-GLANCE STATS (Blue & Green Theme) */}
+            <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
+              <div className="group relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30">
+                    <ShieldCheck className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">Identity Verified</p>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">National Health ID</h3>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 text-xs font-bold text-blue-600">
+                  <BadgeCheck className="h-4 w-4" /> SECURE ACCESS ACTIVE
+                </div>
+              </div>
+
+              <div className="group relative overflow-hidden rounded-3xl border border-emerald-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-600 dark:bg-emerald-900/30">
+                    <ClipboardList className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">Current Status</p>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Healthy & Active</h3>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 text-xs font-bold text-emerald-600">
+                  <Activity className="h-4 w-4" /> 0 PENDING ACTIONS
+                </div>
+              </div>
+
+              <div className="group relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30">
+                    <Pill className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">Prescriptions</p>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Unified Pharmacy</h3>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 text-xs font-bold text-blue-600">
+                  <ShieldPlus className="h-4 w-4" /> SYNCED NATIONWIDE
+                </div>
+              </div>
+            </section>
+
+            {/* 3. QUICK ACTIONS GRID */}
+            <section>
+              <div className="mb-6 flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">How can we help today?</h2>
+              </div>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                {[
+                  { label: "Health AI", icon: MessageCircle, color: "blue", target: "assistant" },
+                  { label: "Records", icon: ClipboardList, color: "emerald", target: "records" },
+                  { label: "Pharmacy", icon: Pill, color: "blue", target: "pharmacy" },
+                  { label: "Settings", icon: Settings, color: "emerald", target: "settings" },
+                ].map((action) => (
+                  <button
+                    key={action.label}
+                    onClick={() => setPage(action.target as Page)}
+                    className={`flex flex-col items-center gap-4 rounded-3xl border border-slate-100 bg-white p-6 transition-all hover:-translate-y-1 hover:border-${action.color}-200 hover:shadow-lg dark:border-slate-800 dark:bg-slate-800`}
+                  >
+                    <div className={`rounded-2xl bg-${action.color}-50 p-4 text-${action.color}-600 dark:bg-${action.color}-900/20`}>
+                      <action.icon className="h-6 w-6" />
+                    </div>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">{action.label}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {/* 4. CLINICAL CARE BANNER */}
+            <section className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-r from-blue-600 to-emerald-600 p-10 text-white">
+              <div className="relative z-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-center">
+                <div className="max-w-md">
+                  <h2 className="text-3xl font-bold">Smart Care Assistant</h2>
+                  <p className="mt-2 text-blue-50/90">
+                    Have questions about your lab results or medication? Our AI Clinical Assistant is available 24/7 to provide immediate guidance.
+                  </p>
+                </div>
                 <button 
                   onClick={() => setPage("assistant")}
-                  className="rounded-2xl border border-white/30 bg-white/10 px-8 py-4 font-bold text-white backdrop-blur-md transition-transform hover:scale-105 hover:bg-white/20"
+                  className="rounded-2xl bg-white px-8 py-4 font-bold text-blue-600 shadow-xl transition-transform hover:scale-105 active:scale-95"
                 >
-                  Talk to AI Assistant
+                  Consult Assistant
                 </button>
               </div>
-            </div>
-          </section>
+              {/* Decorative patterns */}
+              <div className="absolute -right-10 -top-10 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+              <div className="absolute -bottom-10 left-10 h-64 w-64 rounded-full bg-emerald-400/20 blur-3xl" />
+            </section>
+
+          </div>
         )}
           {isLoading ? <LoadingState message="Loading your patient dashboard..." /> : null}
           {!isLoading && dashboardError ? (

@@ -1,15 +1,19 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent } from "react";
 import {
+  Activity,
   AlertTriangle,
   Building2,
+  BadgeCheck,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   ClipboardPlus,
+  ClipboardList,
   FileArchive,
   FolderOpen,
+  Home,
   LayoutDashboard,
   LoaderCircle,
   Lock,
@@ -24,6 +28,7 @@ import {
   Settings,
   ShieldAlert,
   ShieldCheck,
+  ShieldPlus,
   Sparkles,
   SunMedium,
   Trash2,
@@ -63,7 +68,7 @@ import type {
 } from "../types";
 import { doctorSpecializationOptions } from "../../../lib/constants/doctorSpecializations";
 
-type DoctorPage = "overview" | "encounter" | "appointments" | "affiliations" | "settings";
+type DoctorPage = "home" | "overview" | "encounter" | "appointments" | "affiliations" | "settings";
 type DoctorModal = "submit" | "urgent" | "archives" | "availability" | null;
 type Theme = "light" | "dark";
 
@@ -87,7 +92,15 @@ type DashboardSelectOption = {
 
 const DICEBEAR_AVATAR_BASE = "https://api.dicebear.com/7.x/avataaars/svg";
 
+
+import MRI from "../../../assets/welcome/MRI.jpg";
+import Tools from "../../../assets/welcome/Tools.jpg";
+import HealthCamp from "../../../assets/welcome/HealthCamp.jpg";
+
+const WELCOME_IMAGES = [MRI, Tools, HealthCamp];
+
 const navItems = [
+  { id: "home", label: "Welcome", icon: Home },
   { id: "overview", label: "Doctor Overview", icon: LayoutDashboard },
   { id: "encounter", label: "Encounter Record", icon: ClipboardPlus },
   { id: "appointments", label: "Schedule", icon: CalendarDays },
@@ -383,8 +396,8 @@ function getInitials(value: string) {
 export function DoctorDashboardPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [page, setPage] = useState<DoctorPage>("overview");
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [page, setPage] = useState<DoctorPage>("home");
+  const [theme, setTheme] = useState<Theme>("light");
   const [modal, setModal] = useState<DoctorModal>(null);
   const [toast, setToast] = useState<{
     message: string;
@@ -449,6 +462,7 @@ export function DoctorDashboardPage() {
   const profilePreviewInitials = getInitials(profilePreviewName);
   const profilePhotoStorageKey = `doctor-dashboard-profile-photo:${dashboard?.user.id || user?.id || dashboard?.user.email || user?.email || "guest"}`;
   const pageHeaderTitle = {
+    home: "Home",
     overview: "Overview",
     encounter: "Encounter Record",
     appointments: "Schedule",
@@ -580,6 +594,19 @@ export function DoctorDashboardPage() {
       setLoading(false);
     }
   };
+
+  const [bgIndex, setBgIndex] = useState(0);
+  
+    useEffect(() => {
+      // Only run the timer if the user is actually on the home page
+      if (page !== "home") return;
+  
+      const interval = setInterval(() => {
+        setBgIndex((prev) => (prev + 1) % WELCOME_IMAGES.length);
+      }, 5000); // Change image every 5 seconds
+  
+      return () => clearInterval(interval);
+    }, [page]);
 
   useEffect(() => {
     const saved =
@@ -1266,6 +1293,157 @@ export function DoctorDashboardPage() {
 
       <main className="ml-64 flex min-h-screen flex-col">
         <div className="flex-1 px-8 pb-12 pt-24">
+          {page === "home" ? (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 flex flex-col gap-12 pb-16">
+            
+            {/* 1. HERO SECTION (Slideshow) */}
+            <section className="relative -mx-4 md:-mx-8 -mt-4 md:-mt-8 flex min-h-[70vh] items-center justify-center overflow-hidden shadow-2xl shadow-blue-900/10">
+              {/* Background Slideshow Layer */}
+              <div className="absolute inset-0 z-0">
+                {WELCOME_IMAGES.map((src, index) => (
+                  <div
+                    key={src}
+                    className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out ${
+                      index === bgIndex ? "opacity-100" : "opacity-0"
+                    }`}
+                    style={{ backgroundImage: `url(${src})` }}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-b from-slate-900/40 via-slate-900/20 to-white/10 backdrop-blur-[1px]" />
+                  </div>
+                ))}
+              </div>
+
+              {/* Content Layer */}
+              <div className="relative z-10 max-w-4xl px-6 text-center text-white">
+                <span className="mb-4 inline-block rounded-full bg-blue-500/20 px-4 py-1.5 text-sm font-bold tracking-wide text-blue-100 backdrop-blur-md border border-blue-400/30">
+                  Clinical Management Portal
+                </span>
+                <h1 className="font-headline text-5xl font-extrabold tracking-tight sm:text-7xl drop-shadow-xl">
+                  Welcome, <span className="text-blue-400">Dr. {doctorName}</span>
+                </h1>
+                <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-100/90 drop-shadow-md sm:text-xl font-medium">
+                  Manage patient encounters, review clinical schedules, and coordinate 
+                  healthcare delivery across your authorized facilities.
+                </p>
+                
+                <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
+                  <button 
+                    onClick={() => setPage("overview")}
+                    className="group flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-8 py-4 font-bold text-white shadow-xl transition-all hover:bg-blue-700 hover:scale-105 active:scale-95"
+                  >
+                    <Activity className="h-5 w-5" />
+                    Practice Overview
+                  </button>
+                  <button 
+                    onClick={() => setPage("encounter")}
+                    className="flex items-center justify-center gap-2 rounded-2xl border border-white/30 bg-white/10 px-8 py-4 font-bold text-white backdrop-blur-md transition-all hover:bg-white/20 hover:scale-105 active:scale-95"
+                  >
+                    <ClipboardList className="h-5 w-5" />
+                    New Encounter
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* 2. CLINICAL STATUS STATS */}
+            <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
+              <div className="group relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30">
+                    <BadgeCheck className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">Credentials</p>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Licensed Practitioner</h3>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 text-xs font-bold text-blue-600 uppercase tracking-wider">
+                  <ShieldCheck className="h-4 w-4" /> System Verified
+                </div>
+              </div>
+
+              <div className="group relative overflow-hidden rounded-3xl border border-emerald-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-600 dark:bg-emerald-900/30">
+                    <CalendarDays className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">Today's Load</p>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Daily Schedule</h3>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 text-xs font-bold text-emerald-600 uppercase tracking-wider">
+                  <Activity className="h-4 w-4" /> 8 Appointments Remaining
+                </div>
+              </div>
+
+              <div className="group relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30">
+                    <ClipboardList className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">Documentation</p>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Unsigned Charts</h3>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 text-xs font-bold text-blue-600 uppercase tracking-wider">
+                  <ShieldPlus className="h-4 w-4" /> 3 Pending Encounters
+                </div>
+              </div>
+            </section>
+
+            {/* 3. QUICK ACTIONS GRID (Mapped to Doctor Nav Items) */}
+            <section>
+              <div className="mb-6 flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Clinical Quick Actions</h2>
+              </div>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5">
+                {[
+                  { label: "Overview", icon: Activity, color: "blue", target: "overview" },
+                  { label: "Encounters", icon: ClipboardList, color: "emerald", target: "encounter" },
+                  { label: "Schedule", icon: CalendarDays, color: "blue", target: "appointments" },
+                  { label: "Hospital Access", icon: ShieldCheck, color: "emerald", target: "affiliations" },
+                  { label: "Settings", icon: Settings, color: "slate", target: "settings" },
+                ].map((action) => (
+                  <button
+                    key={action.label}
+                    onClick={() => setPage(action.target as DoctorPage)}
+                    className="flex flex-col items-center gap-4 rounded-3xl border border-slate-100 bg-white p-6 transition-all hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg dark:border-slate-800 dark:bg-slate-800"
+                  >
+                    <div className={`rounded-2xl bg-${action.color}-50 p-4 text-${action.color}-600 dark:bg-${action.color}-900/20`}>
+                      <action.icon className="h-6 w-6" />
+                    </div>
+                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm text-center">{action.label}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {/* 4. HOSPITAL CONNECT BANNER */}
+            <section className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-r from-slate-900 to-blue-900 p-10 text-white shadow-xl shadow-blue-900/20">
+              <div className="relative z-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-center">
+                <div className="max-w-md">
+                  <h2 className="text-3xl font-bold">Hospital Access Control</h2>
+                  <p className="mt-2 text-blue-100/80 font-medium">
+                    Authorized to practice at <span className="text-blue-300 font-bold">National Hospital Sri Lanka</span>. 
+                    View and manage your facility-wide clinical permissions here.
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setPage("affiliations")}
+                  className="rounded-2xl bg-blue-500 px-8 py-4 font-bold text-white shadow-xl transition-all hover:bg-blue-400 hover:scale-105 active:scale-95"
+                >
+                  Manage Affiliations
+                </button>
+              </div>
+              {/* Abstract medical design elements */}
+              <div className="absolute -right-20 -top-20 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl" />
+              <div className="absolute -bottom-20 left-20 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
+            </section>
+
+          </div>
+        ) : null}
           {page === "overview" ? (
             <section className="animate-fadeIn">
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
