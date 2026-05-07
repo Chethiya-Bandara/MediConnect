@@ -1,5 +1,6 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Home,
   Activity,
   BadgeCheck,
   CalendarDays,
@@ -61,6 +62,7 @@ import type {
 } from "../types";
 
 type Page =
+  | "home"
   | "overview"
   | "assistant"
   | "records"
@@ -72,7 +74,14 @@ type Theme = "light" | "dark";
 
 const QR_CODE_API_BASE = "https://api.qrserver.com/v1/create-qr-code";
 
+import MRI from "../../../assets/welcome/MRI.jpg";
+import Tools from "../../../assets/welcome/Tools.jpg";
+import HealthCamp from "../../../assets/welcome/HealthCamp.jpg";
+
+const WELCOME_IMAGES = [MRI, Tools, HealthCamp];
+
 const navItems = [
+  { id: "home", label: "Home", icon: Home },
   { id: "overview", label: "Overview", icon: Activity },
   { id: "assistant", label: "Health Assistant", icon: MessageCircle },
   { id: "records", label: "Medical Records", icon: ClipboardList },
@@ -82,6 +91,7 @@ const navItems = [
 ] as const satisfies Array<{ id: Page; label: string; icon: typeof Activity }>;
 
 const pageHeaderTitle: Record<Page, string> = {
+  home: "Welcome",
   overview: "Overview",
   assistant: "Health Assistant",
   records: "Medical Records",
@@ -324,10 +334,10 @@ function isSessionProfileError(message: string) {
 export function PatientDashboardPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [page, setPage] = useState<Page>("overview");
+  const [page, setPage] = useState<Page>("home");
   const [modal, setModal] = useState<Modal>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("light");
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [appointments, setAppointments] = useState<DashboardAppointment[]>([]);
   const [bookingOptions, setBookingOptions] = useState<BookingOption[]>([]);
@@ -491,6 +501,19 @@ export function PatientDashboardPage() {
     setToast({ message, tone });
     toastTimeoutRef.current = window.setTimeout(() => setToast(null), 2800);
   };
+
+  const [bgIndex, setBgIndex] = useState(0);
+
+  useEffect(() => {
+    // Only run the timer if the user is actually on the home page
+    if (page !== "home") return;
+
+    const interval = setInterval(() => {
+      setBgIndex((prev) => (prev + 1) % WELCOME_IMAGES.length);
+    }, 5000); // Change image every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [page]);
 
   const loadDashboard = async () => {
     setIsLoading(true);
@@ -1067,6 +1090,52 @@ export function PatientDashboardPage() {
         ) : null}
 
         <div className="w-full flex-1 px-4 pb-28 pt-24 md:px-8 md:pb-12">
+          {!isLoading && !dashboardError && page === "home" && (
+          <section className="relative -m-4 flex min-h-[calc(100vh-6rem)] items-center justify-center overflow-hidden rounded-[2.5rem] md:-m-8">
+            
+            {/* Background Slideshow Layer */}
+            <div className="absolute inset-0 z-0">
+              {WELCOME_IMAGES.map((src, index) => (
+                <div
+                  key={src}
+                  className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out ${
+                    index === bgIndex ? "opacity-100" : "opacity-0"
+                  }`}
+                  style={{ backgroundImage: `url(${src})` }}
+                >
+                  {/* Dark overlay to make text readable */}
+                  <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" />
+                </div>
+              ))}
+            </div>
+
+            {/* Content Layer */}
+            <div className="relative z-10 max-w-2xl px-6 text-center text-white">
+              <h1 className="font-headline text-4xl font-extrabold sm:text-6xl drop-shadow-md">
+                Welcome, {displayName}!
+              </h1>
+              <p className="mt-6 text-xl text-slate-100/90 drop-shadow-sm">
+                We're glad to have you back. Manage your health records and connect 
+                with your care team all in one place.
+              </p>
+              
+              <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
+                <button 
+                  onClick={() => setPage("overview")}
+                  className="rounded-2xl bg-white px-8 py-4 font-bold text-blue-900 shadow-xl transition-transform hover:scale-105"
+                >
+                  Go to Dashboard
+                </button>
+                <button 
+                  onClick={() => setPage("assistant")}
+                  className="rounded-2xl border border-white/30 bg-white/10 px-8 py-4 font-bold text-white backdrop-blur-md transition-transform hover:scale-105 hover:bg-white/20"
+                >
+                  Talk to AI Assistant
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
           {isLoading ? <LoadingState message="Loading your patient dashboard..." /> : null}
           {!isLoading && dashboardError ? (
             <ErrorState
