@@ -16,6 +16,9 @@ from app.middleware.ai_disclaimer import build_safe_response
 
 router = APIRouter(prefix="/patient/dashboard", tags=["patient-dashboard"])
 
+_ALLOWED_PATIENT_STATUS_UPDATES = {"cancelled"}
+_TERMINAL_APPOINTMENT_STATUSES = {"completed", "cancelled"}
+
 
 class AppointmentCreateRequest(BaseModel):
     slot_id: int
@@ -1496,7 +1499,6 @@ def update_appointment(
     if not rows:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
-    ALLOWED_PATIENT_STATUS_UPDATES={"cancelled"}
     current_status = rows[0]["status"]
 
     update_data = {}
@@ -1505,15 +1507,15 @@ def update_appointment(
     if payload.end_time is not None:
         update_data["end_time"] = payload.end_time.isoformat()
     if payload.status is not None:
-        if payload.status not in ALLOWED_PATIENT_STATUS_UPDATES:
+        if payload.status not in _ALLOWED_PATIENT_STATUS_UPDATES:
             raise HTTPException(
                 status_code=403,
                 detail="Patients are not allowed to set this status"
             )
-        if current_status == "completed":
+        if current_status in _TERMINAL_APPOINTMENT_STATUSES:
             raise HTTPException(
                 status_code=400,
-                detail="Cannot modify a completed appointment"
+                detail="Cannot modify a completed or already cancelled appointment"
             )
         update_data["status"] = payload.status
 
