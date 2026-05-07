@@ -457,34 +457,42 @@ export function PharmacyAdminDashboardPage() {
             </header>
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
-              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <p className="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Inventory Value</p>
-                <h3 className="text-3xl font-extrabold text-blue-900 dark:text-blue-300">
+              {/* Inventory Value Card */}
+              <div className="relative overflow-hidden rounded-[1.75rem] border border-slate-200/90 bg-[linear-gradient(135deg,_rgba(255,255,255,0.95)_0%,_rgba(241,245,249,0.9)_100%)] p-6 shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-[linear-gradient(135deg,_rgba(15,23,42,0.98)_0%,_rgba(30,41,59,0.94)_100%)]">
+                <p className="relative z-10 mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Inventory Value</p>
+                <h3 className="relative z-10 text-3xl font-extrabold text-blue-900 dark:text-blue-300">
                   {formatLkr(activeSummary?.inventorySummary.totalInventoryValue ?? dashboard.stats.totalStockValue)}
                 </h3>
-                <p className="mt-2 text-[10px] font-bold text-green-600 dark:text-green-400">
+                <p className="relative z-10 mt-2 text-[10px] font-bold text-green-600 dark:text-green-400">
                   Last refreshed {formatDate(new Date())}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-outline-variant/10 border-l-4 border-l-error bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              {/* Stock Alerts Card */}
+              <div className="relative overflow-hidden rounded-[1.75rem] border border-red-200/50 bg-[linear-gradient(135deg,_rgba(255,241,241,0.9)_0%,_rgba(255,255,255,0.8)_100%)] p-6 shadow-sm backdrop-blur-md dark:border-red-500/20 dark:bg-[linear-gradient(135deg,_rgba(69,10,10,0.4)_0%,_rgba(15,23,42,0.9)_100%)]">
+                <div className="absolute top-0 left-0 h-full w-1.5 bg-red-500" />
                 <p className="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Stock Alerts</p>
-                <h3 className="text-3xl font-extrabold text-error">
+                <h3 className="text-3xl font-extrabold text-red-600 dark:text-red-400">
                   {activeSummary?.inventorySummary.lowStockItems ?? dashboard.stats.lowStockItems} Items
                 </h3>
-                <p className="mt-2 text-[10px] font-bold text-error">Critical restock required</p>
+                <p className="mt-2 text-[10px] font-bold text-red-600 dark:text-red-500">Critical restock required</p>
               </div>
 
-              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              {/* Staff Active Card */}
+              <div className="relative overflow-hidden rounded-[1.75rem] border border-slate-200/90 bg-[linear-gradient(135deg,_rgba(255,255,255,0.95)_0%,_rgba(241,245,249,0.9)_100%)] p-6 shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-[linear-gradient(135deg,_rgba(15,23,42,0.98)_0%,_rgba(30,41,59,0.94)_100%)]">
                 <p className="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Staff Active</p>
                 <h3 className="text-3xl font-extrabold text-slate-900 dark:text-slate-200">{staff.length}</h3>
-                <p className="mt-2 text-[10px] text-slate-400">Registered pharmacists in this organisation</p>
+                <p className="mt-2 text-[10px] text-slate-400">Registered pharmacists</p>
               </div>
 
-              <div className="rounded-2xl bg-primary p-6 text-white shadow-xl dark:bg-blue-800">
-                <p className="mb-4 text-xs font-bold uppercase tracking-widest opacity-70">Today's Revenue</p>
-                <h3 className="text-3xl font-extrabold">{formatLkr(activeSummary?.reportSummary.todayRevenue ?? null)}</h3>
-                <p className="mt-2 text-[10px] font-bold opacity-80">Tracked from dispense events</p>
+              {/* Today's Revenue Card */}
+              <div className="relative overflow-hidden rounded-[1.75rem] border border-blue-400/30 bg-[linear-gradient(135deg,_rgba(37,99,235,0.1)_0%,_rgba(37,99,235,0.2)_100%)] p-6 shadow-xl backdrop-blur-xl dark:border-blue-400/20 dark:bg-[linear-gradient(135deg,_rgba(37,99,235,0.2)_0%,_rgba(30,41,59,0.8)_100%)]">
+                <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-blue-500/20 blur-2xl" />
+                <p className="mb-4 text-xs font-bold uppercase tracking-widest text-blue-700 dark:text-blue-300">Today's Revenue</p>
+                <h3 className="text-3xl font-extrabold text-slate-900 dark:text-white">
+                  {formatLkr(activeSummary?.reportSummary.todayRevenue ?? null)}
+                </h3>
+                <p className="mt-2 text-[10px] font-bold text-blue-600/80 dark:text-blue-300/80">Tracked from dispense events</p>
               </div>
             </div>
 

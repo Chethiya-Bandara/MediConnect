@@ -1075,13 +1075,15 @@ export function PatientDashboardPage() {
             />
           ) : null}
           {!isLoading && !dashboardError && page === "overview" && overview ? (
-            <section className="space-y-6">
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_420px]">
-                <div className="rounded-[1.7rem] border border-slate-100 bg-white px-6 py-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <section className="space-y-6">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_420px]">
+              <div className="relative overflow-hidden rounded-[1.75rem] border border-slate-200/90 bg-[radial-gradient(circle_at_top_left,_rgba(96,165,250,0.22),_transparent_34%),linear-gradient(135deg,_rgba(30,64,175,0.10),_rgba(255,255,255,0.95)_36%,_rgba(241,245,249,0.92)_100%)] px-6 py-5 shadow-sm dark:border-slate-700/70 dark:bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_38%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(15,23,42,0.9)_58%,_rgba(30,41,59,0.94))]">
+                <div className="absolute inset-y-0 right-0 w-32 bg-[radial-gradient(circle_at_center,_rgba(148,163,184,0.12),_transparent_65%)] dark:bg-[radial-gradient(circle_at_center,_rgba(96,165,250,0.12),_transparent_65%)]" />
+                <div className="relative">
                   <p className="text-xs font-extrabold uppercase tracking-[0.32em] text-slate-500 dark:text-slate-400">Welcome back</p>
                   <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <h2 className="font-headline text-3xl font-extrabold text-primary dark:text-blue-400">{displayName}</h2>
+                      <h2 className="font-headline text-3xl font-extrabold text-slate-900 dark:text-white">{displayName}</h2>
                       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                         Your latest appointments, records, and prescription activity are lined up here.
                       </p>
@@ -1089,88 +1091,106 @@ export function PatientDashboardPage() {
                     <button
                       type="button"
                       onClick={() => setPage("settings")}
-                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-white dark:border-white/15 dark:bg-white/10 dark:text-white dark:hover:bg-white/16"
                     >
                       Open profile
                     </button>
                   </div>
                 </div>
-
-                <button type="button" onClick={() => setModal("digital-id")} className="flex items-center justify-between gap-5 rounded-[1.7rem] border border-slate-100 bg-white p-5 text-left shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <div>
-                    <span className="text-[10px] uppercase tracking-[0.28em] text-slate-400">Your Digital Health ID</span>
-                    <span className="mt-1 block font-headline text-xl font-extrabold tracking-[0.18em] text-secondary dark:text-blue-300">{overview.patient.dhid}</span>
-                  </div>
-                  <ShieldPlus className="text-secondary dark:text-blue-300" size={28} />
-                </button>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                {[
-                  ["Upcoming Appointments", overview.stats.upcoming_appointments],
-                  ["Total Appointments", overview.stats.total_appointments],
-                  ["Medical Records", overview.stats.medical_records],
-                  ["Active Prescriptions", overview.stats.active_prescriptions],
-                ].map(([label, value]) => (
-                  <article key={label} className="rounded-[1.5rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">{label}</p>
-                    <p className="mt-3 font-headline text-4xl font-extrabold">{value}</p>
-                  </article>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-12 gap-6">
-                <div className="col-span-12 rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-8">
-                  <div className="mb-6 flex items-center justify-between">
-                    <h2 className="font-headline text-xl font-bold">Upcoming Appointments</h2>
-                    <button type="button" onClick={() => setPage("appointments")} className="text-sm font-bold text-primary dark:text-blue-400">Open full list</button>
-                  </div>
-                  <div className="space-y-4">
-                    {upcomingAppointments.length === 0 ? (
-                      <EmptyState
-                        title="No upcoming appointments"
-                        description="Once you confirm a live booking, your next appointment will show up here with consent and status details."
-                        className="rounded-xl border-0 bg-slate-50 p-5 text-left shadow-none dark:bg-slate-800/50"
-                      />
-                    ) : (
-                      upcomingAppointments.slice(0, 4).map((item) => (
-                        <article key={item.id} className="rounded-[1.4rem] bg-slate-50 p-4 dark:bg-slate-800/50">
-                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                            <div>
-                              <p className="font-bold">{item.doctor.name}</p>
-                              <p className="text-sm text-slate-500 dark:text-slate-400">{item.doctor.specialization || "Specialization not set"} at {item.organisation.name}</p>
-                              <p className="mt-1 text-sm font-semibold text-primary dark:text-blue-400">{formatDateTime(item.start_time)}</p>
-                              <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                                Consent: {item.consent.status}
-                              </p>
-                            </div>
-                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}>{item.status}</span>
-                          </div>
-                        </article>
-                      ))
-                    )}
-                  </div>
+              {/* UPDATE: DIGITAL ID CARD (Slightly adjusted for visual consistency) */}
+              <button 
+                type="button" 
+                onClick={() => setModal("digital-id")} 
+                className="flex items-center justify-between gap-5 rounded-[1.75rem] border border-slate-200/90 bg-white/80 p-5 text-left shadow-sm backdrop-blur-sm transition hover:bg-white dark:border-white/15 dark:bg-white/5 dark:hover:bg-white/10"
+              >
+                <div>
+                  <span className="text-[10px] uppercase tracking-[0.28em] text-slate-400">Your Digital Health ID</span>
+                  <span className="mt-1 block font-headline text-xl font-extrabold tracking-[0.18em] text-secondary dark:text-blue-300">{overview.patient.dhid}</span>
                 </div>
+                <ShieldPlus className="text-secondary dark:text-blue-300" size={28} />
+              </button>
+            </div>
 
-                <div className="col-span-12 rounded-[1.7rem] border border-slate-100 bg-slate-50 p-8 dark:border-slate-800 dark:bg-slate-800/50 lg:col-span-4">
-                  <h2 className="mb-4 font-headline text-xl font-bold">Latest Medical Record</h2>
-                  {overview.recent_record ? (
-                    <div className="rounded-xl border border-slate-100 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-                      <p className="text-sm text-slate-500 dark:text-slate-400">{formatDateTime(overview.recent_record.created_at)}</p>
-                      <p className="mt-2 text-base font-medium">{overview.recent_record.notes || "No consultation notes were saved for this record."}</p>
-                    </div>
-                  ) : (
+            {/* STATS GRID - Remains Standard for readability */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              ["Upcoming Appointments", overview.stats.upcoming_appointments],
+              ["Total Appointments", overview.stats.total_appointments],
+              ["Medical Records", overview.stats.medical_records],
+              ["Active Prescriptions", overview.stats.active_prescriptions],
+            ].map(([label, value]) => (
+              <article
+                key={label}
+                className="relative overflow-hidden rounded-[1.5rem] border border-slate-200/90 bg-[linear-gradient(135deg,_rgba(255,255,255,0.9)_0%,_rgba(241,245,249,0.8)_100%)] p-6 shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-[linear-gradient(135deg,_rgba(15,23,42,0.9)_0%,_rgba(30,41,59,0.8)_100%)]"
+              >
+                <div className="absolute -left-8 -top-8 h-24 w-24 bg-blue-400/10 blur-2xl dark:bg-blue-500/5" />
+                
+                <div className="relative">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500 dark:text-slate-400">
+                    {label}
+                  </p>
+                  <p className="mt-3 font-headline text-4xl font-extrabold text-slate-900 dark:text-white">
+                    {value}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
+
+            {/* LOWER CONTENT SECTION */}
+            <div className="grid grid-cols-12 gap-6">
+              <div className="col-span-12 rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-8">
+                <div className="mb-6 flex items-center justify-between">
+                  <h2 className="font-headline text-xl font-bold">Upcoming Appointments</h2>
+                  <button type="button" onClick={() => setPage("appointments")} className="text-sm font-bold text-primary dark:text-blue-400">Open full list</button>
+                </div>
+                <div className="space-y-4">
+                  {upcomingAppointments.length === 0 ? (
                     <EmptyState
-                      title="No encounter records yet"
-                      description="Your consultation history will appear here once a doctor saves your first encounter."
-                      className="rounded-xl p-5"
+                      title="No upcoming appointments"
+                      description="Once you confirm a live booking, your next appointment will show up here with consent and status details."
+                      className="rounded-xl border-0 bg-slate-50 p-5 text-left shadow-none dark:bg-slate-800/50"
                     />
+                  ) : (
+                    upcomingAppointments.slice(0, 4).map((item) => (
+                      <article key={item.id} className="rounded-[1.4rem] bg-slate-50 p-4 dark:bg-slate-800/50">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="font-bold">{item.doctor.name}</p>
+                            <p className="text-sm text-slate-500 dark:text-slate-400">{item.doctor.specialization || "Specialization not set"} at {item.organisation.name}</p>
+                            <p className="mt-1 text-sm font-semibold text-primary dark:text-blue-400">{formatDateTime(item.start_time)}</p>
+                            <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Consent: {item.consent.status}
+                            </p>
+                          </div>
+                          <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}>{item.status}</span>
+                        </div>
+                      </article>
+                    ))
                   )}
                 </div>
               </div>
-            </section>
-          ) : null}
 
+              <div className="col-span-12 rounded-[1.7rem] border border-slate-100 bg-slate-50 p-8 dark:border-slate-800 dark:bg-slate-800/50 lg:col-span-4">
+                <h2 className="mb-4 font-headline text-xl font-bold">Latest Medical Record</h2>
+                {overview.recent_record ? (
+                  <div className="rounded-xl border border-slate-100 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{formatDateTime(overview.recent_record.created_at)}</p>
+                    <p className="mt-2 text-base font-medium">{overview.recent_record.notes || "No consultation notes were saved for this record."}</p>
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No encounter records yet"
+                    description="Your consultation history will appear here once a doctor saves your first encounter."
+                    className="rounded-xl p-5"
+                  />
+                )}
+              </div>
+            </div>
+          </section>
+        ) : null}
           {!isLoading && !dashboardError && page === "assistant" ? (
             <section className="min-h-[calc(100svh-8rem)] space-y-5">
               <div
