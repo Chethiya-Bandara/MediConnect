@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -27,7 +28,7 @@ def register(user: RegisterRequest):
                 "errors": errors
             }
         )
-    
+
     role = user.role
     auth_res = supabase.auth.sign_up({
         "email": user.email,
@@ -69,7 +70,7 @@ def register(user: RegisterRequest):
             # validate dhid (just a precaution)
             if not validate_dhid(dhid):
                 raise HTTPException(status_code=400, detail="Invalid DHID generated")
-            
+
             patient_record = {
                 "user_id": user_id,
                 "dhid": dhid
@@ -147,8 +148,9 @@ def login(data: LoginRequest):
 def forgot_password(payload: PasswordResetRequest):
     try:
         supabase.auth.reset_password_for_email(payload.email)
-    except AuthApiError:
-        pass
+    except AuthApiError as exc:
+        # Intentional: same response regardless of whether the email exists (account enumeration guard).
+        logging.debug("Password reset AuthApiError for %s: %s", payload.email, exc)
     except Exception:
         raise HTTPException(
             status_code=500,

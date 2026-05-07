@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -35,7 +36,10 @@ def _log_deletion_audit(*, user_id: str, action: str, entity: str, entity_id: st
             attempts=2,
         )
     except Exception:
-        pass
+        logging.exception(
+            "Audit log write failed — action=%s entity=%s entity_id=%s user_id=%s",
+            action, entity, entity_id, user_id,
+        )
 
 
 def _get_request_or_404(request_id: str) -> dict[str, Any]:

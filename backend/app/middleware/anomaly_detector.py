@@ -14,6 +14,7 @@ A cooldown of 15 min prevents duplicate flags for the same (ip, event_type).
 Failures never propagate to the caller — anomaly logging must not block
 primary request handling.
 """
+import logging
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -92,4 +93,7 @@ def _write_flag(
             attempts=2,
         )
     except Exception:
-        pass
+        logging.exception(
+            "Anomaly flag write failed — event_type=%s ip=%s count=%d",
+            event_type, ip, count,
+        )

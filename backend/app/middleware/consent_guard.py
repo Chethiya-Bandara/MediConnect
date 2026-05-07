@@ -23,6 +23,8 @@
 #       # If no consent → 403 raised automatically
 #       # If consent granted → continues normally
 
+import logging
+
 from fastapi import HTTPException, status
 from app.config.supabase import supabase_admin
 
@@ -204,8 +206,11 @@ def auto_revoke_consent(
         return True
 
     except Exception:
-        # Auto-revocation failure should NOT block the encounter from completing
-        # Log the failure but let the encounter proceed
+        # Non-blocking by design — encounter still completes even if audit write fails.
+        logging.exception(
+            "auto_revoke_consent failed for appointment_id=%s doctor_user_id=%s",
+            appointment_id, doctor_user_id,
+        )
         return False
 
 
