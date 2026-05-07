@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, doctor_dashboard, patient_dashboard, pharmacist_dashboard, pharmacy_admin_dashboard, moh_admin_dashboard, hospital_admin_dashboard, admin_router, deletion_requests
 from app.middleware import anomaly_detector
+from app.middleware.performance import measure_ms, record_request
 
 app = FastAPI()
 
@@ -46,9 +47,11 @@ _ANOMALY_EVENT_MAP: dict[str, str] = {
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     """
-    Sliding window rate limiter.
-    Blocks requests exceeding the limit with 429 Too Many Requests.
+    Sliding window rate limiter + response-time tracking (NFR-4.1).
+    Blocks requests exceeding the rate limit with 429 Too Many Requests.
+    Adds X-Response-Time header and logs requests that exceed the 2s SLA.
     """
+    _start     = time.monotonic()
     client_ip  = request.client.host if request.client else "unknown"
     path       = request.url.path
 
@@ -69,7 +72,9 @@ async def rate_limit_middleware(request: Request, call_next):
 
     # Block if limit exceeded
     if len(bucket) >= max_requests:
-        return JSONResponse(
+        duration = measure_ms(_start)
+        record_request(path, request.method, 429, duration)
+        resp = JSONResponse(
             status_code=429,
             content={
                 "error": "Too many requests",
@@ -78,11 +83,20 @@ async def rate_limit_middleware(request: Request, call_next):
                 "window_seconds": window_seconds,
             },
         )
+        resp.headers["X-Response-Time"] = f"{duration:.0f}ms"
+        return resp
 
     # Record this request
     bucket.append(now)
 
-    return await call_next(request)
+    response = await call_next(request)
+
+    # Response-time tracking — NFR-4.1
+    duration = measure_ms(_start)
+    response.headers["X-Response-Time"] = f"{duration:.0f}ms"
+    record_request(path, request.method, response.status_code, duration)
+
+    return response
 
 
 # ── CORS ──────────────────────────────────────────────────────────────────────

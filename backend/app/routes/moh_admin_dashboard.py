@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.config.supabase import execute_with_retry, supabase_admin
 from app.middleware.role_checker import HealthMinistryOnly
+from app.middleware.performance import SLA_MS, get_slow_requests
 from app.schemas.moh_admin_schema import (
     AnalyticsRequest,
     DoctorApprovalRequest,
@@ -783,6 +784,17 @@ def top_diagnoses(current_user: dict = Depends(HealthMinistryOnly)):
     _ = current_user
     counter = _build_diagnosis_counter()
     return counter.most_common(10)
+
+
+@router.get("/performance/slow-requests")
+def list_slow_requests(current_user: dict = Depends(HealthMinistryOnly)):
+    _ = current_user
+    rows = get_slow_requests()
+    return {
+        "sla_ms": SLA_MS,
+        "total_slow": len(rows),
+        "requests": rows,
+    }
 
 
 @router.get("/anomalies")

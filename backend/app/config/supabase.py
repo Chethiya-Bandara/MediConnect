@@ -14,7 +14,7 @@ url = os.getenv("SUPABASE_URL")
 anon_key = os.getenv("SUPABASE_KEY")
 service_key = os.getenv("SUPABASE_SERVICE_KEY")
 
-_REQUEST_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
+_REQUEST_TIMEOUT = httpx.Timeout(5.0, connect=5.0)  # NFR-4.1: fail fast within SLA budget
 _CONNECTION_LIMITS = httpx.Limits(max_connections=40, max_keepalive_connections=20)
 _UNSET = object()
 
@@ -33,8 +33,8 @@ def _create_supabase_client(key: str):
     options = SyncClientOptions(
         httpx_client=_build_httpx_client(),
         postgrest_client_timeout=_REQUEST_TIMEOUT,
-        storage_client_timeout=20,
-        function_client_timeout=10,
+        storage_client_timeout=5,
+        function_client_timeout=5,
     )
     return create_client(url, key, options)
 

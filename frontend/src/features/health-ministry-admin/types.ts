@@ -98,6 +98,20 @@ export interface HealthMinistryAuditLog {
   details: string | null;
 }
 
+export interface SlowRequest {
+  path: string;
+  method: string;
+  statusCode: number;
+  durationMs: number;
+  timestamp: string;
+}
+
+export interface SlowRequestsReport {
+  slaMs: number;
+  totalSlow: number;
+  requests: SlowRequest[];
+}
+
 export type AnomalyFlagStatus = "open" | "resolved" | "dismissed";
 
 export interface AnomalyFlag {

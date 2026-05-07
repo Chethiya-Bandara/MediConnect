@@ -1013,6 +1013,7 @@ def get_overview(authorization: Optional[str] = Header(None)):
             .select("*")
             .eq("patient_id", patient["id"])
             .order("start_time")
+            .limit(50)
             .execute()
             .data
             or []
@@ -1025,6 +1026,7 @@ def get_overview(authorization: Optional[str] = Header(None)):
             .select("*")
             .eq("patient_id", patient["id"])
             .order("created_at", desc=True)
+            .limit(20)
             .execute()
             .data
             or []
@@ -1037,6 +1039,7 @@ def get_overview(authorization: Optional[str] = Header(None)):
             .select("*")
             .eq("patient_id", patient["id"])
             .order("created_at", desc=True)
+            .limit(20)
             .execute()
             .data
             or []
@@ -1141,6 +1144,7 @@ def list_appointments(authorization: Optional[str] = Header(None)):
             .select("*")
             .eq("patient_id", patient["id"])
             .order("start_time")
+            .limit(50)
             .execute()
             .data
             or []
