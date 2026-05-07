@@ -109,11 +109,6 @@ export function LoginPage() {
               </div>
             </div>
 
-            <label className="remember-row">
-              <input type="checkbox" />
-              <span>Remember this device</span>
-            </label>
-
             <Button
               type="submit"
               className="primary-button"

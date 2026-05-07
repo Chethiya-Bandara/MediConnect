@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 import re
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 NIC_PATTERN = re.compile(r"^(?:\d{9}[VvXx]|\d{12})$")
 SUPPORTED_GENDERS = {"male", "female"}
@@ -45,7 +45,7 @@ def _parse_nic_birth_details(nic: str):
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=1, max_length=128)
     role: str
     dhid: Optional[str] = None
 
@@ -60,7 +60,7 @@ class RegisterRequest(BaseModel):
     hospitalId: Optional[str] = None
     parentNic: Optional[str] = None
     organisationId: Optional[str] = None
-    credentialFileName: Optional[str] = None
+    credentialFileName: Optional[str] = Field(default=None, max_length=255)
     credentialFileSize: Optional[int] = None
     credentialFileType: Optional[str] = None
 
@@ -204,7 +204,7 @@ class RegisterRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=1, max_length=128)
 
 
 class PasswordResetRequest(BaseModel):

@@ -6,6 +6,7 @@
 #   Only health_ministry_admin can approve/reject doctor and hospital registrations
 #   Any other role → 403 Forbidden
 
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
@@ -126,7 +127,7 @@ def approve_doctor(
             "entity":    "doctors",
             "entity_id": doctor_id,
             "user_id":   current_user["user_id"],
-            "timestamp": __import__("datetime").datetime.now().astimezone().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }).execute()
     except Exception:
         pass  # Don't fail if audit log fails
@@ -219,7 +220,7 @@ def approve_hospital(
             "entity":    "organisations",
             "entity_id": hospital_id,
             "user_id":   current_user["user_id"],
-            "timestamp": __import__("datetime").datetime.now().astimezone().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }).execute()
     except Exception:
         pass

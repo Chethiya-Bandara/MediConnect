@@ -56,8 +56,8 @@ class AnalyticsRequest(BaseModel):
 
 
 class OrganizationCreateRequest(BaseModel):
-    name: str
-    type: str
+    name: str = Field(max_length=255)
+    type: str = Field(max_length=100)
     status: str = "active"
 
     @field_validator("name", "type")

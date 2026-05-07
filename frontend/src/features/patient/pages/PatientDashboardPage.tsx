@@ -70,6 +70,8 @@ type Page =
 type Modal = "digital-id" | "appointment" | "record" | null;
 type Theme = "light" | "dark";
 
+const QR_CODE_API_BASE = "https://api.qrserver.com/v1/create-qr-code";
+
 const navItems = [
   { id: "overview", label: "Overview", icon: Activity },
   { id: "assistant", label: "Health Assistant", icon: MessageCircle },
@@ -373,9 +375,7 @@ export function PatientDashboardPage() {
   const profilePhotoStorageKey = `patient-dashboard-profile-photo:${overview?.user.id || user?.id || user?.email || "guest"}`;
   const currentHeaderTitle = pageHeaderTitle[page];
   const qrCodeUrl = overview?.patient.dhid
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
-        overview.patient.dhid,
-      )}`
+    ? `${QR_CODE_API_BASE}/?size=220x220&data=${encodeURIComponent(overview.patient.dhid)}`
     : "";
 
   const organisationOptions = useMemo(() => {
@@ -1100,9 +1100,9 @@ export function PatientDashboardPage() {
               </div>
 
               {/* UPDATE: DIGITAL ID CARD (Slightly adjusted for visual consistency) */}
-              <button 
-                type="button" 
-                onClick={() => setModal("digital-id")} 
+              <button
+                type="button"
+                onClick={() => setModal("digital-id")}
                 className="flex items-center justify-between gap-5 rounded-[1.75rem] border border-slate-200/90 bg-white/80 p-5 text-left shadow-sm backdrop-blur-sm transition hover:bg-white dark:border-white/15 dark:bg-white/5 dark:hover:bg-white/10"
               >
                 <div>
@@ -1126,7 +1126,7 @@ export function PatientDashboardPage() {
                 className="relative overflow-hidden rounded-[1.5rem] border border-slate-200/90 bg-[linear-gradient(135deg,_rgba(255,255,255,0.9)_0%,_rgba(241,245,249,0.8)_100%)] p-6 shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-[linear-gradient(135deg,_rgba(15,23,42,0.9)_0%,_rgba(30,41,59,0.8)_100%)]"
               >
                 <div className="absolute -left-8 -top-8 h-24 w-24 bg-blue-400/10 blur-2xl dark:bg-blue-500/5" />
-                
+
                 <div className="relative">
                   <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500 dark:text-slate-400">
                     {label}

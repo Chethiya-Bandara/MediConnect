@@ -85,6 +85,8 @@ type DashboardSelectOption = {
   label: string;
 };
 
+const DICEBEAR_AVATAR_BASE = "https://api.dicebear.com/7.x/avataaars/svg";
+
 const navItems = [
   { id: "overview", label: "Doctor Overview", icon: LayoutDashboard },
   { id: "encounter", label: "Encounter Record", icon: ClipboardPlus },
@@ -1661,7 +1663,7 @@ export function DoctorDashboardPage() {
                     <>
                       <div className="mb-6 flex items-center gap-4">
                         <div className="h-16 w-16 rounded-2xl border border-white/30 bg-white/20 p-1">
-                          <img className="h-full w-full rounded-xl object-cover" src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(activePatient.patient.name)}`} alt={activePatient.patient.name} />
+                          <img className="h-full w-full rounded-xl object-cover" src={`${DICEBEAR_AVATAR_BASE}?seed=${encodeURIComponent(activePatient.patient.name)}`} alt={activePatient.patient.name} />
                         </div>
                         <div>
                           <h2 className="text-xl font-bold">{activePatient.patient.name}</h2>
