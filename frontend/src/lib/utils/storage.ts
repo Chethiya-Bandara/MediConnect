@@ -1,15 +1,20 @@
-// Tokens stored in sessionStorage instead of localStorage so they are
-// never persisted to disk and are cleared when the browser tab closes.
+// Default: sessionStorage — cleared when the tab closes, never persisted to disk.
+// With rememberDevice=true: localStorage — survives browser restarts.
 // Full migration to httpOnly cookies is the next step.
 export function getStoredToken() {
-  return sessionStorage.getItem("token");
+  return localStorage.getItem("token") ?? sessionStorage.getItem("token");
 }
 
-export function setStoredToken(token: string) {
-  sessionStorage.setItem("token", token);
+export function setStoredToken(token: string, persistent = false) {
+  if (persistent) {
+    localStorage.setItem("token", token);
+  } else {
+    sessionStorage.setItem("token", token);
+  }
 }
 
 export function removeStoredToken() {
+  localStorage.removeItem("token");
   sessionStorage.removeItem("token");
 }
 

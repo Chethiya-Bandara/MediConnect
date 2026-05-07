@@ -25,7 +25,7 @@ import {
 interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
-  login: (payload: LoginFormValues) => Promise<AuthActionResult>;
+  login: (payload: LoginFormValues, rememberDevice?: boolean) => Promise<AuthActionResult>;
   register: (payload: RegisterFormValues) => Promise<AuthActionResult>;
   requestPasswordReset: (email: string) => Promise<AuthActionResult>;
   logout: () => void;
@@ -129,10 +129,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (
     payload: LoginFormValues,
+    rememberDevice = false,
   ): Promise<AuthActionResult> => {
     try {
       const { access_token: token } = await loginRequest(payload);
-      setStoredToken(token);
+      setStoredToken(token, rememberDevice);
       const userData = await getCurrentUser(token);
 
       const loggedUser: AuthUser = {

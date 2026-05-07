@@ -14,6 +14,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberDevice, setRememberDevice] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
@@ -30,7 +31,7 @@ export function LoginPage() {
 
   const onSubmit = async (values: LoginFormValues) => {
     setSubmitError(null);
-    const result = await login(values);
+    const result = await login(values, rememberDevice);
 
     if (!result.success) {
       setSubmitError(result.message ?? "Login failed.");
@@ -108,6 +109,15 @@ export function LoginPage() {
                 )}
               </div>
             </div>
+
+            <label className="remember-row">
+              <input
+                type="checkbox"
+                checked={rememberDevice}
+                onChange={(e) => setRememberDevice(e.target.checked)}
+              />
+              <span>Remember this device</span>
+            </label>
 
             <Button
               type="submit"
