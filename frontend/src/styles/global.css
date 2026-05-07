@@ -1253,3 +1253,52 @@ html.dark .step-strip__step--verification.active {
     grid-template-columns: 1fr;
   }
 }
+
+/* Container override */
+#reader {
+  border: none !important;
+  background-color: #000000 !important;
+}
+
+/* The Square Viewfinder */
+#reader__scan_region svg rect {
+  stroke: #1e40af !important; /* Blue-800 */
+  stroke-width: 5px !important;
+  filter: drop-shadow(0 0 5px rgba(30, 64, 175, 0.5));
+}
+
+/* Internal Library Buttons */
+#reader button {
+  background-color: #1e3a8a !important; /* Dark Blue */
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: white !important;
+  border-radius: 10px !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  padding: 10px 20px !important;
+  transition: 0.3s ease;
+}
+
+#reader button:hover {
+  background-color: #2563eb !important; /* Primary Blue */
+  box-shadow: 0 0 15px rgba(37, 99, 235, 0.3);
+}
+
+/* Hide the default file input text but keep the button */
+#reader input[type="file"] {
+  display: none;
+}
+
+/* Custom Viewfinder Style */
+#reader__scan_region svg rect {
+  stroke: #1d4ed8 !important; /* Blue-700 */
+  stroke-width: 6px !important;
+  fill: transparent !important;
+}
+
+/* Hide any hidden library text */
+#reader video {
+  border-radius: 1rem;
+  object-fit: cover;
+}

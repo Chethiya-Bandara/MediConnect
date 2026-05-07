@@ -1,4 +1,5 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Html5Qrcode } from "html5-qrcode";
+import { useDeferredValue, useEffect, useMemo, useState, useRef } from "react";
 import {
   Fingerprint,
   HeartPulse,
@@ -8,6 +9,10 @@ import {
   Moon,
   Pill,
   QrCode,
+  ImagePlus,
+  Camera,
+  Zap,
+  XCircle,
   RefreshCcw,
   ScanLine,
   Search,
@@ -68,6 +73,125 @@ function noticeClassName(tone: "error" | "info" | "success") {
   }
   return "border-red-200 bg-red-50 text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300";
 }
+
+interface QrScannerLaneProps {
+  onScanSuccess: (decodedText: string) => void;
+}
+
+export const QrScannerLane = ({ onScanSuccess }: QrScannerLaneProps) => {
+  const [isScanning, setIsScanning] = useState(false);
+  const qrCodeInstance = useRef<Html5Qrcode | null>(null);
+
+  useEffect(() => {
+    qrCodeInstance.current = new Html5Qrcode("reader");
+
+    return () => {
+      if (qrCodeInstance.current?.isScanning) {
+        qrCodeInstance.current.stop().catch(() => {});
+      }
+    };
+  }, []);
+
+  const handleStartCamera = async () => {
+    if (!qrCodeInstance.current) return;
+    
+    setIsScanning(true);
+    try {
+      await qrCodeInstance.current.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => {
+          onScanSuccess(decodedText);
+          handleStopCamera(); 
+        },
+        () => {}
+      );
+    } catch (err) {
+      console.error("Camera failed:", err);
+      setIsScanning(false);
+    }
+  };
+
+  const handleStopCamera = async () => {
+    if (qrCodeInstance.current?.isScanning) {
+      await qrCodeInstance.current.stop();
+      setIsScanning(false);
+    }
+  };
+
+  const handleFileScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !qrCodeInstance.current) return;
+
+    try {
+      const decodedText = await qrCodeInstance.current.scanFile(file, true);
+      onScanSuccess(decodedText);
+    } catch (err) {
+      alert("No valid QR code found in this image.");
+    }
+  };
+
+  return (
+    <div className="rounded-3xl border border-white/5 bg-[#0a0a0a] p-6 shadow-2xl">
+      {/* Header */}
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600/20 text-blue-500">
+            <QrCode size={18} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-white">QR Code Scanner</p>
+          </div>
+        </div>
+        {isScanning && (
+          <div className="flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1">
+            <Zap size={12} className="text-emerald-500 animate-pulse" />
+            <span className="text-[10px] font-bold text-emerald-500">LIVE</span>
+          </div>
+        )}
+      </div>
+
+      {/* Camera Viewport (Hidden until scanning starts) */}
+      <div 
+        id="reader" 
+        className={`w-full overflow-hidden rounded-2xl border-2 transition-all duration-500 ${
+          isScanning ? "border-blue-500 opacity-100 mb-6" : "border-transparent h-0 opacity-0"
+        }`}
+      ></div>
+
+      {/* Actions */}
+      <div className="grid grid-cols-1 gap-3">
+        {!isScanning ? (
+          <button
+            onClick={handleStartCamera}
+            className="flex w-full items-center justify-center gap-3 rounded-xl bg-blue-700 py-3 font-bold text-white transition-all hover:bg-blue-600 active:scale-[0.98]"
+          >
+            <Camera size={18} />
+            <span>Start Scanning</span>
+          </button>
+        ) : (
+          <button
+            onClick={handleStopCamera}
+            className="flex w-full items-center justify-center gap-3 rounded-xl bg-red-900/20 py-3 font-bold text-red-500 border border-red-900/50"
+          >
+            <XCircle size={18} />
+            <span>Cancel Scan</span>
+          </button>
+        )}
+
+        <label className="flex cursor-pointer items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/5 py-3 transition-all hover:bg-white/10 group">
+          <input type="file" accept="image/*" className="hidden" onChange={handleFileScan} />
+          <ImagePlus size={18} className="text-slate-400 group-hover:text-white" />
+          <span className="text-xs font-bold text-slate-400 group-hover:text-white">
+            Scan an Image File
+          </span>
+        </label>
+      </div>
+    </div>
+  );
+};
+
+
 
 export function PharmacistDashboardPage() {
   const navigate = useNavigate();
@@ -410,7 +534,7 @@ export function PharmacistDashboardPage() {
                 </div>
 
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                  <div className="mb-4 flex items-center gap-3">
+                  {/* <div className="mb-4 flex items-center gap-3">
                     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-800">
                       <QrCode size={22} />
                     </div>
@@ -429,7 +553,14 @@ export function PharmacistDashboardPage() {
                       <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                       For now, scan the patient QR outside the browser and paste the verified DHID here.
                     </p>
-                  </div>
+                  </div> */}
+                  <QrScannerLane 
+                    onScanSuccess={(decodedText) => {
+                      dashboard.setSearchQuery(decodedText);
+                      // Automatically trigger the backend lookup after a successful scan
+                      setTimeout(() => dashboard.lookupPrescription(), 100);
+                    }} 
+                  />
                 </div>
               </div>
             </div>
