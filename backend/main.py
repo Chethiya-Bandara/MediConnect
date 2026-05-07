@@ -63,6 +63,10 @@ async def rate_limit_middleware(request: Request, call_next):
     while bucket and now - bucket[0] > window_seconds:
         bucket.popleft()
 
+    # Anomaly spike detection (NFR-1.9) — counts ALL attempts including rate-limited ones
+    event_type = _ANOMALY_EVENT_MAP.get(path, "REQUEST_FLOOD")
+    anomaly_detector.record(client_ip, event_type)
+
     # Block if limit exceeded
     if len(bucket) >= max_requests:
         return JSONResponse(
@@ -77,10 +81,6 @@ async def rate_limit_middleware(request: Request, call_next):
 
     # Record this request
     bucket.append(now)
-
-    # Anomaly spike detection (NFR-1.9) — runs async, never blocks
-    event_type = _ANOMALY_EVENT_MAP.get(path, "REQUEST_FLOOD")
-    anomaly_detector.record(client_ip, event_type)
 
     return await call_next(request)
 
