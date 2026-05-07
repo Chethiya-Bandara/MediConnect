@@ -1756,7 +1756,7 @@ export function DoctorDashboardPage() {
                   {dashboard?.schedule.length ? dashboard.schedule.map((item) => (
                     <div key={item.id} className="relative flex items-start gap-6">
                       <div className="w-16 pt-1 text-right"><p className="text-sm font-bold dark:text-slate-300">{formatDateTime(item.start_time).split(", ").slice(-1)[0]}</p><p className="text-[10px] font-bold tracking-widest text-slate-500">{item.start_time ? new Date(item.start_time).toLocaleTimeString([], { hour12: true }).split(" ")[1] : "--"}</p></div>
-                      <div className={`absolute left-16 top-2 z-10 h-3 w-3 -translate-x-1/2 rounded-full ring-4 ring-white dark:ring-slate-900 ${getTimelineTone(item)}`} />
+                      <div className={`absolute left-[4.75rem] top-2 z-10 h-3 w-3 -translate-x-1/2 rounded-full ring-4 ring-white dark:ring-slate-900 ${getTimelineTone(item)}`} />
                       <div className="flex-1 rounded-2xl border border-slate-100 bg-slate-50 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/50">
                         <div className="flex items-start justify-between gap-4">
                           <div>
