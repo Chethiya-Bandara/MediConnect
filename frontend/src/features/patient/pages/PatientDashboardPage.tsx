@@ -1,5 +1,6 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowUpRight,
   Home,
   Activity,
   BadgeCheck,
@@ -996,7 +997,7 @@ export function PatientDashboardPage() {
 
   return (
     <div className="min-h-screen bg-surface text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-62 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6 dark:border-slate-800 dark:bg-slate-900 md:flex">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-62 flex-col border-r border-sky-200/60 bg-sky-100 px-4 py-6 dark:border-slate-800 dark:bg-slate-900 md:flex">
         <div className="mb-8 px-2">
           <AppBrandMark subtitle="Patient Console" />
         </div>
@@ -1140,6 +1141,78 @@ export function PatientDashboardPage() {
                 </div>
               </div>
 
+            </section>
+
+            {/* SECTION: WHAT IS MEDICONNECT */}
+            <section className="mt-6 border-t border-slate-100 pt-6 dark:border-white/5">
+              
+              <div className="mb-6 flex flex-col items-start gap-4">
+                <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300">
+                  <Sparkles size={14} />
+                  The MediConnect Advantage
+                </span>
+                <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                  Your Health, <span className="text-blue-600 dark:text-blue-400">Unified.</span>
+                </h2>
+                <p className="max-w-2xl text-slate-500 dark:text-slate-400">
+                  MediConnect is a national healthcare integration network that bridges the gap between state hospitals, pharmacies, and patients. 
+                  We turn fragmented medical data into a single, secure, and accessible ecosystem.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+                {[
+                  {
+                    title: "Unified Health ID",
+                    desc: "One Digital Health ID (DHID) that works across every state hospital in Sri Lanka. No more carrying paper files.",
+                    icon: Fingerprint,
+                    color: "blue"
+                  },
+                  {
+                    title: "Smart Prescriptions",
+                    desc: "Instant digital prescriptions sent from your doctor directly to the pharmacy lane. Track dispensing in real-time.",
+                    icon: Pill,
+                    color: "emerald"
+                  },
+                  {
+                    title: "Secure Backbone",
+                    desc: "Advanced encryption ensures your clinical history is only accessible by authorized medical practitioners.",
+                    icon: ShieldCheck,
+                    color: "indigo"
+                  }
+                ].map((feature, i) => (
+                  <div 
+                    key={i} 
+                    className="group relative overflow-hidden rounded-[2rem] border border-slate-100 bg-white p-8 transition-all hover:border-blue-500/30 dark:border-white/5 dark:bg-[#0a0a0a]"
+                  >
+                    <div className={`mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-${feature.color}-50 text-${feature.color}-600 transition-transform group-hover:scale-110 dark:bg-${feature.color}-500/10 dark:text-${feature.color}-400`}>
+                      <feature.icon size={28} />
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">{feature.title}</h3>
+                    <p className="mt-3 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                      {feature.desc}
+                    </p>
+                    
+                    {/* Decorative Background Element */}
+                    <div className={`absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-${feature.color}-500/5 blur-2xl transition-opacity group-hover:opacity-100`} />
+                  </div>
+                ))}
+              </div>
+
+              {/* Network Connectivity Banner */}
+              <div className="mt-12 rounded-[2.5rem] bg-slate-900 p-1 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] dark:bg-blue-600/5">
+                <div className="flex flex-col items-center justify-between gap-6 rounded-[2.3rem] bg-white px-10 py-8 dark:bg-[#050505] md:flex-row">
+                  <div className="flex items-center gap-6">
+                    <div className="hidden h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 md:flex">
+                      <Activity size={24} />
+                    </div>
+                    <div>
+                      <h4 className="text-lg font-bold">100+ Hospitals Connected</h4>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Join the nationwide network optimizing public healthcare delivery.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </section>
 
             {/* 2. AT-A-GLANCE STATS (Blue & Green Theme) */}
@@ -1808,7 +1881,7 @@ export function PatientDashboardPage() {
             <section className="space-y-6">
               <div className="space-y-6">
                 <div className="relative overflow-hidden rounded-[1.75rem] border border-slate-200/90 bg-[radial-gradient(circle_at_top_left,_rgba(96,165,250,0.22),_transparent_34%),linear-gradient(135deg,_rgba(30,64,175,0.10),_rgba(255,255,255,0.95)_36%,_rgba(241,245,249,0.92)_100%)] px-6 py-5 shadow-sm dark:border-slate-700/70 dark:bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_38%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(15,23,42,0.9)_58%,_rgba(30,41,59,0.94))] sm:px-8">
-                  <div className="absolute inset-y-0 right-0 w-32 bg-[radial-gradient(circle_at_center,_rgba(148,163,184,0.12),_transparent_65%)] dark:bg-[radial-gradient(circle_at_center,_rgba(96,165,250,0.12),_transparent_65%)]" />
+                  <div className="absolute inset-y-0 right-0 w-48 bg-[radial-gradient(circle_at_right,_rgba(148,163,184,0.25),_transparent_100%)] dark:bg-[radial-gradient(circle_at_right,_rgba(96,165,250,0.25),_transparent_100%)]" />
                   <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-4">
                       <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white/90 text-lg font-black tracking-[0.08em] text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] backdrop-blur-md dark:border-white/15 dark:bg-white/10 dark:text-white dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.16)]">
@@ -1837,14 +1910,15 @@ export function PatientDashboardPage() {
                   </div>
                 </div>
 
+                {/* 1. Added the linear sky blue gradient to the main container */}
                 <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.95fr)]">
-                  <div className="rounded-[1.55rem] border border-slate-200/80 bg-slate-50/55 p-5 dark:border-slate-700/70 dark:bg-slate-800/35">
+                  <div className="rounded-[1.55rem] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-5 shadow-sm backdrop-blur-sm dark:border-slate-700/70 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Editable profile</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-blue-400/60">Editable profile</p>
                         <h3 className="mt-2 font-headline text-lg font-extrabold text-slate-900 dark:text-white sm:text-xl">Display name</h3>
                       </div>
-                      <div className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-3 text-blue-600 shadow-sm dark:border-blue-500/30 dark:bg-slate-900 dark:text-blue-400">
                         <UserRound size={18} />
                       </div>
                     </div>
@@ -1978,7 +2052,7 @@ export function PatientDashboardPage() {
                     </div>
                   </div>
 
-                  <article className="rounded-[1.55rem] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(241,245,249,0.9))] p-5 shadow-sm dark:border-slate-700/70 dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.84),rgba(15,23,42,0.82))]">
+                  <article className="rounded-[1.55rem] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-5 shadow-sm dark:border-slate-700/70 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Read only</p>

@@ -177,7 +177,7 @@ export function HospitalAdminDashboardPage() {
   const dashboard = useHospitalAdminDashboard();
 
   const [view, setView] = useState<DashboardView>("overview");
-  const [theme, setTheme] = useState<ThemeMode>("dark");
+  const [theme, setTheme] = useState<ThemeMode>("light");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteHospitalId, setInviteHospitalId] = useState("");
   const [selectedAffiliationId, setSelectedAffiliationId] = useState("");

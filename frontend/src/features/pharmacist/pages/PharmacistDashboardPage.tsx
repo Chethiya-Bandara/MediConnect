@@ -2,6 +2,10 @@ import { Html5Qrcode } from "html5-qrcode";
 import { useDeferredValue, useEffect, useMemo, useState, useRef } from "react";
 import {
   Fingerprint,
+  Package,
+  Sparkles,
+  BarChart3,
+  ClipboardCheck,
   HeartPulse,
   History,
   Info,
@@ -395,7 +399,7 @@ export function PharmacistDashboardPage() {
 
   return (
     <div className="min-h-screen bg-surface font-body text-on-background antialiased transition-colors dark:bg-slate-950 dark:text-slate-100">
-      <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-100 bg-slate-50 py-6 transition-colors dark:border-slate-800 dark:bg-slate-900">
+      <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-sky-200/60 bg-sky-100 px-4 py-6 dark:border-slate-800 dark:bg-slate-900">
         <div className="mb-10 px-6">
           <AppBrandMark subtitle="Verified Pharmacist" />
         </div>
@@ -524,6 +528,79 @@ export function PharmacistDashboardPage() {
             <History className="h-5 w-5" />
             View History
           </button>
+        </div>
+      </div>
+    </section>
+
+    {/* SECTION: PHARMACY DISPENSING NETWORK */}
+    <section className="mt-6 border-t border-slate-100 pt-6 dark:border-white/5">
+      <div className="mb-6 flex flex-col items-start gap-4">
+        <span className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-sky-800 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-300">
+          <Sparkles size={14} />
+          Dispensing & Inventory Logic
+        </span>
+        <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+          <span className="text-sky-600 dark:text-sky-400">Streamlined </span>Pharmacy Operations. 
+        </h2>
+        <p className="max-w-2xl text-slate-500 dark:text-slate-400 text-sm md:text-base">
+          MediConnect connects digital prescriptions directly with pharmacy workflows. Monitor medicine inventory in real time,
+          process prescriptions efficiently, and maintain secure dispensing records with complete traceability.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        {[
+          {
+            title: "Smart Prescription Queue",
+            desc: "Receive prescriptions instantly from doctors and prepare medications before patients arrive for faster dispensing.",
+            icon: Zap,
+            color: "blue"
+          },
+          {
+            title: "Inventory Monitoring",
+            desc: "Track medicine availability in real time, manage low-stock alerts, and reduce dispensing delays across the pharmacy.",
+            icon: BarChart3,
+            color: "emerald"
+          },
+          {
+            title: "Secure Dispensing Records",
+            desc: "Every prescription and medication issue is securely logged under the patient’s Digital Health ID for safe and traceable care.",
+            icon: ClipboardCheck,
+            color: "blue"
+          }
+        ].map((feature, i) => (
+          <article 
+            key={i} 
+            className="group relative overflow-hidden rounded-[2rem] border border-sky-200/50 bg-white p-8 transition-all hover:border-sky-300 dark:border-slate-800 dark:bg-slate-900/90"
+          >
+            <div className="relative z-10">
+              <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-sky-600 shadow-sm transition-transform group-hover:scale-110 dark:bg-sky-900/30 dark:text-sky-400">
+                <feature.icon size={28} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">{feature.title}</h3>
+              <p className="mt-3 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                {feature.desc}
+              </p>
+            </div>
+            
+            {/* Subtle right-aligned glow to match your "effectful" gradient style */}
+            <div className="absolute inset-y-0 right-0 w-32 bg-[radial-gradient(circle_at_right,_rgba(14,165,233,0.1),_transparent_80%)]" />
+          </article>
+        ))}
+      </div>
+
+      {/* Inventory Metrics Banner */}
+      <div className="mt-10 rounded-[2.5rem] bg-sky-600 p-1 dark:bg-sky-500/10">
+        <div className="flex flex-col items-center justify-between gap-6 rounded-[2.3rem] bg-white px-10 py-6 dark:bg-[#050505] md:flex-row">
+          <div className="flex items-center gap-6">
+            <div className="hidden h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400 md:flex">
+              <Package size={20} />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-slate-900 dark:text-white">Unified Inventory Backbone</h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Your facility is currently connected to the National State Pharmacy registry.</p>
+            </div>
+          </div>
         </div>
       </div>
     </section>

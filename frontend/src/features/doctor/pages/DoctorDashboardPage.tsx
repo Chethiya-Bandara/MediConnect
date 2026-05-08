@@ -1188,9 +1188,9 @@ export function DoctorDashboardPage() {
 
   return (
     <div className="min-h-screen bg-surface text-on-surface transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
-      <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-100 bg-slate-50 py-6 dark:border-slate-800 dark:bg-slate-900">
+      <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-sky-200/60 bg-sky-100 px-4 py-6 dark:border-slate-800 dark:bg-slate-900">
         <div className="mb-8 px-6">
-          <AppBrandMark titleClassName="text-xl" logoClassName="h-11" />
+          <AppBrandMark subtitle="Doctor Console" />
         </div>
         <nav className="flex-1 space-y-1 px-2">
           {navItems.map((item) => {
@@ -1341,6 +1341,75 @@ export function DoctorDashboardPage() {
                     <ClipboardList className="h-5 w-5" />
                     New Encounter
                   </button>
+                </div>
+              </div>
+            </section>
+
+            {/* SECTION: CLINICAL ECOSYSTEM (DR DASHBOARD) */}
+            <section className="mt-6 border-t border-slate-100 pt-6 dark:border-white/5">
+              <div className="mb-6 flex flex-col items-start gap-4">
+                <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300">
+                  <Sparkles size={14} />
+                  Clinical Excellence Network
+                </span>
+                <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                  Precision <span className="text-blue-600 dark:text-blue-400">Diagnostics.</span>
+                </h2>
+                <p className="max-w-2xl text-slate-500 dark:text-slate-400 text-sm md:text-base">
+                  MediConnect streamlines the physician workflow by providing a longitudinal view of patient health. 
+                  Access real-time diagnostic data and coordinate treatments across the national facility network.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+                {[
+                  {
+                    title: "Longitudinal Records",
+                    desc: "View a patient's complete history across all state facilities in one unified timeline. No more missing charts.",
+                    icon: ClipboardList,
+                    color: "blue"
+                  },
+                  {
+                    title: "Diagnostic Integration",
+                    desc: "Direct access to MRI, X-ray, and lab results verified by system-wide diagnostic standards.",
+                    icon: Activity,
+                    color: "emerald"
+                  },
+                  {
+                    title: "Clinical Permissions",
+                    desc: "Your credentials grant secure access to clinical notes and sensitive data within authorized hospital boundaries.",
+                    icon: ShieldPlus,
+                    color: "blue"
+                  }
+                ].map((feature, i) => (
+                  <div 
+                    key={i} 
+                    className="group relative overflow-hidden rounded-[2rem] border border-slate-100 bg-white p-8 transition-all hover:border-blue-500/30 dark:border-white/5 dark:bg-[#0a0a0a]"
+                  >
+                    <div className={`mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-${feature.color}-50 text-${feature.color}-600 transition-transform group-hover:scale-110 dark:bg-${feature.color}-500/10 dark:text-${feature.color}-400`}>
+                      <feature.icon size={28} />
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">{feature.title}</h3>
+                    <p className="mt-3 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                      {feature.desc}
+                    </p>
+                    <div className={`absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-${feature.color}-500/5 blur-2xl transition-opacity group-hover:opacity-100`} />
+                  </div>
+                ))}
+              </div>
+
+              {/* Clinical Compliance Banner */}
+              <div className="mt-10 rounded-[2.5rem] bg-slate-900 p-1 dark:bg-blue-600/5">
+                <div className="flex flex-col items-center justify-between gap-6 rounded-[2.3rem] bg-white px-10 py-6 dark:bg-[#050505] md:flex-row">
+                  <div className="flex items-center gap-6">
+                    <div className="hidden h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 md:flex">
+                      <BadgeCheck size={20} />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-bold">Clinical Protocol Compliant</h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">All data handling follows national healthcare privacy standards.</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
@@ -2137,19 +2206,19 @@ export function DoctorDashboardPage() {
               </div>
 
               <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-                <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <div className="mb-6 flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Profile</p>
-                      <h3 className="mt-2 text-2xl font-extrabold dark:text-white">Identity settings</h3>
-                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                        Update the doctor-facing profile details patients and hospitals see.
-                      </p>
-                    </div>
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-300">
-                      <UserRound size={22} />
-                    </div>
+              <div className="rounded-3xl border border-sky-100 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm dark:border-sky-900/50 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
+                <div className="mb-6 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-sky-600 dark:text-sky-400">Profile</p>
+                    <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">Identity settings</h3>
+                    <p className="mt-2 text-sm text-slate-500 dark:text-sky-200/60">
+                      Update the doctor-facing profile details patients and hospitals see.
+                    </p>
                   </div>
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-sky-200 bg-white text-sky-600 shadow-sm dark:border-sky-700 dark:bg-sky-900 dark:text-sky-300">
+                    <UserRound size={22} />
+                  </div>
+                </div>
 
                   <div className="grid gap-5 md:grid-cols-2">
                     <label className="block">
@@ -2298,16 +2367,20 @@ export function DoctorDashboardPage() {
                 </div>
 
                 <div className="space-y-6">
-                  <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <div className="mb-6 flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Read Only</p>
-                        <h3 className="mt-2 text-2xl font-extrabold dark:text-white">Doctor details</h3>
-                      </div>
-                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-300">
-                        <ShieldCheck size={22} />
-                      </div>
+                {/* Consistent solid Sky Blue theme */}
+                <div className="rounded-3xl border border-sky-100 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm dark:border-sky-900/50 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
+                  <div className="mb-6 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-sky-500/70 dark:text-sky-400/50">Read Only</p>
+                      <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">Doctor details</h3>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-sky-200/60">
+                        Verified clinical identity from the National Health Registry.
+                      </p>
                     </div>
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-sky-200 bg-white text-sky-600 shadow-sm dark:border-sky-700 dark:bg-sky-900 dark:text-sky-300">
+                      <ShieldCheck size={22} />
+                    </div>
+                  </div>
 
                     <div className="overflow-hidden rounded-3xl border border-slate-100 dark:border-slate-800">
                       <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
@@ -2329,7 +2402,7 @@ export function DoctorDashboardPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="rounded-3xl border border-slate-100 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm dark:border-slate-800 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Account summary</p>
                     <div className="mt-6 space-y-4">
                       <div className="rounded-2xl border border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
