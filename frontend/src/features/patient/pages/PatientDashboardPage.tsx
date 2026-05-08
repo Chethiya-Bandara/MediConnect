@@ -1,6 +1,5 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowUpRight,
   Home,
   Activity,
   BadgeCheck,
