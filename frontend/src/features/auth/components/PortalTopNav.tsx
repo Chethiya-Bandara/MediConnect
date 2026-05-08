@@ -7,11 +7,18 @@ interface PortalTopNavProps {
 }
 
 export function PortalTopNav({ brandVariant = "default" }: PortalTopNavProps) {
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  // 1. Change initial state to "light"
+  const [theme, setTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("patient-dashboard-theme");
-    setTheme(savedTheme === "light" ? "light" : "dark");
+    // 2. Only set to "dark" if specifically found in localStorage
+    // otherwise, stay as "light"
+    if (savedTheme === "dark") {
+      setTheme("dark");
+    } else {
+      setTheme("light");
+    }
   }, []);
 
   useEffect(() => {
@@ -52,6 +59,7 @@ export function PortalTopNav({ brandVariant = "default" }: PortalTopNavProps) {
           title="Toggle theme"
           aria-label="Toggle theme"
         >
+          {/* 3. The icon logic should match: show Sun when in dark mode to switch to light */}
           {theme === "dark" ? <SunMedium size={18} /> : <MoonStar size={18} />}
         </button>
       </div>

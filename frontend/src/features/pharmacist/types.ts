@@ -1,4 +1,5 @@
 export type PharmacistSection =
+  | "home"
   | "overview"
   | "lookup"
   | "dispensing"

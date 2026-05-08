@@ -19,6 +19,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sun,
+  Home,
+  Activity
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { AppBrandMark } from "../../../components/ui";
@@ -28,6 +30,12 @@ import { useAuth } from "../../auth/context/AuthContext";
 import { PrescriptionStatusBadge } from "../components/PrescriptionStatusBadge";
 import { usePharmacistDashboard } from "../hooks/usePharmacistDashboard";
 import type { PharmacistSection } from "../types";
+
+import MRI from "../../../assets/welcome/MRI.jpg";
+import Tools from "../../../assets/welcome/Tools.jpg";
+import HealthCamp from "../../../assets/welcome/HealthCamp.jpg";
+
+const WELCOME_IMAGES = [MRI, Tools, HealthCamp];
 
 function formatLkr(value: number | null) {
   if (value === null) return "N/A";
@@ -196,8 +204,8 @@ export const QrScannerLane = ({ onScanSuccess }: QrScannerLaneProps) => {
 export function PharmacistDashboardPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const [section, setSection] = useState<PharmacistSection>("dispensing");
-  const [isDark, setIsDark] = useState(false);
+  const [section, setSection] = useState<PharmacistSection>("home");
+  const [isLight, setIsLight] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
   const [historyStatusFilter, setHistoryStatusFilter] = useState("ALL");
   const dashboard = usePharmacistDashboard(user?.id, user?.organisationId ?? null);
@@ -205,16 +213,25 @@ export function PharmacistDashboardPage() {
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("theme");
-    const dark = storedTheme !== "light";
-    document.documentElement.classList.toggle("dark", dark);
-    setIsDark(dark);
+    const light = storedTheme !== "dark";
+    document.documentElement.classList.toggle("light", light);
+    setIsLight(light);
+  }, []);
+
+  const [bgIndex, setBgIndex] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setBgIndex((prev) => (prev + 1) % WELCOME_IMAGES.length);
+    }, 6000);
+    return () => clearInterval(interval);
   }, []);
 
   const toggleTheme = () => {
-    const next = !isDark;
+    const next = !isLight;
     document.documentElement.classList.toggle("dark", next);
     window.localStorage.setItem("theme", next ? "dark" : "light");
-    setIsDark(next);
+    setIsLight(next);
   };
 
   const handleLogout = () => {
@@ -385,6 +402,7 @@ export function PharmacistDashboardPage() {
 
         <nav className="flex-1 space-y-1 px-2">
           {[
+            { id: "home" as const, label: "Home", icon: Home },
             { id: "dispensing" as const, label: "Prescription Dispensing", icon: Pill },
             { id: "history" as const, label: "Transaction History", icon: History },
           ].map((item) => {
@@ -437,7 +455,7 @@ export function PharmacistDashboardPage() {
             onClick={toggleTheme}
             className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-blue-300"
           >
-            {isDark ? <Sun size={18} /> : <Moon size={18} />}
+            {isLight ? <Sun size={18} /> : <Moon size={18} />}
           </button>
           <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-slate-700" />
           <div className="flex items-center gap-3">
@@ -457,6 +475,152 @@ export function PharmacistDashboardPage() {
       </header>
 
       <main className="ml-64 min-h-screen px-8 pb-12 pt-24">
+        {section === "home" && (
+  <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 flex flex-col gap-12 pb-16">
+    
+    {/* 1. HERO SECTION (Slideshow) */}
+    <section className="relative -mx-4 md:-mx-8 -mt-4 md:-mt-8 flex min-h-[65vh] items-center justify-center overflow-hidden shadow-2xl shadow-blue-900/10">
+      {/* Background Slideshow Layer */}
+      <div className="absolute inset-0 z-0">
+        {WELCOME_IMAGES.map((src, index) => (
+          <div
+            key={src}
+            className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out ${
+              index === bgIndex ? "opacity-100" : "opacity-0"
+            }`}
+            style={{ backgroundImage: `url(${src})` }}
+          >
+            {/* Overlay Gradient for "Void" feel */}
+            <div className="absolute inset-0 bg-gradient-to-b from-slate-950/60 via-slate-950/40 to-[#050505] backdrop-blur-[1px]" />
+          </div>
+        ))}
+      </div>
+
+      {/* Content Layer */}
+      <div className="relative z-10 max-w-4xl px-6 text-center text-white">
+        <span className="mb-4 inline-block rounded-full bg-blue-500/20 px-4 py-1.5 text-xs font-bold tracking-[0.2em] uppercase text-blue-100 backdrop-blur-md border border-blue-400/30">
+          State Hospital Dispensing Portal
+        </span>
+        <h1 className="font-headline text-5xl font-extrabold tracking-tight sm:text-7xl drop-shadow-2xl">
+          Welcome, <span className="text-blue-400">{user?.name}</span>
+        </h1>
+        <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-200/90 drop-shadow-md sm:text-xl font-medium">
+          Securely manage prescriptions, track inventory reduction, and coordinate 
+          pharmaceutical care across authorized state facilities.
+        </p>
+        
+        <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
+          <button 
+            onClick={() => setSection("dispensing")}
+            className="group flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-8 py-4 font-bold text-white shadow-xl transition-all hover:bg-blue-700 hover:scale-105 active:scale-95"
+          >
+            <Zap className="h-5 w-5" />
+            Start Dispensing
+          </button>
+          <button 
+            onClick={() => setSection("history")}
+            className="flex items-center justify-center gap-2 rounded-2xl border border-white/30 bg-white/10 px-8 py-4 font-bold text-white backdrop-blur-md transition-all hover:bg-white/20 hover:scale-105 active:scale-95"
+          >
+            <History className="h-5 w-5" />
+            View History
+          </button>
+        </div>
+      </div>
+    </section>
+
+    {/* 2. OPERATIONAL STATUS STATS */}
+    <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
+      <div className="group relative overflow-hidden rounded-3xl border border-blue-100/10 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:bg-white/5">
+        <div className="flex items-center gap-4">
+          <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+            <ShieldCheck className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-slate-500">Security Status</p>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Encrypted Session</h3>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-blue-600 uppercase tracking-widest">
+           System Verified & Active
+        </div>
+      </div>
+
+      <div className="group relative overflow-hidden rounded-3xl border border-emerald-100/10 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:bg-white/5">
+        <div className="flex items-center gap-4">
+          <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400">
+            <Pill className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-slate-500">Today's Volume</p>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">{dashboard.stats.dispensedToday} Handled</h3>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-emerald-600 uppercase tracking-widest">
+          <Activity className="h-4 w-4" /> Queue Moving Efficiently
+        </div>
+      </div>
+
+      <div className="group relative overflow-hidden rounded-3xl border border-amber-100/10 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:bg-white/5">
+        <div className="flex items-center gap-4">
+          <div className="rounded-2xl bg-amber-50 p-3 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">
+            <RefreshCcw className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-slate-500">Awaiting Action</p>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">{dashboard.stats.pendingPrescriptions} Pending</h3>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-amber-600 uppercase tracking-widest">
+           Ready for Verification
+        </div>
+      </div>
+    </section>
+
+    {/* 3. QUICK ACTIONS GRID */}
+    <section>
+      <div className="mb-6 flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Pharmacy Quick Actions</h2>
+      </div>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5">
+        {[
+          { label: "Dispensing Lane", icon: Pill, color: "blue", target: "dispensing" },
+          { label: "Audit Logs", icon: History, color: "emerald", target: "history" },
+        ].map((action) => (
+          <button
+            key={action.label}
+            onClick={() => setSection(action.target as PharmacistSection)}
+            className="flex flex-col items-center gap-4 rounded-3xl border border-slate-100 bg-white p-6 transition-all hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg dark:border-white/5 dark:bg-[#0a0a0a]"
+          >
+            <div className={`rounded-2xl bg-${action.color}-50 p-4 text-${action.color}-600 dark:bg-${action.color}-500/10 dark:text-${action.color}-400`}>
+              <action.icon className="h-6 w-6" />
+            </div>
+            <span className="font-bold text-slate-700 dark:text-slate-200 text-sm text-center">{action.label}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+
+    {/* 4. FACILITY CONNECT BANNER */}
+    <section className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-r from-slate-900 to-blue-900 p-10 text-white shadow-xl shadow-blue-900/20">
+      <div className="relative z-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-center">
+        <div className="max-w-md">
+          <h2 className="text-3xl font-bold">State Hospital Network</h2>
+          <p className="mt-2 text-blue-100/80 font-medium text-sm">
+            You are currently authenticated at <span className="text-blue-300 font-bold">National Hospital Sri Lanka</span>. 
+            All dispensed items are logged directly to the central healthcare backbone.
+          </p>
+        </div>
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 backdrop-blur-md">
+           <ShieldCheck className="text-blue-400" />
+        </div>
+      </div>
+      {/* Abstract medical design elements */}
+      <div className="absolute -right-20 -top-20 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl" />
+      <div className="absolute -bottom-20 left-20 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
+    </section>
+
+  </div>
+)}
         {section === "dispensing" ? (
           <div className="transition-opacity duration-300">
             <div className="mb-10 max-w-3xl">
