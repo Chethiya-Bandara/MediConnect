@@ -10,6 +10,7 @@ import type {
   ManagedOrganisationItem,
   ManagedMedicineItem,
   ManagedMedicinePayload,
+  PendingAdminItem,
   PendingDoctorItem,
   PendingOrganisationItem,
 } from "../types";
@@ -31,6 +32,7 @@ interface DashboardResponse {
     pending_organisations?: number;
     total_doctors?: number;
     pending_doctors?: number;
+    pending_admins?: number;
     total_patients?: number;
     audit_events_24h?: number;
   };
@@ -45,9 +47,23 @@ interface DashboardResponse {
     doctor_id?: string | number | null;
     user_id?: string | null;
     name?: string | null;
+    preferred_name?: string | null;
     email?: string | null;
     specialization?: string | null;
     slmc_number?: string | null;
+    status?: string | null;
+    created_at?: string | null;
+  }>;
+  pending_admins?: Array<{
+    profile_id?: string | number | null;
+    user_id?: string | null;
+    name?: string | null;
+    preferred_name?: string | null;
+    email?: string | null;
+    role?: string | null;
+    admin_role?: string | null;
+    organisation_id?: string | number | null;
+    organisation_name?: string | null;
     status?: string | null;
     created_at?: string | null;
   }>;
@@ -100,12 +116,15 @@ function asString(value: unknown) {
   return null;
 }
 
-function normalizeDashboardStats(payload: DashboardResponse["stats"]): HealthMinistryDashboardStats {
+function normalizeDashboardStats(
+  payload: DashboardResponse["stats"],
+): HealthMinistryDashboardStats {
   return {
     totalOrganisations: Number(payload?.total_organisations ?? 0),
     pendingOrganisations: Number(payload?.pending_organisations ?? 0),
     totalDoctors: Number(payload?.total_doctors ?? 0),
     pendingDoctors: Number(payload?.pending_doctors ?? 0),
+    pendingAdmins: Number(payload?.pending_admins ?? 0),
     totalPatients: Number(payload?.total_patients ?? 0),
     auditEvents24h: Number(payload?.audit_events_24h ?? 0),
   };
@@ -127,7 +146,9 @@ function normalizePendingOrganisations(
   }));
 }
 
-function normalizePendingDoctors(payload: DashboardResponse["pending_doctors"]): PendingDoctorItem[] {
+function normalizePendingDoctors(
+  payload: DashboardResponse["pending_doctors"],
+): PendingDoctorItem[] {
   if (!Array.isArray(payload)) {
     return [];
   }
@@ -136,9 +157,30 @@ function normalizePendingDoctors(payload: DashboardResponse["pending_doctors"]):
     doctorId: asString(item.doctor_id) ?? "",
     userId: item.user_id ?? null,
     name: item.name ?? null,
+    preferredName: item.preferred_name ?? item.name ?? null,
     email: item.email ?? null,
     specialization: item.specialization ?? null,
     slmcNumber: item.slmc_number ?? null,
+    status: item.status ?? null,
+    createdAt: item.created_at ?? null,
+  }));
+}
+
+function normalizePendingAdmins(payload: DashboardResponse["pending_admins"]): PendingAdminItem[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload.map((item) => ({
+    profileId: asString(item.profile_id) ?? "",
+    userId: asString(item.user_id) ?? "",
+    name: item.name ?? null,
+    preferredName: item.preferred_name ?? item.name ?? null,
+    email: item.email ?? null,
+    role: item.role ?? null,
+    adminRole: item.admin_role ?? null,
+    organisationId: asString(item.organisation_id) ?? null,
+    organisationName: item.organisation_name ?? null,
     status: item.status ?? null,
     createdAt: item.created_at ?? null,
   }));
@@ -176,8 +218,7 @@ function normalizeManagedOrganisations(
     status: item.status ?? null,
     createdAt: item.created_at ?? null,
     linkedTable: item.linked_table ?? null,
-    linkedRecordId:
-      typeof item.linked_record_id === "number" ? item.linked_record_id : null,
+    linkedRecordId: typeof item.linked_record_id === "number" ? item.linked_record_id : null,
   }));
 }
 
@@ -197,23 +238,20 @@ function normalizeManagedMedicines(
         ? item.wholesale_price
         : Number(item.wholesale_price ?? 0),
     retailPrice:
-      typeof item.retail_price === "number"
-        ? item.retail_price
-        : Number(item.retail_price ?? 0),
+      typeof item.retail_price === "number" ? item.retail_price : Number(item.retail_price ?? 0),
     createdAt: item.created_at ?? null,
     inventoryLinks: Number(item.inventory_links ?? 0),
   }));
 }
 
 export async function getHealthMinistryDashboard() {
-  const response = await apiRequest<DashboardResponse>(
-    endpoints.healthMinistryAdmin.dashboard,
-  );
+  const response = await apiRequest<DashboardResponse>(endpoints.healthMinistryAdmin.dashboard);
 
   return {
     stats: normalizeDashboardStats(response.stats),
     pendingOrganisations: normalizePendingOrganisations(response.pending_organisations),
     pendingDoctors: normalizePendingDoctors(response.pending_doctors),
+    pendingAdmins: normalizePendingAdmins(response.pending_admins),
     auditLogs: normalizeAuditLogs(response.audit_logs),
   };
 }
@@ -242,9 +280,7 @@ export async function createManagedOrganisation(payload: {
 }
 
 export async function getManagedMedicines(search = "") {
-  const query = search.trim()
-    ? `?search=${encodeURIComponent(search.trim())}`
-    : "";
+  const query = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
   const response = await apiRequest<MedicineRegistryResponse>(
     `${endpoints.healthMinistryAdmin.medicinesBase}${query}`,
   );
@@ -264,10 +300,7 @@ export async function createManagedMedicine(payload: ManagedMedicinePayload) {
   });
 }
 
-export async function updateManagedMedicine(
-  medicineId: string,
-  payload: ManagedMedicinePayload,
-) {
+export async function updateManagedMedicine(medicineId: string, payload: ManagedMedicinePayload) {
   return apiRequest<{ message?: string }>(
     `${endpoints.healthMinistryAdmin.medicinesBase}/${encodeURIComponent(medicineId)}`,
     {
@@ -327,35 +360,36 @@ function normalizeIncidenceMap(payload: unknown): DiagnosisMetric[] {
   });
 }
 
-export async function approveOrganization(
-  organizationId: string,
-  status: ApprovalStatus,
-) {
-  return apiRequest<{ message?: string }>(
-    endpoints.healthMinistryAdmin.approveOrganization,
-    {
-      method: "PUT",
-      body: JSON.stringify({
-        id: organizationId,
-        organization_id: organizationId,
-        status,
-      }),
-    },
-  );
+export async function approveOrganization(organizationId: string, status: ApprovalStatus) {
+  return apiRequest<{ message?: string }>(endpoints.healthMinistryAdmin.approveOrganization, {
+    method: "PUT",
+    body: JSON.stringify({
+      id: organizationId,
+      organization_id: organizationId,
+      status,
+    }),
+  });
 }
 
 export async function approveDoctor(doctorId: string, status: ApprovalStatus) {
-  return apiRequest<{ message?: string }>(
-    endpoints.healthMinistryAdmin.approveDoctor,
-    {
-      method: "PUT",
-      body: JSON.stringify({
-        id: doctorId,
-        doctor_id: doctorId,
-        status,
-      }),
-    },
-  );
+  return apiRequest<{ message?: string }>(endpoints.healthMinistryAdmin.approveDoctor, {
+    method: "PUT",
+    body: JSON.stringify({
+      id: doctorId,
+      doctor_id: doctorId,
+      status,
+    }),
+  });
+}
+
+export async function updateAdminUserStatus(userId: string, status: ApprovalStatus) {
+  return apiRequest<{ message?: string }>(endpoints.healthMinistryAdmin.adminUserStatus, {
+    method: "PUT",
+    body: JSON.stringify({
+      user_id: userId,
+      status,
+    }),
+  });
 }
 
 export async function suspendEntity(
@@ -390,9 +424,7 @@ export async function getDiseaseIncidence(payload: IncidenceRequestPayload) {
 }
 
 export async function getTopDiagnoses() {
-  const response = await apiRequest<unknown>(
-    endpoints.healthMinistryAdmin.analyticsTopDiagnoses,
-  );
+  const response = await apiRequest<unknown>(endpoints.healthMinistryAdmin.analyticsTopDiagnoses);
   return normalizeDiagnosisList(response);
 }
 

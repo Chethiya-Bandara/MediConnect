@@ -3,7 +3,7 @@
 # Managed by Bihanga (B-2.1.1)
 #
 # RULES:
-#   Allowed types: PDF, JPG/JPEG only
+#   Allowed types: PDF, JPG/JPEG/PNG only
 #   Max file size: 5MB
 #   Validates REAL file content (not just extension)
 #   Prevents: malware uploads, wrong file types, oversized files
@@ -19,6 +19,7 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024  # 5,242,880 bytes
 ALLOWED_MIME_TYPES = {
     "application/pdf",
     "image/jpeg",
+    "image/png",
 }
 
 # Allowed file extensions
@@ -26,6 +27,7 @@ ALLOWED_EXTENSIONS = {
     ".pdf",
     ".jpg",
     ".jpeg",
+    ".png",
 }
 
 # Magic bytes — the first few bytes of a file that identify its real type
@@ -38,6 +40,7 @@ MAGIC_BYTES = {
     b"\xff\xd8\xff\xe3":         "image/jpeg",        # JPEG
     b"\xff\xd8\xff\xdb":         "image/jpeg",        # JPEG
     b"\xff\xd8\xff\xee":         "image/jpeg",        # JPEG
+    b"\x89\x50\x4e\x47":         "image/png",         # PNG
 }
 
 
@@ -73,7 +76,7 @@ async def validate_upload_file(file: UploadFile) -> bytes:
             status_code=400,
             detail={
                 "error": "Invalid file type",
-                "message": f"Only PDF and JPG files are allowed. "
+                "message": f"Only PDF, JPG, and PNG files are allowed. "
                            f"You uploaded: '{extension or 'unknown'}'"
             }
         )
@@ -117,7 +120,7 @@ async def validate_upload_file(file: UploadFile) -> bytes:
             detail={
                 "error": "Invalid file content",
                 "message": "File content does not match an allowed type. "
-                           "Only real PDF and JPG files are accepted."
+                           "Only real PDF, JPG, and PNG files are accepted."
             }
         )
 
@@ -127,7 +130,7 @@ async def validate_upload_file(file: UploadFile) -> bytes:
             detail={
                 "error": "Invalid file type",
                 "message": f"Detected file type '{detected_type}' is not allowed. "
-                           f"Only PDF and JPG files are accepted."
+                           f"Only PDF, JPG, and PNG files are accepted."
             }
         )
 

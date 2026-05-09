@@ -45,6 +45,7 @@ export interface DoctorArchiveItem {
 
 export interface DoctorPrescriptionItem {
   id: number;
+  medicine_id?: number | null;
   medicine_name: string | null;
   dosage: string | null;
   quantity: string | null;
@@ -87,6 +88,8 @@ export interface DoctorDashboardData {
     id: string;
     email: string;
     name: string | null;
+    legal_name?: string | null;
+    preferred_name?: string | null;
   };
   doctor: {
     id: number;
@@ -147,4 +150,11 @@ export interface DoctorMedicineCatalogItem {
   unit: string | null;
   retail_price: number | null;
   wholesale_price: number | null;
+}
+
+export interface DoctorDiseaseCatalogItem {
+  id: number;
+  code: string | null;
+  name: string;
+  domain?: string | null;
 }

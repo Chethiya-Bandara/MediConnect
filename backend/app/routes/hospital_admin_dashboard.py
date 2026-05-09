@@ -345,7 +345,7 @@ def get_hospital_admin_dashboard(context=Depends(_hospital_admin_context)):
 
     return {
         "hospital": {
-            "id": hospital["id"],
+            "id": organisation["id"],
             "name": organisation.get("name"),
             "type": organisation.get("type"),
             "status": organisation.get("status"),
@@ -609,8 +609,14 @@ def invite_doctor(
     context=Depends(_hospital_admin_context),
 ):
     hospital_id = context["hospital"]["id"]
-    if data.hospital_id and str(data.hospital_id) != str(hospital_id):
-        raise HTTPException(status_code=403, detail="You can only invite for your own hospital")
+    if data.hospital_id:
+        provided_value = str(data.hospital_id).strip()
+        allowed_values = {
+            str(hospital_id),
+            str(context["organisation"]["id"]),
+        }
+        if provided_value not in allowed_values:
+            raise HTTPException(status_code=403, detail="You can only invite for your own hospital")
 
     supabase_admin.table("doctor_invitations").insert(
         {

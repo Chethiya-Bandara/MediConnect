@@ -1,23 +1,20 @@
-import forms from '@tailwindcss/forms';
-import containerQueries from '@tailwindcss/container-queries';
+import forms from "@tailwindcss/forms";
+import containerQueries from "@tailwindcss/container-queries";
 
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: "class",
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
       colors: {
-        "error": "#ba1a1a",
+        error: "#ba1a1a",
         "surface-bright": "#f7fafc",
         "secondary-fixed-dim": "#81cfff",
-        "primary": "#004275",
+        primary: "#004275",
         "inverse-on-surface": "#eef1f3",
         "on-surface-variant": "#414750",
-        "background": "#f7fafc",
+        background: "#f7fafc",
         "surface-tint": "#1261a3",
         "on-tertiary-container": "#ffc29c",
         "primary-container": "#005a9c",
@@ -32,13 +29,13 @@ export default {
         "on-error-container": "#93000a",
         "secondary-fixed": "#c6e7ff",
         "surface-container": "#ebeef0",
-        "secondary": "#00658d",
-        "outline": "#727781",
+        secondary: "#00658d",
+        outline: "#727781",
         "surface-container-high": "#e5e9eb",
-        "surface": "#f7fafc",
+        surface: "#f7fafc",
         "primary-fixed-dim": "#a1c9ff",
         "on-tertiary-fixed-variant": "#733600",
-        "tertiary": "#6a3100",
+        tertiary: "#6a3100",
         "on-tertiary-fixed": "#311300",
         "error-container": "#ffdad6",
         "surface-container-lowest": "#ffffff",
@@ -57,20 +54,20 @@ export default {
         "on-background": "#181c1e",
         "on-secondary": "#ffffff",
         "surface-dim": "#d7dadc",
-        "on-secondary-fixed": "#001e2d"
+        "on-secondary-fixed": "#001e2d",
       },
       fontFamily: {
-        "headline": ["Manrope"],
-        "body": ["Inter"],
-        "label": ["Inter"]
+        headline: ["Manrope"],
+        body: ["Inter"],
+        label: ["Inter"],
       },
       borderRadius: {
-        "DEFAULT": "0.375rem", 
-        "lg": "0.5rem", 
-        "xl": "0.75rem", 
-        "full": "1.5rem"
+        DEFAULT: "0.375rem",
+        lg: "0.5rem",
+        xl: "0.75rem",
+        full: "1.5rem",
       },
     },
   },
   plugins: [forms, containerQueries],
-}
+};

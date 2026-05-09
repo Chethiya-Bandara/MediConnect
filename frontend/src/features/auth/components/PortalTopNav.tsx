@@ -6,14 +6,13 @@ interface PortalTopNavProps {
   brandVariant?: "default" | "mediconnect";
 }
 
+const AUTH_THEME_STORAGE_KEY = "auth-theme";
+
 export function PortalTopNav({ brandVariant = "default" }: PortalTopNavProps) {
-  // 1. Change initial state to "light"
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("patient-dashboard-theme");
-    // 2. Only set to "dark" if specifically found in localStorage
-    // otherwise, stay as "light"
+    const savedTheme = localStorage.getItem(AUTH_THEME_STORAGE_KEY);
     if (savedTheme === "dark") {
       setTheme("dark");
     } else {
@@ -25,13 +24,15 @@ export function PortalTopNav({ brandVariant = "default" }: PortalTopNavProps) {
     const root = document.documentElement;
     root.classList.remove("light", "dark");
     root.classList.add(theme);
-    localStorage.setItem("patient-dashboard-theme", theme);
+    localStorage.setItem(AUTH_THEME_STORAGE_KEY, theme);
   }, [theme]);
 
   return (
     <nav className="portal-nav">
       <div className="portal-nav-inner">
-        <div className={`brand-wrap ${brandVariant === "mediconnect" ? "brand-wrap--mediconnect" : ""}`}>
+        <div
+          className={`brand-wrap ${brandVariant === "mediconnect" ? "brand-wrap--mediconnect" : ""}`}
+        >
           {brandVariant === "mediconnect" ? (
             <>
               <img src={mediConnectLogo} alt="MediConnect logo" className="brand-wrap__logo" />
@@ -52,14 +53,11 @@ export function PortalTopNav({ brandVariant = "default" }: PortalTopNavProps) {
         </div>
         <button
           type="button"
-          onClick={() =>
-            setTheme((current) => (current === "dark" ? "light" : "dark"))
-          }
+          onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
           className="auth-theme-toggle"
           title="Toggle theme"
           aria-label="Toggle theme"
         >
-          {/* 3. The icon logic should match: show Sun when in dark mode to switch to light */}
           {theme === "dark" ? <SunMedium size={18} /> : <MoonStar size={18} />}
         </button>
       </div>

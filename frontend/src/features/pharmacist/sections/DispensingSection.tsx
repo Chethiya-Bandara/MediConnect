@@ -40,12 +40,7 @@ export function DispensingSection({
   }
 
   if (error) {
-    return (
-      <ErrorState
-        title="Dispensing detail unavailable"
-        message={error}
-      />
-    );
+    return <ErrorState title="Dispensing detail unavailable" message={error} />;
   }
 
   if (!detail) {
@@ -57,13 +52,11 @@ export function DispensingSection({
     );
   }
 
-  const estimatedTotal =
-    detail.items.every((item) => item.unitPrice !== null && item.quantity !== null)
-      ? detail.items.reduce(
-          (sum, item) => sum + (item.unitPrice ?? 0) * (item.quantity ?? 0),
-          0,
-        )
-      : null;
+  const estimatedTotal = detail.items.every(
+    (item) => item.unitPrice !== null && item.quantity !== null,
+  )
+    ? detail.items.reduce((sum, item) => sum + (item.unitPrice ?? 0) * (item.quantity ?? 0), 0)
+    : null;
 
   return (
     <section className="space-y-5">
@@ -89,7 +82,9 @@ export function DispensingSection({
             disabled={detail.prescription.status === "DISPENSED"}
             className="bg-primary px-5 py-3 text-white dark:bg-blue-600"
           >
-            {detail.prescription.status === "DISPENSED" ? "Already Dispensed" : "Dispense Prescription"}
+            {detail.prescription.status === "DISPENSED"
+              ? "Already Dispensed"
+              : "Dispense Prescription"}
           </Button>
         </div>
       </div>
@@ -187,7 +182,8 @@ export function DispensingSection({
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 shrink-0" size={16} />
                 <span>
-                  Partial dispensing is in the proposal, but the current backend endpoint only performs full dispense.
+                  Partial dispensing is in the proposal, but the current backend endpoint only
+                  performs full dispense.
                 </span>
               </div>
             </div>

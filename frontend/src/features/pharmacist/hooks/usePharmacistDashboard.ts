@@ -79,16 +79,13 @@ function createPlan(detail: PharmacistPrescriptionDetail | null) {
     return {} as Record<string, PharmacistDispensePlanItem>;
   }
 
-  return detail.items.reduce<Record<string, PharmacistDispensePlanItem>>(
-    (accumulator, item) => {
-      accumulator[item.id] = {
-        action: getDefaultAction(item),
-        quantity: getDefaultQuantity(item),
-      };
-      return accumulator;
-    },
-    {},
-  );
+  return detail.items.reduce<Record<string, PharmacistDispensePlanItem>>((accumulator, item) => {
+    accumulator[item.id] = {
+      action: getDefaultAction(item),
+      quantity: getDefaultQuantity(item),
+    };
+    return accumulator;
+  }, {});
 }
 
 function getSearchableValues(item: PharmacistPrescriptionSummary) {
@@ -113,18 +110,12 @@ function buildStats(
 
   const dispensedToday = history.filter((item) => isSameDay(item.dispensedAt)).length;
 
-  const queuedItems = prescriptions.reduce(
-    (sum, item) => sum + (item.totalItems ?? 0),
-    0,
-  );
+  const queuedItems = prescriptions.reduce((sum, item) => sum + (item.totalItems ?? 0), 0);
 
   const estimatedValue =
     billableTotal ??
     (detail?.items.every((item) => item.unitPrice !== null && item.quantity !== null)
-      ? detail.items.reduce(
-          (sum, item) => sum + (item.unitPrice ?? 0) * (item.quantity ?? 0),
-          0,
-        )
+      ? detail.items.reduce((sum, item) => sum + (item.unitPrice ?? 0) * (item.quantity ?? 0), 0)
       : null);
 
   return {
@@ -135,10 +126,7 @@ function buildStats(
   };
 }
 
-export function usePharmacistDashboard(
-  pharmacistId?: string,
-  organisationId?: number | null,
-) {
+export function usePharmacistDashboard(pharmacistId?: string, organisationId?: number | null) {
   const [prescriptions, setPrescriptions] = useState<PharmacistPrescriptionSummary[]>([]);
   const [history, setHistory] = useState<PharmacistDispenseHistoryEntry[]>([]);
   const [selectedPrescriptionId, setSelectedPrescriptionId] = useState<string | null>(null);
@@ -186,9 +174,7 @@ export function usePharmacistDashboard(
       setPrescriptions(items);
 
       const targetId =
-        nextSelectedId && items.some((item) => item.id === nextSelectedId)
-          ? nextSelectedId
-          : null;
+        nextSelectedId && items.some((item) => item.id === nextSelectedId) ? nextSelectedId : null;
 
       setSelectedPrescriptionId(targetId);
       return targetId;
@@ -218,9 +204,7 @@ export function usePharmacistDashboard(
     } catch (loadError) {
       setHistory([]);
       setHistoryError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Dispense history could not be loaded.",
+        loadError instanceof Error ? loadError.message : "Dispense history could not be loaded.",
       );
     } finally {
       setIsLoadingHistory(false);
@@ -246,9 +230,7 @@ export function usePharmacistDashboard(
       setSelectedDetail(null);
       setDispensePlan({});
       setDetailError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Prescription detail could not be loaded.",
+        loadError instanceof Error ? loadError.message : "Prescription detail could not be loaded.",
       );
     } finally {
       setIsLoadingDetail(false);
@@ -307,10 +289,7 @@ export function usePharmacistDashboard(
   const billingItems = useMemo(
     () =>
       plannedItems
-        .filter(
-          ({ quantityToDispense, item }) =>
-            quantityToDispense > 0 && item.unitPrice !== null,
-        )
+        .filter(({ quantityToDispense, item }) => quantityToDispense > 0 && item.unitPrice !== null)
         .map(({ item, quantityToDispense }) => ({
           id: item.id,
           name: item.medicineName,
@@ -323,17 +302,13 @@ export function usePharmacistDashboard(
 
   const billingTotal = useMemo(
     () =>
-      billingItems.length > 0
-        ? billingItems.reduce((sum, item) => sum + item.total, 0)
-        : null,
+      billingItems.length > 0 ? billingItems.reduce((sum, item) => sum + item.total, 0) : null,
     [billingItems],
   );
 
   const unsupportedSelections = useMemo(
     () =>
-      plannedItems.filter(
-        ({ plan }) => plan.action === "CANCELLED" || plan.action === "EXPIRED",
-      ),
+      plannedItems.filter(({ plan }) => plan.action === "CANCELLED" || plan.action === "EXPIRED"),
     [plannedItems],
   );
 
@@ -408,9 +383,7 @@ export function usePharmacistDashboard(
     }
 
     const exactMatch = prescriptions.find((item) =>
-      [item.id, item.patientDhid ?? ""].some(
-        (value) => value.toLowerCase() === query,
-      ),
+      [item.id, item.patientDhid ?? ""].some((value) => value.toLowerCase() === query),
     );
 
     if (exactMatch) {
@@ -489,9 +462,7 @@ export function usePharmacistDashboard(
       return true;
     } catch (dispenseError) {
       setActionMessage(
-        dispenseError instanceof Error
-          ? dispenseError.message
-          : "Dispense action failed.",
+        dispenseError instanceof Error ? dispenseError.message : "Dispense action failed.",
       );
       return false;
     } finally {

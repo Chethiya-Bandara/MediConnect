@@ -3,6 +3,7 @@ import type {
   DoctorAffiliationHospitalOption,
   DoctorAvailabilitySlot,
   DoctorDashboardData,
+  DoctorDiseaseCatalogItem,
   DoctorMedicineCatalogItem,
 } from "../types";
 import { apiRequest } from "../../../lib/api/client";
@@ -16,7 +17,7 @@ export function getDoctorDashboard(activeAppointmentId?: number | null) {
 }
 
 export function updateDoctorProfile(payload: {
-  name: string;
+  preferred_name: string;
   specialization: string;
   slmc_number: string;
 }) {
@@ -36,6 +37,7 @@ export function submitDoctorEncounter(payload: {
   encounter_type: string;
   clinical_notes: string;
   prescription_items: Array<{
+    medicine_id?: number | null;
     medicine_name: string;
     dosage: string;
     duration: string;
@@ -73,6 +75,13 @@ export async function searchDoctorMedicines(query: string) {
   return Array.isArray(response.items) ? response.items : [];
 }
 
+export async function searchDoctorDiseases(query: string) {
+  const response = await apiRequest<{ items?: DoctorDiseaseCatalogItem[] }>(
+    `${endpoints.doctor.diseasesSearch}?query=${encodeURIComponent(query)}`,
+  );
+  return Array.isArray(response.items) ? response.items : [];
+}
+
 export async function getDoctorAvailability(slotDate?: string, hospitalId?: number | "") {
   const search = new URLSearchParams();
   if (slotDate) {
@@ -84,9 +93,7 @@ export async function getDoctorAvailability(slotDate?: string, hospitalId?: numb
   const path = search.toString()
     ? `${endpoints.doctor.availability}?${search.toString()}`
     : endpoints.doctor.availability;
-  const response = await apiRequest<{ slots: DoctorAvailabilitySlot[] }>(
-    path,
-  );
+  const response = await apiRequest<{ slots: DoctorAvailabilitySlot[] }>(path);
   return Array.isArray(response.slots) ? response.slots : [];
 }
 
@@ -102,22 +109,16 @@ export function createDoctorAvailability(payload: {
     created_count?: number;
     slot: DoctorAvailabilitySlot | null;
     slots?: DoctorAvailabilitySlot[];
-  }>(
-    endpoints.doctor.availability,
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-  );
+  }>(endpoints.doctor.availability, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function deleteDoctorAvailability(slotId: number) {
-  return apiRequest<{ success: boolean }>(
-    `${endpoints.doctor.availability}/${slotId}`,
-    {
-      method: "DELETE",
-    },
-  );
+  return apiRequest<{ success: boolean }>(`${endpoints.doctor.availability}/${slotId}`, {
+    method: "DELETE",
+  });
 }
 
 export function updateDoctorAvailability(

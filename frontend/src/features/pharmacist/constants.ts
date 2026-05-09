@@ -1,9 +1,4 @@
-import {
-  Activity,
-  ClipboardList,
-  Pill,
-  Settings,
-} from "lucide-react";
+import { Activity, ClipboardList, Pill, Settings } from "lucide-react";
 import type { ComponentType } from "react";
 import type { PharmacistSection } from "./types";
 

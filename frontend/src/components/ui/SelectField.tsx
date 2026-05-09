@@ -12,14 +12,7 @@ interface SelectFieldProps extends SelectHTMLAttributes<HTMLSelectElement> {
   options: SelectOption[];
 }
 
-export function SelectField({
-  id,
-  label,
-  error,
-  options,
-  className,
-  ...props
-}: SelectFieldProps) {
+export function SelectField({ id, label, error, options, className, ...props }: SelectFieldProps) {
   return (
     <label className="field-wrapper" htmlFor={id}>
       <span className="field-label">{label}</span>

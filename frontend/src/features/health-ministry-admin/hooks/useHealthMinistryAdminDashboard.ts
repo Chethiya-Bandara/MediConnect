@@ -12,6 +12,7 @@ import {
   getManagedOrganisations,
   getTopDiagnoses,
   suspendEntity,
+  updateAdminUserStatus,
   updateManagedMedicine,
 } from "../api/healthMinistryAdminApi";
 import {
@@ -38,6 +39,7 @@ import type {
   ManagedMedicineItem,
   ManagedMedicinePayload,
   ManagedOrganisationItem,
+  PendingAdminItem,
   PendingDoctorItem,
   PendingOrganisationItem,
   RegistryPersonItem,
@@ -65,6 +67,7 @@ function createEmptyStats(): HealthMinistryDashboardStats {
     pendingOrganisations: 0,
     totalDoctors: 0,
     pendingDoctors: 0,
+    pendingAdmins: 0,
     totalPatients: 0,
     auditEvents24h: 0,
   };
@@ -85,9 +88,11 @@ function buildOverviewStats(
 
 export function useHealthMinistryAdminDashboard() {
   const [filters, setFilters] = useState<AnalyticsFilters>(createDefaultFilters);
-  const [dashboardStats, setDashboardStats] = useState<HealthMinistryDashboardStats>(createEmptyStats);
+  const [dashboardStats, setDashboardStats] =
+    useState<HealthMinistryDashboardStats>(createEmptyStats);
   const [pendingOrganisations, setPendingOrganisations] = useState<PendingOrganisationItem[]>([]);
   const [pendingDoctors, setPendingDoctors] = useState<PendingDoctorItem[]>([]);
+  const [pendingAdmins, setPendingAdmins] = useState<PendingAdminItem[]>([]);
   const [managedOrganisations, setManagedOrganisations] = useState<ManagedOrganisationItem[]>([]);
   const [managedMedicines, setManagedMedicines] = useState<ManagedMedicineItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<HealthMinistryAuditLog[]>([]);
@@ -136,6 +141,7 @@ export function useHealthMinistryAdminDashboard() {
       setDashboardStats(dashboardResponse.stats);
       setPendingOrganisations(dashboardResponse.pendingOrganisations);
       setPendingDoctors(dashboardResponse.pendingDoctors);
+      setPendingAdmins(dashboardResponse.pendingAdmins);
       setAuditLogs(dashboardResponse.auditLogs);
       setManagedOrganisations(organisationResponse);
       return true;
@@ -143,12 +149,11 @@ export function useHealthMinistryAdminDashboard() {
       setDashboardStats(createEmptyStats());
       setPendingOrganisations([]);
       setPendingDoctors([]);
+      setPendingAdmins([]);
       setManagedOrganisations([]);
       setAuditLogs([]);
       setDashboardError(
-        error instanceof Error
-          ? error.message
-          : "Health ministry dashboard could not be loaded.",
+        error instanceof Error ? error.message : "Health ministry dashboard could not be loaded.",
       );
       return false;
     } finally {
@@ -172,9 +177,7 @@ export function useHealthMinistryAdminDashboard() {
       setIncidence([]);
       setTopDiagnoses([]);
       setAnalyticsError(
-        error instanceof Error
-          ? error.message
-          : "Government analytics could not be loaded.",
+        error instanceof Error ? error.message : "Government analytics could not be loaded.",
       );
       return false;
     } finally {
@@ -193,9 +196,7 @@ export function useHealthMinistryAdminDashboard() {
     } catch (error) {
       setManagedMedicines([]);
       setMedicineMessage(
-        error instanceof Error
-          ? error.message
-          : "Medicine registry could not be loaded.",
+        error instanceof Error ? error.message : "Medicine registry could not be loaded.",
       );
       return false;
     } finally {
@@ -212,10 +213,7 @@ export function useHealthMinistryAdminDashboard() {
     [dashboardStats, topDiagnoses, report],
   );
 
-  const submitOrganizationApproval = async (
-    organizationId: string,
-    status: ApprovalStatus,
-  ) => {
+  const submitOrganizationApproval = async (organizationId: string, status: ApprovalStatus) => {
     setIsSubmittingApproval(true);
     setApprovalsMessage(null);
 
@@ -225,9 +223,7 @@ export function useHealthMinistryAdminDashboard() {
       await refreshDashboard();
       return true;
     } catch (error) {
-      setApprovalsMessage(
-        error instanceof Error ? error.message : "Organisation approval failed.",
-      );
+      setApprovalsMessage(error instanceof Error ? error.message : "Organisation approval failed.");
       return false;
     } finally {
       setIsSubmittingApproval(false);
@@ -244,9 +240,24 @@ export function useHealthMinistryAdminDashboard() {
       await refreshDashboard();
       return true;
     } catch (error) {
-      setApprovalsMessage(
-        error instanceof Error ? error.message : "Doctor approval failed.",
-      );
+      setApprovalsMessage(error instanceof Error ? error.message : "Doctor approval failed.");
+      return false;
+    } finally {
+      setIsSubmittingApproval(false);
+    }
+  };
+
+  const submitAdminApproval = async (userId: string, status: ApprovalStatus) => {
+    setIsSubmittingApproval(true);
+    setApprovalsMessage(null);
+
+    try {
+      const response = await updateAdminUserStatus(userId, status);
+      setApprovalsMessage(response.message ?? `Admin user ${status}.`);
+      await refreshDashboard();
+      return true;
+    } catch (error) {
+      setApprovalsMessage(error instanceof Error ? error.message : "Admin approval failed.");
       return false;
     } finally {
       setIsSubmittingApproval(false);
@@ -272,9 +283,7 @@ export function useHealthMinistryAdminDashboard() {
       await refreshDashboard();
       return true;
     } catch (error) {
-      setUsersMessage(
-        error instanceof Error ? error.message : "User governance action failed.",
-      );
+      setUsersMessage(error instanceof Error ? error.message : "User governance action failed.");
       return false;
     } finally {
       setIsSubmittingUserAction(false);
@@ -314,19 +323,14 @@ export function useHealthMinistryAdminDashboard() {
       await refreshMedicines();
       return true;
     } catch (error) {
-      setMedicineMessage(
-        error instanceof Error ? error.message : "Medicine creation failed.",
-      );
+      setMedicineMessage(error instanceof Error ? error.message : "Medicine creation failed.");
       return false;
     } finally {
       setIsSubmittingMedicine(false);
     }
   };
 
-  const submitMedicineUpdate = async (
-    medicineId: string,
-    payload: ManagedMedicinePayload,
-  ) => {
+  const submitMedicineUpdate = async (medicineId: string, payload: ManagedMedicinePayload) => {
     setIsSubmittingMedicine(true);
     setMedicineMessage(null);
 
@@ -336,9 +340,7 @@ export function useHealthMinistryAdminDashboard() {
       await refreshMedicines();
       return true;
     } catch (error) {
-      setMedicineMessage(
-        error instanceof Error ? error.message : "Medicine update failed.",
-      );
+      setMedicineMessage(error instanceof Error ? error.message : "Medicine update failed.");
       return false;
     } finally {
       setIsSubmittingMedicine(false);
@@ -355,9 +357,7 @@ export function useHealthMinistryAdminDashboard() {
       await refreshMedicines();
       return true;
     } catch (error) {
-      setMedicineMessage(
-        error instanceof Error ? error.message : "Medicine removal failed.",
-      );
+      setMedicineMessage(error instanceof Error ? error.message : "Medicine removal failed.");
       return false;
     } finally {
       setIsSubmittingMedicine(false);
@@ -416,9 +416,7 @@ export function useHealthMinistryAdminDashboard() {
       await refreshDeletionRequests();
       return true;
     } catch (error) {
-      setDeletionMessage(
-        error instanceof Error ? error.message : "Deletion request failed.",
-      );
+      setDeletionMessage(error instanceof Error ? error.message : "Deletion request failed.");
       return false;
     } finally {
       setIsSubmittingDeletion(false);
@@ -434,9 +432,7 @@ export function useHealthMinistryAdminDashboard() {
       await refreshDeletionRequests();
       return true;
     } catch (error) {
-      setDeletionMessage(
-        error instanceof Error ? error.message : "Approval failed.",
-      );
+      setDeletionMessage(error instanceof Error ? error.message : "Approval failed.");
       return false;
     } finally {
       setIsSubmittingDeletion(false);
@@ -452,9 +448,7 @@ export function useHealthMinistryAdminDashboard() {
       await refreshDeletionRequests();
       return true;
     } catch (error) {
-      setDeletionMessage(
-        error instanceof Error ? error.message : "Cancellation failed.",
-      );
+      setDeletionMessage(error instanceof Error ? error.message : "Cancellation failed.");
       return false;
     } finally {
       setIsSubmittingDeletion(false);
@@ -474,9 +468,7 @@ export function useHealthMinistryAdminDashboard() {
     } catch (error) {
       setReport(null);
       setReportGeneratedAt(null);
-      setReportMessage(
-        error instanceof Error ? error.message : "Monthly report failed.",
-      );
+      setReportMessage(error instanceof Error ? error.message : "Monthly report failed.");
       return false;
     } finally {
       setIsGeneratingReport(false);
@@ -488,6 +480,7 @@ export function useHealthMinistryAdminDashboard() {
     dashboardStats,
     pendingOrganisations,
     pendingDoctors,
+    pendingAdmins,
     managedOrganisations,
     managedMedicines,
     auditLogs,
@@ -530,6 +523,7 @@ export function useHealthMinistryAdminDashboard() {
     refreshPeopleRegistries,
     submitOrganizationApproval,
     submitDoctorApproval,
+    submitAdminApproval,
     submitUserAction,
     submitOrganisationCreate,
     submitMedicineCreate,

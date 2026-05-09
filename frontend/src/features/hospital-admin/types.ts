@@ -1,8 +1,4 @@
-export type HospitalAdminSection =
-  | "overview"
-  | "doctors"
-  | "affiliations"
-  | "settings";
+export type HospitalAdminSection = "overview" | "doctors" | "affiliations" | "settings";
 
 export type AffiliationDecisionStatus = "APPROVED" | "REJECTED";
 

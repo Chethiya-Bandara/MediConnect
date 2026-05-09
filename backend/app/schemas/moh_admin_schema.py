@@ -1,6 +1,21 @@
 from pydantic import BaseModel, field_validator, Field
 
 
+def _normalize_approval_status(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    aliases = {
+        "approve": "approved",
+        "approved": "approved",
+        "active": "approved",
+        "reject": "rejected",
+        "rejected": "rejected",
+        "pending": "pending",
+        "suspend": "suspended",
+        "suspended": "suspended",
+    }
+    return aliases.get(normalized, normalized)
+
+
 class OrganizationApprovalRequest(BaseModel):
     id: str
     status: str
@@ -8,7 +23,7 @@ class OrganizationApprovalRequest(BaseModel):
     @field_validator("status")
     @classmethod
     def validate_status(cls, value: str) -> str:
-        normalized = (value or "").strip().lower()
+        normalized = _normalize_approval_status(value)
         if normalized not in {"approved", "rejected", "pending", "active", "suspended"}:
             raise ValueError("Invalid organisation status")
         return normalized
@@ -21,9 +36,30 @@ class DoctorApprovalRequest(BaseModel):
     @field_validator("status")
     @classmethod
     def validate_status(cls, value: str) -> str:
-        normalized = (value or "").strip().lower()
+        normalized = _normalize_approval_status(value)
         if normalized not in {"approved", "rejected", "pending", "active", "suspended"}:
             raise ValueError("Invalid doctor status")
+        return normalized
+
+
+class AdminUserStatusRequest(BaseModel):
+    user_id: str
+    status: str
+
+    @field_validator("user_id")
+    @classmethod
+    def validate_user_id(cls, value: str) -> str:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise ValueError("User ID is required")
+        return cleaned
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        normalized = _normalize_approval_status(value)
+        if normalized not in {"approved", "rejected", "pending", "suspended"}:
+            raise ValueError("Invalid admin user status")
         return normalized
 
 

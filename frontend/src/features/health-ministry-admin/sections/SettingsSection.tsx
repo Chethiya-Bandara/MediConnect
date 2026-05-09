@@ -26,9 +26,7 @@ export function SettingsSection({ user, onLogout }: SettingsSectionProps) {
 
         <div className="mt-6 space-y-4">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
-              Name
-            </p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Name</p>
             <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
               {user?.name ?? "Unknown administrator"}
             </p>
@@ -42,9 +40,7 @@ export function SettingsSection({ user, onLogout }: SettingsSectionProps) {
             </p>
           </div>
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
-              Role
-            </p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Role</p>
             <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
               {user?.role ?? "Unknown"}
             </p>
@@ -65,9 +61,7 @@ export function SettingsSection({ user, onLogout }: SettingsSectionProps) {
         <div className="flex items-start gap-3">
           <ShieldCheck className="mt-1 text-emerald-600 dark:text-emerald-400" size={20} />
           <div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-              Policy Notes
-            </h2>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Policy Notes</h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
               Proposal-driven privacy and governance reminders for this admin role.
             </p>

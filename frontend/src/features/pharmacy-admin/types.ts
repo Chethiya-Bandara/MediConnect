@@ -1,8 +1,4 @@
-export type PharmacyAdminSection =
-  | "dashboard"
-  | "inventory"
-  | "reports"
-  | "staff";
+export type PharmacyAdminSection = "dashboard" | "inventory" | "reports" | "staff";
 
 export interface PharmacyInventoryItem {
   id: string;
@@ -31,7 +27,7 @@ export interface PharmacyAdminStaffMember {
   name: string;
   email: string | null;
   licenseNo: string | null;
-  organisationId: string | null;
+  pharmacyId: string | null;
   status: string;
   dispenseEventsCount: number;
   lastDispensedAt: string | null;
@@ -100,11 +96,11 @@ export interface PharmacyAdminStaffRegistrationPayload {
   email: string;
   password: string;
   licenseNo: string;
-  status?: "active" | "suspended";
+  status?: "pending" | "approved" | "suspended";
 }
 
 export interface PharmacyAdminStaffStatusPayload {
   pharmacyId: string;
   staffId: string;
-  status: "active" | "suspended";
+  status: "approved" | "suspended";
 }

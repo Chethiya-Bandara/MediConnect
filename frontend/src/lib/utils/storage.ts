@@ -6,6 +6,9 @@ export function getStoredToken() {
 }
 
 export function setStoredToken(token: string, persistent = false) {
+  localStorage.removeItem("token");
+  sessionStorage.removeItem("token");
+
   if (persistent) {
     localStorage.setItem("token", token);
   } else {

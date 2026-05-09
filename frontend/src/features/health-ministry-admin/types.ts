@@ -7,7 +7,7 @@ export type HealthMinistryAdminSection =
   | "anomalies"
   | "settings";
 
-export type ApprovalStatus = "approved" | "rejected";
+export type ApprovalStatus = "approved" | "rejected" | "pending" | "suspended";
 
 export type GovernanceTargetType = "USER" | "ORGANIZATION";
 
@@ -36,6 +36,7 @@ export interface HealthMinistryDashboardStats {
   pendingOrganisations: number;
   totalDoctors: number;
   pendingDoctors: number;
+  pendingAdmins: number;
   totalPatients: number;
   auditEvents24h: number;
 }
@@ -79,9 +80,24 @@ export interface PendingDoctorItem {
   doctorId: string;
   userId: string | null;
   name: string | null;
+  preferredName: string | null;
   email: string | null;
   specialization: string | null;
   slmcNumber: string | null;
+  status: string | null;
+  createdAt: string | null;
+}
+
+export interface PendingAdminItem {
+  profileId: string;
+  userId: string;
+  name: string | null;
+  preferredName: string | null;
+  email: string | null;
+  role: string | null;
+  adminRole: string | null;
+  organisationId: string | null;
+  organisationName: string | null;
   status: string | null;
   createdAt: string | null;
 }

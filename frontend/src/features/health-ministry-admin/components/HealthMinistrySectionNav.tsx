@@ -7,10 +7,7 @@ interface HealthMinistrySectionNavProps {
   onChange: (section: HealthMinistryAdminSection) => void;
 }
 
-export function HealthMinistrySectionNav({
-  value,
-  onChange,
-}: HealthMinistrySectionNavProps) {
+export function HealthMinistrySectionNav({ value, onChange }: HealthMinistrySectionNavProps) {
   return (
     <div className="flex flex-wrap gap-2">
       {healthMinistrySectionTabs.map((item) => {

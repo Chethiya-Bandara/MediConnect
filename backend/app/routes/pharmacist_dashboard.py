@@ -197,6 +197,25 @@ def _medicine_map(medicine_ids) -> dict:
     return {row["id"]: row for row in rows}
 
 
+def _medicine_by_id(medicine_id: int | None) -> Optional[dict]:
+    if medicine_id is None:
+        return None
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, name, retail_price, wholesale_price, unit")
+            .eq("id", medicine_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+    return rows[0] if rows else None
+
+
 def _medicine_by_name(medicine_name: str) -> Optional[dict]:
     normalized = (medicine_name or "").strip()
     if not normalized:
@@ -298,6 +317,52 @@ def _pharmacy_map_by_organisation(organisation_ids) -> dict:
         default=list,
     )
     return {row["organisation_id"]: row for row in rows if row.get("organisation_id") is not None}
+
+
+def _pharmacy_by_id(pharmacy_id: int | None) -> Optional[dict]:
+    if pharmacy_id is None:
+        return None
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("pharmacies")
+            .select("*")
+            .eq("id", pharmacy_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+    return rows[0] if rows else None
+
+
+def _resolve_pharmacist_pharmacy(user: dict, requested_identifier: int | None = None) -> dict:
+    pharmacy_id = _coerce_int(user.get("pharmacy_id"))
+    organisation_id = _coerce_int(user.get("organisation_id"))
+
+    pharmacy = _pharmacy_by_id(pharmacy_id)
+    if pharmacy is None and organisation_id is not None:
+        pharmacy = _pharmacy_map_by_organisation({organisation_id}).get(organisation_id)
+
+    if not pharmacy:
+        raise HTTPException(
+            status_code=403,
+            detail="Each pharmacist must be affiliated with at least one pharmacy before using dispensing features.",
+        )
+
+    requested_id = _coerce_int(requested_identifier)
+    if requested_id is not None and requested_id not in {
+        _coerce_int(pharmacy.get("id")),
+        _coerce_int(pharmacy.get("organisation_id")),
+    }:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only operate against your affiliated pharmacy.",
+        )
+
+    return pharmacy
 
 
 def _prescription_items_by_prescription(prescription_ids) -> dict:
@@ -498,10 +563,10 @@ def _dispensing_history_entries(dispensing_rows: list[dict]) -> list[dict]:
     return history
 
 
-def reduce_stock(medicine_name: str, pharmacy_id: int, quantity: int) -> dict:
-    medicine = _medicine_by_name(medicine_name)
+def reduce_stock(medicine_id: int, pharmacy_id: int, quantity: int) -> dict:
+    medicine = _medicine_by_id(medicine_id)
     if not medicine:
-        raise HTTPException(404, f"{medicine_name} is not registered in the medicines catalog.")
+        raise HTTPException(404, f"Medicine ID {medicine_id} is not registered in the medicines catalog.")
 
     item = execute_with_retry(
         lambda: (
@@ -515,13 +580,13 @@ def reduce_stock(medicine_name: str, pharmacy_id: int, quantity: int) -> dict:
     )
 
     if not item.data:
-        raise HTTPException(404, f"{medicine_name} is not stocked in pharmacy {pharmacy_id}.")
+        raise HTTPException(404, f"Medicine ID {medicine_id} is not stocked in pharmacy {pharmacy_id}.")
 
     current_stock = item.data.get("stock_quantity", 0)
     if current_stock < quantity:
         raise HTTPException(
             400,
-            f"Not enough stock for {medicine_name}. Available: {current_stock}",
+            f"Not enough stock for {medicine.get('name') or f'Medicine ID {medicine_id}'}. Available: {current_stock}",
         )
 
     supabase_admin.table("inventory").update({
@@ -530,7 +595,7 @@ def reduce_stock(medicine_name: str, pharmacy_id: int, quantity: int) -> dict:
     }).eq("id", item.data["id"]).execute()
     return {
         **item.data,
-        "medicine_name": medicine.get("name") or medicine_name,
+        "medicine_name": medicine.get("name") or f"Medicine ID {medicine_id}",
         "unit_price": item.data.get("unit_price") or medicine.get("retail_price") or 0,
     }
 
@@ -602,36 +667,30 @@ def get_prescription_details(
         default=list,
     )
 
-    pharmacist_org_id = user.get("organisation_id")
-    pharmacy_lookup = _pharmacy_map_by_organisation(
-        {int(pharmacist_org_id)}
-        if pharmacist_org_id is not None
-        else set()
-    )
-    pharmacy = pharmacy_lookup.get(int(pharmacist_org_id)) if pharmacist_org_id is not None else None
-    pharmacy_id = pharmacy.get("id") if pharmacy else None
+    pharmacy = _resolve_pharmacist_pharmacy(user)
+    pharmacy_id = pharmacy.get("id")
 
     items = context["prescription_items_lookup"].get(prescription.data["id"], [])
-    medicine_by_item_id = {}
-    medicine_ids = set()
-    for item in items:
-        medicine = _medicine_by_name(item.get("medicine_name") or "")
-        if medicine:
-            medicine_by_item_id[item["id"]] = medicine
-            medicine_ids.add(medicine["id"])
+    medicine_ids = {
+        item.get("medicine_id")
+        for item in items
+        if item.get("medicine_id") is not None
+    }
 
     inventory_lookup = _inventory_map_for_pharmacy(pharmacy_id, medicine_ids)
+    medicine_lookup = _medicine_map(medicine_ids)
     enriched_items = []
     for item in items:
-        medicine = medicine_by_item_id.get(item["id"])
-        inventory_item = inventory_lookup.get(medicine.get("id")) if medicine else None
+        medicine_id = _coerce_int(item.get("medicine_id"))
+        medicine = medicine_lookup.get(medicine_id, {})
+        inventory_item = inventory_lookup.get(medicine_id) if medicine_id is not None else None
         stock_quantity = _coerce_int(inventory_item.get("stock_quantity")) if inventory_item else None
         has_stock = stock_quantity is not None and stock_quantity > 0
         enriched_items.append(
             {
                 **item,
-                "medicine_id": medicine.get("id") if medicine else None,
-                "catalog_unit": medicine.get("unit") if medicine else None,
+                "medicine_id": medicine_id,
+                "catalog_unit": medicine.get("unit"),
                 "unit_price": (
                     float(inventory_item.get("unit_price") or 0)
                     if inventory_item and has_stock
@@ -644,7 +703,11 @@ def get_prescription_details(
                     else (
                         "Listed in your inventory but currently out of stock."
                         if inventory_item
-                        else "This medicine is not stocked in your pharmacy."
+                        else (
+                            "Prescription item is missing a medicine ID."
+                            if medicine_id is None
+                            else "This medicine is not stocked in your pharmacy."
+                        )
                     )
                 ),
             }
@@ -713,32 +776,8 @@ def dispense_prescription(
 ):
     """Dispenses a prescription. Pharmacists only."""
     pharmacist_id     = user.get("user_id")
-    pharmacist_org_id = user.get("organisation_id")
     items_to_dispense = payload.items
-
-    raw_pharmacy_org_id = payload.pharmacy_id
-    if raw_pharmacy_org_id is None:
-        raw_pharmacy_org_id = pharmacist_org_id
-
-    if raw_pharmacy_org_id is None:
-        raise HTTPException(400, "Pharmacy organisation ID is required before dispensing.")
-
-    try:
-        pharmacy_org_id = int(raw_pharmacy_org_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "Invalid pharmacy organisation ID.")
-
-    if pharmacist_org_id is None or pharmacy_org_id != int(pharmacist_org_id):
-        raise HTTPException(
-            403,
-            "You can only dispense against your assigned pharmacy organisation.",
-        )
-
-    pharmacy_lookup = _pharmacy_map_by_organisation({pharmacy_org_id})
-    pharmacy = pharmacy_lookup.get(pharmacy_org_id)
-    if not pharmacy:
-        raise HTTPException(404, "No pharmacy record is linked to this organisation.")
-
+    pharmacy = _resolve_pharmacist_pharmacy(user, payload.pharmacy_id)
     pharmacy_id = pharmacy["id"]
 
     pres = execute_with_retry(
@@ -784,18 +823,18 @@ def dispense_prescription(
         if qty > remaining:
             raise HTTPException(400, f"Cannot dispense more than remaining ({remaining})")
 
-        medicine_name = db_item.data.get("medicine_name")
-        if not medicine_name:
-            raise HTTPException(400, f"Prescription item {item_id} is missing medicine_name")
+        medicine_id = _coerce_int(db_item.data.get("medicine_id"))
+        if medicine_id is None:
+            raise HTTPException(400, f"Prescription item {item_id} is missing medicine_id")
 
-        inventory_item = reduce_stock(medicine_name, pharmacy_id, qty)
+        inventory_item = reduce_stock(medicine_id, pharmacy_id, qty)
 
         new_dispensed = (_coerce_int(db_item.data.get("dispensed_quantity")) or 0) + qty
         supabase_admin.table("prescription_items").update({
             "dispensed_quantity": new_dispensed
         }).eq("id", item_id).execute()
 
-        medicine = _medicine_by_name(medicine_name)
+        medicine = _medicine_by_id(medicine_id)
         unit_price = float(
             inventory_item.get("unit_price")
             or (medicine.get("retail_price") if medicine else 0)
@@ -923,13 +962,7 @@ def get_prescriptions_by_dhid(dhid: str):
 
 @router.get("/history", dependencies=[Depends(PharmacistOnly)])
 def get_dispense_history(user: dict = Depends(PharmacistOnly)):
-    pharmacist_org_id = user.get("organisation_id")
-    pharmacy_lookup = _pharmacy_map_by_organisation(
-        {pharmacist_org_id} if pharmacist_org_id is not None else set()
-    )
-    pharmacy = pharmacy_lookup.get(pharmacist_org_id)
-    if not pharmacy:
-        return []
+    pharmacy = _resolve_pharmacist_pharmacy(user)
 
     dispensing_rows = execute_with_retry(
         lambda: (
@@ -965,6 +998,8 @@ def generate_bill(
     """
     bill_lines  = []
     total_amount = 0.0
+    pharmacy = _resolve_pharmacist_pharmacy(current_user, payload.pharmacy_id)
+    pharmacy_id = _coerce_int(pharmacy.get("id"))
 
     for item in payload.items:
 
@@ -975,7 +1010,7 @@ def generate_bill(
                 supabase_admin.table("inventory")
                 .select("id, medicine_id, unit_price, stock_quantity, pharmacy_id")
                 .eq("id", item.inventory_id)
-                .eq("pharmacy_id", payload.pharmacy_id)
+                .eq("pharmacy_id", pharmacy_id)
                 .single()
                 .execute()
                 .data
@@ -1025,7 +1060,7 @@ def generate_bill(
     try:
         bill = supabase_admin.table("billing").insert({
             "prescription_id": payload.prescription_id,
-            "pharmacy_id":     payload.pharmacy_id,
+            "pharmacy_id":     pharmacy_id,
             "pharmacist_id":   current_user.get("user_id"),
             "total_amount":    round(total_amount, 2),
             "status":          "pending",
@@ -1050,7 +1085,7 @@ def generate_bill(
     return {
         "success":        True,
         "prescription_id": payload.prescription_id,
-        "pharmacy_id":    payload.pharmacy_id,
+        "pharmacy_id":    pharmacy_id,
         "bill_lines":     bill_lines,
         "total_amount":   round(total_amount, 2),
         "currency":       "LKR",

@@ -27,6 +27,8 @@ export interface DashboardOverview {
     id: string;
     email: string;
     name: string | null;
+    legal_name?: string | null;
+    preferred_name?: string | null;
   };
   patient: {
     id: number;

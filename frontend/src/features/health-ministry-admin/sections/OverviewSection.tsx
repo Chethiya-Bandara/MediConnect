@@ -1,9 +1,6 @@
 import { AlertTriangle, Landmark, ShieldCheck } from "lucide-react";
 import { GovernanceStatCard } from "../components/GovernanceStatCard";
-import {
-  healthMinistryGovernanceNotes,
-  healthMinistryOperationalNotes,
-} from "../constants";
+import { healthMinistryGovernanceNotes, healthMinistryOperationalNotes } from "../constants";
 import type { AnalyticsFilters, HealthMinistryOverviewStats } from "../types";
 
 interface OverviewSectionProps {
@@ -46,7 +43,8 @@ export function OverviewSection({ stats, filters }: OverviewSectionProps) {
                 Governance Guardrails
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                This role is supposed to approve, supervise, and aggregate, not poke around in patient-level secrets like a bored neighbourhood uncle.
+                This role is supposed to approve, supervise, and aggregate, not poke around in
+                patient-level secrets like a bored neighbourhood uncle.
               </p>
             </div>
           </div>
@@ -67,9 +65,7 @@ export function OverviewSection({ stats, filters }: OverviewSectionProps) {
           <div className="flex items-start gap-3">
             <Landmark className="mt-1 text-primary dark:text-blue-400" size={20} />
             <div>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                Active Scope
-              </h2>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Active Scope</h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                 Current analytics window and honest operational caveats.
               </p>

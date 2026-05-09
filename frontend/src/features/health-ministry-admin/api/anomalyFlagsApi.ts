@@ -34,7 +34,9 @@ function normaliseFlag(raw: NonNullable<AnomalyFlagsResponse["flags"]>[number]):
   };
 }
 
-export async function getAnomalyFlags(status?: string): Promise<{ flags: AnomalyFlag[]; openCount: number }> {
+export async function getAnomalyFlags(
+  status?: string,
+): Promise<{ flags: AnomalyFlag[]; openCount: number }> {
   const url = status
     ? `${endpoints.healthMinistryAdmin.anomalies}?status=${encodeURIComponent(status)}`
     : endpoints.healthMinistryAdmin.anomalies;
@@ -46,7 +48,10 @@ export async function getAnomalyFlags(status?: string): Promise<{ flags: Anomaly
   };
 }
 
-export async function resolveAnomalyFlag(flagId: number, action: "resolved" | "dismissed"): Promise<void> {
+export async function resolveAnomalyFlag(
+  flagId: number,
+  action: "resolved" | "dismissed",
+): Promise<void> {
   await apiRequest<unknown>(`${endpoints.healthMinistryAdmin.anomalies}/${flagId}/resolve`, {
     method: "PUT",
     body: JSON.stringify({ action }),

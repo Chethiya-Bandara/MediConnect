@@ -9,7 +9,9 @@ from pydantic import BaseModel
 from app.config.supabase import execute_with_retry, supabase_admin
 from app.middleware.role_checker import HealthMinistryOnly
 from app.middleware.performance import SLA_MS, get_slow_requests
+from app.utils.gemini_client import call_gemini_assistant
 from app.schemas.moh_admin_schema import (
+    AdminUserStatusRequest,
     AnalyticsRequest,
     DoctorApprovalRequest,
     MedicineUpsertRequest,
@@ -20,6 +22,8 @@ from app.schemas.moh_admin_schema import (
 
 
 router = APIRouter(prefix="/moh-admin", tags=["moh-admin-dashboard"])
+_ADMIN_APPROVAL_ROLES = {"hospital_admin", "pharmacy_admin", "health_ministry_admin"}
+_ADMIN_APPROVAL_STATUSES = {"approved", "rejected", "pending", "suspended"}
 
 _DIAGNOSIS_PATTERN = re.compile(r"Diagnosis:\s*(.+?)(?:\r?\n|$)", re.IGNORECASE)
 
@@ -46,7 +50,17 @@ def _fetch_single_with_query(query_factory) -> dict[str, Any] | None:
 
 
 def _normalize_status(value: str | None) -> str:
-    return (value or "").strip().lower()
+    normalized = (value or "").strip().lower()
+    aliases = {
+        "approve": "approved",
+        "approved": "approved",
+        "active": "approved",
+        "reject": "rejected",
+        "rejected": "rejected",
+        "suspend": "suspended",
+        "suspended": "suspended",
+    }
+    return aliases.get(normalized, normalized)
 
 
 def _clean_medicine_text(value: str | None) -> str:
@@ -77,10 +91,65 @@ def _build_user_lookup(user_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
 
     rows = _fetch_rows_with_query(
         lambda: supabase_admin.table("users")
-        .select("id, email, role, name, status")
+        .select("id, email, role, name, pref_name, status")
         .in_("id", values)
     )
     return {str(row["id"]): row for row in rows if row.get("id") is not None}
+
+
+def _list_admin_approval_users() -> list[dict[str, Any]]:
+    admin_profiles = _fetch_rows_with_query(
+        lambda: supabase_admin.table("admin_profiles")
+        .select("id, created_at, user_id, admin_role, organisation_id")
+        .order("created_at", desc=True)
+    )
+
+    admin_profiles = [
+        row
+        for row in admin_profiles
+        if _normalize_status(row.get("admin_role")) in _ADMIN_APPROVAL_ROLES
+    ]
+    user_lookup = _build_user_lookup(row.get("user_id") for row in admin_profiles)
+    organisation_lookup = _build_organisation_lookup(
+        row.get("organisation_id") for row in admin_profiles if row.get("organisation_id") is not None
+    )
+
+    items: list[dict[str, Any]] = []
+    for row in admin_profiles:
+        user = user_lookup.get(str(row.get("user_id")))
+        if not user:
+            continue
+
+        role = _normalize_status(user.get("role"))
+        if role not in _ADMIN_APPROVAL_ROLES:
+            continue
+
+        status_value = _normalize_status(user.get("status"))
+        organisation = None
+        organisation_id = row.get("organisation_id")
+        try:
+            if organisation_id is not None:
+                organisation = organisation_lookup.get(int(organisation_id))
+        except (TypeError, ValueError):
+            organisation = None
+
+        items.append(
+            {
+                "profile_id": row.get("id"),
+                "user_id": str(user.get("id")),
+                "email": user.get("email"),
+                "name": user.get("name"),
+                "preferred_name": user.get("pref_name") or user.get("name"),
+                "role": user.get("role"),
+                "admin_role": row.get("admin_role"),
+                "organisation_id": organisation.get("id") if organisation else organisation_id,
+                "organisation_name": organisation.get("name") if organisation else None,
+                "status": status_value or user.get("status"),
+                "created_at": row.get("created_at"),
+            }
+        )
+
+    return items
 
 
 def _build_organisation_lookup(
@@ -318,6 +387,56 @@ def _build_diagnosis_counter(
     return counter
 
 
+def _monthly_report_fallback(report_input: dict[str, Any]) -> str:
+    top_diagnoses = report_input.get("top_diagnoses") or []
+    top_summary = (
+        ", ".join(f"{item['label']} ({item['count']})" for item in top_diagnoses[:5])
+        if top_diagnoses
+        else "No diagnosis-coded encounter notes were recorded in the selected period."
+    )
+    anomalies = report_input.get("anomalies") or {}
+    performance = report_input.get("performance") or {}
+
+    return (
+        "Monthly national health summary\n\n"
+        f"Generated for: {report_input.get('generated_for')}\n"
+        f"Generated at: {report_input.get('generated_at')}\n\n"
+        f"Registered organisations: {report_input.get('registered_organisations')}\n"
+        f"Approved or active organisations: {report_input.get('approved_organisations')}\n"
+        f"Pending organisations: {report_input.get('pending_organisations')}\n"
+        f"Registered doctors: {report_input.get('registered_doctors')}\n"
+        f"Approved or active doctors: {report_input.get('approved_doctors')}\n"
+        f"Pending doctors: {report_input.get('pending_doctors')}\n"
+        f"Registered patients: {report_input.get('registered_patients')}\n"
+        f"Encounters in the last 30 days: {report_input.get('encounters_last_30_days')}\n"
+        f"Top diagnosis signals from encounter notes: {top_summary}\n"
+        f"Open anomaly flags: {anomalies.get('open_count', 0)} of {anomalies.get('total_count', 0)} total\n"
+        f"Slow requests above SLA: {performance.get('slow_request_count', 0)} over {performance.get('sla_ms', SLA_MS)} ms\n"
+        f"Audit events in the last 24 hours: {report_input.get('audit_events_last_24_hours')}\n\n"
+        "District-level slicing is currently limited because the live schema does not expose a district column for encounter diagnosis data."
+    )
+
+
+def _generate_monthly_ai_report(report_input: dict[str, Any]) -> str | None:
+    prompt = (
+        "Generate a monthly MOH admin report that summarizes the provided national health statistics. "
+        "Use only the provided data. Include: 1) executive summary, 2) operational highlights, "
+        "3) diagnosis trend signals, 4) risk/watch items, and 5) data limitations. "
+        "Keep it concise, factual, and useful for an internal ministry admin audience."
+    )
+    answer, issue = call_gemini_assistant(
+        {
+            "message": prompt,
+            "history": [],
+            "moh_admin_context": report_input,
+        }
+    )
+    if answer:
+        return answer.strip()
+    _ = issue
+    return None
+
+
 @router.get("/dashboard")
 def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
     organisations = _list_all_organisations()
@@ -326,6 +445,7 @@ def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
         .select("id, created_at, specialization, user_id, slmc_number, status")
         .order("created_at", desc=True)
     )
+    admin_users = _list_admin_approval_users()
     patients = _fetch_rows("patients", "id")
 
     now_utc = datetime.now(timezone.utc)
@@ -346,7 +466,9 @@ def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
     )
 
     user_lookup = _build_user_lookup(
-        [row.get("user_id") for row in doctors] + [row.get("user_id") for row in all_audit_rows]
+        [row.get("user_id") for row in doctors]
+        + [row.get("user_id") for row in all_audit_rows]
+        + [row.get("user_id") for row in admin_users]
     )
 
     pending_organisations = [
@@ -362,6 +484,7 @@ def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
                 "doctor_id": doctor.get("id"),
                 "user_id": doctor.get("user_id"),
                 "name": user.get("name") if user else None,
+                "preferred_name": user.get("pref_name") if user else None,
                 "email": user.get("email") if user else None,
                 "specialization": doctor.get("specialization"),
                 "slmc_number": doctor.get("slmc_number"),
@@ -369,6 +492,15 @@ def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
                 "created_at": doctor.get("created_at"),
             }
         )
+
+    admin_approval_items = [
+        item
+        for item in admin_users
+        if _normalize_status(item.get("status")) in {"pending", "approved", "rejected", "suspended"}
+    ]
+    pending_admin_count = sum(
+        1 for item in admin_approval_items if _normalize_status(item.get("status")) == "pending"
+    )
 
     organisation_lookup = _build_organisation_lookup(
         [row.get("entity_id") for row in all_audit_rows if row.get("entity") == "organisations"]
@@ -388,7 +520,7 @@ def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
                 "id": row.get("id"),
                 "timestamp": row.get("timestamp"),
                 "actor_id": row.get("user_id"),
-                "actor_name": actor.get("name") if actor else None,
+                "actor_name": (actor.get("pref_name") or actor.get("name")) if actor else None,
                 "actor_role": actor.get("role") if actor else None,
                 "organisation_id": organisation.get("id") if organisation else None,
                 "organisation_name": organisation.get("name") if organisation else None,
@@ -407,11 +539,13 @@ def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
             "pending_organisations": len(pending_organisations),
             "total_doctors": len(doctors),
             "pending_doctors": len(pending_doctors),
+            "pending_admins": pending_admin_count,
             "total_patients": len(patients),
             "audit_events_24h": len(audit_rows),
         },
         "pending_organisations": pending_organisations,
         "pending_doctors": pending_doctors,
+        "pending_admins": admin_approval_items,
         "audit_logs": audit_logs,
         "viewer": {
             "user_id": current_user.get("user_id"),
@@ -723,6 +857,52 @@ def approve_doctor(
     return {"message": f"Doctor marked as {_title_status(data.status)}."}
 
 
+@router.put("/admin-users/status")
+def update_admin_user_status(
+    data: AdminUserStatusRequest,
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    admin_profile = _fetch_single_with_query(
+        lambda: supabase_admin.table("admin_profiles")
+        .select("id, user_id, admin_role")
+        .eq("user_id", data.user_id)
+    )
+    user = _fetch_single_with_query(
+        lambda: supabase_admin.table("users")
+        .select("id, email, role, status, pref_name, name")
+        .eq("id", data.user_id)
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Admin user not found.")
+
+    role = _normalize_status(user.get("role"))
+    if role not in _ADMIN_APPROVAL_ROLES:
+        raise HTTPException(status_code=400, detail="Only admin-role users can be managed here.")
+    if not admin_profile:
+        raise HTTPException(status_code=404, detail="Admin profile not found.")
+
+    next_status = _normalize_status(data.status)
+    if next_status not in _ADMIN_APPROVAL_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid admin status.")
+
+    execute_with_retry(
+        lambda: supabase_admin.table("users")
+        .update({"status": next_status})
+        .eq("id", data.user_id)
+        .execute()
+    )
+
+    _log_audit_action(
+        user_id=current_user["user_id"],
+        action=f"ADMIN_USER_{next_status.upper()}",
+        entity="admin_profiles",
+        entity_id=int(admin_profile["id"]),
+    )
+
+    display_name = user.get("pref_name") or user.get("name") or user.get("email") or "Admin user"
+    return {"message": f"{display_name} marked as {_title_status(next_status)}."}
+
+
 @router.put("/suspend")
 def suspend_entity(
     data: SuspendRequest,
@@ -889,28 +1069,64 @@ def generate_report(current_user: dict = Depends(HealthMinistryOnly)):
     approved_doctors = sum(
         1 for row in doctors if _normalize_status(row.get("status")) in {"approved", "active"}
     )
-    top_lines = diagnosis_counter.most_common(3)
-    top_summary = (
-        ", ".join(f"{label} ({count})" for label, count in top_lines)
-        if top_lines
-        else "No diagnosis-coded encounter notes were recorded in the selected period."
+    pending_organisations = sum(
+        1 for row in organisations if _normalize_status(row.get("status")) == "pending"
     )
+    pending_doctors = sum(
+        1 for row in doctors if _normalize_status(row.get("status")) == "pending"
+    )
+    anomaly_rows = _fetch_rows_with_query(
+        lambda: supabase_admin.table("anomaly_flags")
+        .select("id, status")
+        .order("flagged_at", desc=True)
+        .limit(200)
+    )
+    open_anomalies = sum(
+        1 for row in anomaly_rows if _normalize_status(row.get("status")) == "open"
+    )
+    slow_requests = get_slow_requests()
+    recent_audit_threshold = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    recent_audit_events = _fetch_rows_with_query(
+        lambda: supabase_admin.table("audit_logs")
+        .select("id")
+        .gte("timestamp", recent_audit_threshold)
+        .limit(500)
+    )
+    generated_at = datetime.now(timezone.utc).isoformat()
+    report_input = {
+        "generated_for": current_user.get("name")
+        or current_user.get("email")
+        or "Health Ministry Admin",
+        "generated_at": generated_at,
+        "registered_organisations": len(organisations),
+        "approved_organisations": approved_organisations,
+        "pending_organisations": pending_organisations,
+        "registered_doctors": len(doctors),
+        "approved_doctors": approved_doctors,
+        "pending_doctors": pending_doctors,
+        "registered_patients": len(patients),
+        "encounters_last_30_days": len(encounter_rows),
+        "top_diagnoses": [
+            {"label": label, "count": count}
+            for label, count in diagnosis_counter.most_common(5)
+        ],
+        "anomalies": {
+            "open_count": open_anomalies,
+            "total_count": len(anomaly_rows),
+        },
+        "performance": {
+            "sla_ms": SLA_MS,
+            "slow_request_count": len(slow_requests),
+        },
+        "audit_events_last_24_hours": len(recent_audit_events),
+        "data_limitations": [
+            "District-level slicing is limited because encounter diagnosis data has no live district column."
+        ],
+    }
 
-    report = (
-        "Monthly national health summary\n\n"
-        f"Generated for: {current_user.get('name') or current_user.get('email') or 'Health Ministry Admin'}\n"
-        f"Generated at: {datetime.now(timezone.utc).isoformat()}\n\n"
-        f"Registered organisations: {len(organisations)}\n"
-        f"Approved or active organisations: {approved_organisations}\n"
-        f"Registered doctors: {len(doctors)}\n"
-        f"Approved or active doctors: {approved_doctors}\n"
-        f"Registered patients: {len(patients)}\n"
-        f"Encounters in the last 30 days: {len(encounter_rows)}\n"
-        f"Top diagnosis signals from encounter notes: {top_summary}\n\n"
-        "District-level slicing is currently limited because the live schema does not expose a district column for encounter diagnosis data."
-    )
+    report = _generate_monthly_ai_report(report_input) or _monthly_report_fallback(report_input)
 
     return {
         "report": report,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at,
     }

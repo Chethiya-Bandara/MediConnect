@@ -20,11 +20,11 @@ SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 
 
 class ProfileUpdateRequest(BaseModel):
-    name: str
+    preferred_name: str
     specialization: str
     slmc_number: str
 
-    @field_validator("name", "specialization", "slmc_number")
+    @field_validator("preferred_name", "specialization", "slmc_number")
     @classmethod
     def validate_required_text(cls, value: str):
         cleaned = value.strip()
@@ -34,9 +34,19 @@ class ProfileUpdateRequest(BaseModel):
 
 
 class EncounterPrescriptionItemRequest(BaseModel):
+    medicine_id: Optional[int] = None
     medicine_name: str
     dosage: str = ""
     duration: str = ""
+
+    @field_validator("medicine_id")
+    @classmethod
+    def validate_medicine_id(cls, value: Optional[int]):
+        if value is None:
+            return None
+        if value <= 0:
+            raise ValueError("Medicine ID must be a positive integer")
+        return value
 
     @field_validator("medicine_name")
     @classmethod
@@ -303,6 +313,84 @@ def _search_medicines(query: str, limit: int = 8) -> list[dict]:
     )
 
 
+def _medicine_catalog_item(medicine_id: int) -> Optional[dict]:
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, name, unit, retail_price, wholesale_price")
+            .eq("id", medicine_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    return rows[0] if rows else None
+
+
+def _search_diseases(query: str, limit: int = 12) -> list[dict]:
+    normalized = (query or "").strip()
+    if len(normalized) < 2:
+        return []
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("diseases")
+            .select("id, icd, definition, domain")
+            .or_(f"icd.ilike.%{normalized}%,definition.ilike.%{normalized}%,domain.ilike.%{normalized}%")
+            .order("icd")
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+    return [
+        {
+            "id": row.get("id"),
+            "code": row.get("icd"),
+            "name": row.get("definition"),
+            "domain": row.get("domain"),
+        }
+        for row in rows
+    ]
+
+
+def _resolve_disease(query: str) -> Optional[dict]:
+    normalized = (query or "").strip()
+    if len(normalized) < 2:
+        return None
+
+    exact_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("diseases")
+            .select("id, icd, definition, domain")
+            .or_(f"icd.ilike.{normalized},definition.ilike.{normalized},domain.ilike.{normalized}")
+            .limit(5)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    for row in exact_rows:
+        code = str(row.get("icd") or "").strip().lower()
+        name = str(row.get("definition") or "").strip().lower()
+        if normalized.lower() in {code, name, f"{code} - {name}"}:
+            return {
+                "id": row.get("id"),
+                "code": row.get("icd"),
+                "name": row.get("definition"),
+                "domain": row.get("domain"),
+            }
+
+    search_rows = _search_diseases(normalized, limit=1)
+    return search_rows[0] if search_rows else None
+
+
 def _title_status(value: Optional[str]) -> str:
     return (value or "unknown").replace("_", " ").title()
 
@@ -315,6 +403,17 @@ def doctor_medicine_search(
     _require_doctor_context(authorization)
     return {
         "items": _search_medicines(query),
+    }
+
+
+@router.get("/diseases/search")
+def doctor_disease_search(
+    query: str = Query(default=""),
+    authorization: Optional[str] = Header(None),
+):
+    _require_doctor_context(authorization)
+    return {
+        "items": _search_diseases(query),
     }
 
 
@@ -381,7 +480,8 @@ def _patient_map(patient_ids: set[int]):
     for row in rows:
         linked_user = user_lookup.get(row.get("user_id"), {})
         display_name = (
-            linked_user.get("name")
+            linked_user.get("pref_name")
+            or linked_user.get("name")
             or linked_user.get("email")
             or f"Patient #{row['id']}"
         )
@@ -391,7 +491,6 @@ def _patient_map(patient_ids: set[int]):
             "email": linked_user.get("email"),
         }
     return patient_lookup
-
 
 def _doctor_map(doctor_ids: set[int]):
     if not doctor_ids:
@@ -415,7 +514,8 @@ def _doctor_map(doctor_ids: set[int]):
         linked_user = user_lookup.get(row.get("user_id"), {})
         doctor_lookup[row["id"]] = {
             **row,
-            "display_name": linked_user.get("name")
+            "display_name": linked_user.get("pref_name")
+            or linked_user.get("name")
             or linked_user.get("email")
             or f"Doctor #{row['id']}",
             "email": linked_user.get("email"),
@@ -866,7 +966,9 @@ def _build_dashboard_payload(context, active_appointment_id: Optional[int] = Non
         "user": {
             "id": user["id"],
             "email": user["email"],
-            "name": user.get("name"),
+            "name": user.get("pref_name") or user.get("name"),
+            "legal_name": user.get("name"),
+            "preferred_name": user.get("pref_name"),
         },
         "doctor": {
             "id": doctor["id"],
@@ -1008,7 +1110,7 @@ def update_doctor_profile(
 
     updated_user = (
         supabase_admin.table("users")
-        .update({"name": payload.name})
+        .update({"pref_name": payload.preferred_name})
         .eq("id", context["user_id"])
         .execute()
         .data
@@ -1035,7 +1137,11 @@ def update_doctor_profile(
         context["doctor"]["id"],
     )
 
-    user_row = updated_user[0] if updated_user else {**context["user"], "name": payload.name}
+    user_row = (
+        updated_user[0]
+        if updated_user
+        else {**context["user"], "pref_name": payload.preferred_name}
+    )
     doctor_row = (
         updated_doctor[0]
         if updated_doctor
@@ -1049,7 +1155,9 @@ def update_doctor_profile(
         "user": {
             "id": user_row["id"],
             "email": user_row["email"],
-            "name": user_row.get("name"),
+            "name": user_row.get("pref_name") or user_row.get("name"),
+            "legal_name": user_row.get("name"),
+            "preferred_name": user_row.get("pref_name"),
         },
         "doctor": {
             "id": doctor_row["id"],
@@ -1086,6 +1194,37 @@ def submit_encounter(
     if not patient_rows:
         raise HTTPException(status_code=404, detail="Patient not found")
 
+    disease = _resolve_disease(payload.diagnosis)
+    if not disease:
+        raise HTTPException(
+            status_code=400,
+            detail="Diagnosis must match a disease from the saved disease catalog search results.",
+        )
+
+    normalized_prescription_items = []
+    for item in payload.prescription_items:
+        if item.medicine_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Prescription item '{item.medicine_name}' must use a saved medicine ID from search results.",
+            )
+
+        medicine = _medicine_catalog_item(item.medicine_id)
+        if not medicine:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Medicine ID {item.medicine_id} was not found in the medicine catalog.",
+            )
+
+        normalized_prescription_items.append(
+            {
+                "medicine_id": medicine["id"],
+                "medicine_name": medicine.get("name") or item.medicine_name,
+                "dosage": item.dosage,
+                "duration": item.duration,
+            }
+        )
+
     appointment = None
     if payload.appointment_id is not None:
         appointment_rows = (
@@ -1102,8 +1241,15 @@ def submit_encounter(
             raise HTTPException(status_code=404, detail="Appointment not found for this doctor and patient")
         appointment = appointment_rows[0]
 
+    diagnosis_code = str(disease.get("code") or "").strip()
+    diagnosis_name = str(disease.get("name") or "").strip()
+    diagnosis_label = (
+        f"{diagnosis_code} - {diagnosis_name}"
+        if diagnosis_code and diagnosis_name
+        else diagnosis_name or diagnosis_code or payload.diagnosis
+    )
     compiled_notes = (
-        f"Diagnosis: {payload.diagnosis}\n"
+        f"Diagnosis: {diagnosis_label}\n"
         f"Encounter Type: {payload.encounter_type}\n\n"
         f"{payload.clinical_notes}"
     )
@@ -1127,7 +1273,7 @@ def submit_encounter(
 
     encounter = encounter_rows[0]
     prescription = None
-    if payload.prescription_items:
+    if normalized_prescription_items:
         prescription_rows = (
             supabase_admin.table("prescriptions")
             .insert(
@@ -1148,14 +1294,15 @@ def submit_encounter(
                 [
                     {
                         "prescription_id": prescription["id"],
-                        "medicine_name": item.medicine_name,
-                        "dosage": item.dosage,
+                        "medicine_id": item["medicine_id"],
+                        "medicine_name": item["medicine_name"],
+                        "dosage": item["dosage"],
                         "instructions": _build_prescription_instructions(
-                            item.duration,
+                            item["duration"],
                             payload.encounter_type,
                         ),
                     }
-                    for item in payload.prescription_items
+                    for item in normalized_prescription_items
                 ]
             ).execute()
 

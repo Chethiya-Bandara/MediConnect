@@ -25,6 +25,7 @@ import {
 interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
+  isAuthResolved: boolean;
   login: (payload: LoginFormValues, rememberDevice?: boolean) => Promise<AuthActionResult>;
   register: (payload: RegisterFormValues) => Promise<AuthActionResult>;
   requestPasswordReset: (email: string) => Promise<AuthActionResult>;
@@ -34,7 +35,9 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 function normalizeRole(role: unknown): UserRole {
-  const normalized = String(role ?? "PATIENT").trim().toUpperCase();
+  const normalized = String(role ?? "PATIENT")
+    .trim()
+    .toUpperCase();
   const allowedRoles: UserRole[] = [
     "PATIENT",
     "DOCTOR",
@@ -44,9 +47,7 @@ function normalizeRole(role: unknown): UserRole {
     "PHARMACY_ADMIN",
   ];
 
-  return allowedRoles.includes(normalized as UserRole)
-    ? (normalized as UserRole)
-    : "PATIENT";
+  return allowedRoles.includes(normalized as UserRole) ? (normalized as UserRole) : "PATIENT";
 }
 
 function shouldClearSession(error: unknown) {
@@ -66,6 +67,7 @@ function shouldClearSession(error: unknown) {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const hasStoredToken = Boolean(getStoredToken());
   const [user, setUser] = useState<AuthUser | null>(() => {
     const stored = getStoredJson<AuthUser>("user");
     if (!stored) {
@@ -77,10 +79,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: normalizeRole(stored.role),
     };
   });
+  const [isAuthResolved, setIsAuthResolved] = useState(() => !hasStoredToken);
 
   useEffect(() => {
     const token = getStoredToken();
     if (!token) {
+      setIsAuthResolved(true);
       return;
     }
 
@@ -98,6 +102,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           name: userData.name || userData.email || "User",
           email: userData.email,
           role: normalizeRole(userData.role),
+          preferredName: userData.preferred_name ?? null,
+          legalName: userData.legal_name ?? null,
+          address: userData.address ?? null,
           organisationId: userData.organisation_id ?? null,
           adminRole: userData.admin_role ?? null,
           doctorId: userData.doctor_id ?? null,
@@ -116,6 +123,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null);
           removeStoredToken();
           removeStoredValue("user");
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsAuthResolved(true);
         }
       }
     };
@@ -141,6 +152,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: userData.name || userData.email || "User",
         email: userData.email,
         role: normalizeRole(userData.role),
+        preferredName: userData.preferred_name ?? null,
+        legalName: userData.legal_name ?? null,
+        address: userData.address ?? null,
         organisationId: userData.organisation_id ?? null,
         adminRole: userData.admin_role ?? null,
         doctorId: userData.doctor_id ?? null,
@@ -151,7 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(loggedUser);
       setStoredJson("user", loggedUser);
 
-      return { success: true };
+      return { success: true, role: loggedUser.role };
     } catch (error) {
       return {
         success: false,
@@ -160,9 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async (
-    payload: RegisterFormValues,
-  ): Promise<AuthActionResult> => {
+  const register = async (payload: RegisterFormValues): Promise<AuthActionResult> => {
     try {
       return await registerRequest(payload);
     } catch (error) {
@@ -173,9 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const requestPasswordReset = async (
-    email: string,
-  ): Promise<AuthActionResult> => {
+  const requestPasswordReset = async (email: string): Promise<AuthActionResult> => {
     try {
       return await requestPasswordResetApi(email);
     } catch (error) {
@@ -196,12 +206,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       isAuthenticated: Boolean(user),
+      isAuthResolved,
       login,
       register,
       requestPasswordReset,
       logout,
     }),
-    [user],
+    [isAuthResolved, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

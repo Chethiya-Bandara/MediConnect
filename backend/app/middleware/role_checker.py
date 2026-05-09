@@ -21,13 +21,57 @@ from typing import Optional
 from app.config.supabase import execute_with_retry, supabase, supabase_admin
 
 
+def _resolve_pharmacist_affiliation(user_id: str) -> Optional[dict]:
+    pharmacist = execute_with_retry(
+        lambda: (
+            supabase_admin.table("pharmacists")
+            .select("pharmacy_id")
+            .eq("user_id", user_id)
+            .single()
+            .execute()
+            .data
+        ),
+        default=None,
+    )
+    if not pharmacist:
+        return None
+
+    pharmacy_id = pharmacist.get("pharmacy_id")
+    pharmacy_rows = []
+    if pharmacy_id is not None:
+        pharmacy_rows = execute_with_retry(
+            lambda: (
+                supabase_admin.table("pharmacies")
+                .select("id, organisation_id")
+                .eq("id", pharmacy_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            ),
+            default=[],
+        )
+
+    pharmacy = pharmacy_rows[0] if pharmacy_rows else None
+    if pharmacy:
+        return {
+            "pharmacy_id": pharmacy.get("id"),
+            "organisation_id": pharmacy.get("organisation_id"),
+        }
+
+    return {
+        "pharmacy_id": pharmacy_id,
+        "organisation_id": None,
+    }
+
+
 # ── Core Token Verifier ───────────────────────────────────────────────────────
 
 def _load_user_row(user_id: str):
     rows = execute_with_retry(
         lambda: (
             supabase_admin.table("users")
-            .select("id, email, role, name, status")
+            .select("id, email, role, name, pref_name, address, status")
             .eq("id", user_id)
             .execute()
             .data
@@ -44,7 +88,9 @@ def _provision_missing_user_row(user_id: str, auth_user: Optional[object]) -> Op
     metadata = getattr(auth_user, "user_metadata", None) or {}
     role = str(metadata.get("role") or "").strip().lower()
     email = getattr(auth_user, "email", None) or metadata.get("email")
-    name = metadata.get("full_name") or metadata.get("name") or email
+    legal_name = metadata.get("full_name") or metadata.get("name") or email
+    preferred_name = metadata.get("preferred_name") or legal_name
+    address = metadata.get("address")
 
     allowed_roles = {
         "patient",
@@ -65,7 +111,9 @@ def _provision_missing_user_row(user_id: str, auth_user: Optional[object]) -> Op
                     "id": user_id,
                     "email": email,
                     "role": role,
-                    "name": name,
+                    "name": legal_name,
+                    "pref_name": preferred_name,
+                    "address": address,
                 }
             ).execute(),
             attempts=2,
@@ -103,7 +151,10 @@ def build_user_context(
         "user_id": user_id,
         "id": user_id,
         "email": db_user.get("email"),
-        "name": db_user.get("name"),
+        "name": db_user.get("pref_name") or db_user.get("name"),
+        "preferred_name": db_user.get("pref_name"),
+        "legal_name": db_user.get("name"),
+        "address": db_user.get("address"),
         "role": user_role,
         "status": db_user.get("status"),
     }
@@ -117,18 +168,9 @@ def build_user_context(
 
     try:
         if user_role == "pharmacist":
-            pharmacist = execute_with_retry(
-                lambda: (
-                    supabase_admin.table("pharmacists")
-                    .select("organisation_id")
-                    .eq("user_id", user_id)
-                    .single()
-                    .execute()
-                    .data
-                ),
-                default=None,
-            )
+            pharmacist = _resolve_pharmacist_affiliation(user_id)
             if pharmacist:
+                context["pharmacy_id"] = pharmacist.get("pharmacy_id")
                 context["organisation_id"] = pharmacist.get("organisation_id")
 
         elif user_role == "doctor":

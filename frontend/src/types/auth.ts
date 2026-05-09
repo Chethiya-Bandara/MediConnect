@@ -13,6 +13,9 @@ export interface AuthUser {
   name: string;
   email: string;
   role: UserRole;
+  preferredName?: string | null;
+  legalName?: string | null;
+  address?: string | null;
   nic?: string;
   dob?: string;
   gender?: Gender;
@@ -30,23 +33,24 @@ export interface LoginFormValues {
 
 export interface RegisterFormValues {
   fullName: string;
+  preferredName: string;
   email: string;
   role: UserRole;
   nic: string;
   dob: string;
   gender: string;
+  address: string;
   parentNic?: string | undefined;
   password: string;
   confirmPassword: string;
   specialization?: string | undefined;
   licenseNumber?: string | undefined;
-  pharmacyId?: string | undefined;
   organisationId?: string | undefined;
-  credentialFile?: FileList;
-  credentialUrl?: string | null;
+  nicImage?: FileList;
 }
 
 export interface AuthActionResult {
   success: boolean;
   message?: string;
+  role?: UserRole;
 }

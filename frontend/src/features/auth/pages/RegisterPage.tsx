@@ -26,66 +26,91 @@ import { calculateAge } from "../utils";
 import { doctorSpecializationOptions } from "../../../lib/constants/doctorSpecializations";
 
 const ROLE_FIELD_ORDER: Record<string, string[]> = {
-  PATIENT: ["role", "fullName", "email", "nic", "dob", "gender", "parentNic", "password", "confirmPassword"],
-  DOCTOR: [
+  PATIENT: [
     "role",
     "fullName",
+    "preferredName",
     "email",
     "nic",
     "dob",
     "gender",
-    "specialization",
-    "licenseNumber",
+    "address",
+    "parentNic",
+    "nicImage",
     "password",
     "confirmPassword",
-    "credentialFile",
+  ],
+  DOCTOR: [
+    "role",
+    "fullName",
+    "preferredName",
+    "email",
+    "nic",
+    "dob",
+    "gender",
+    "address",
+    "specialization",
+    "licenseNumber",
+    "nicImage",
+    "password",
+    "confirmPassword",
   ],
   PHARMACIST: [
     "role",
     "fullName",
+    "preferredName",
     "email",
     "nic",
     "dob",
     "gender",
-    "pharmacyId",
+    "address",
+    "organisationId",
+    "licenseNumber",
+    "nicImage",
     "password",
     "confirmPassword",
-    "credentialFile",
   ],
   HOSPITAL_ADMIN: [
     "role",
     "fullName",
+    "preferredName",
     "email",
     "nic",
     "dob",
     "gender",
+    "address",
     "organisationId",
+    "nicImage",
     "password",
     "confirmPassword",
-    "credentialFile",
   ],
   PHARMACY_ADMIN: [
     "role",
     "fullName",
+    "preferredName",
     "email",
     "nic",
     "dob",
     "gender",
+    "address",
     "organisationId",
+    "licenseNumber",
+    "nicImage",
     "password",
     "confirmPassword",
-    "credentialFile",
   ],
   HEALTH_MINISTRY_ADMIN: [
     "role",
     "fullName",
+    "preferredName",
     "email",
     "nic",
     "dob",
     "gender",
+    "address",
+    "nicImage",
     "password",
     "confirmPassword",
-    "credentialFile",
   ],
 };
 
@@ -94,21 +119,16 @@ const ROLE_HELPERS = {
     nic: "Use the patient NIC. Underage patients must also provide a guardian NIC.",
   },
   DOCTOR: {
-    specialization: "Pick the closest specialty label you want displayed in the portal.",
-    licenseNumber: "Enter the SLMC or professional registration number exactly as issued.",
   },
   PHARMACIST: {
-    pharmacyId: "Enter the pharmacy organisation ID assigned to your branch.",
   },
   HOSPITAL_ADMIN: {
-    organisationId: "Enter the hospital organisation ID already created in the system.",
+    organisationId: "Use a hospital organization ID that already exists in the registry.",
   },
   PHARMACY_ADMIN: {
-    organisationId: "Enter the pharmacy organisation ID already registered in the system.",
+    organisationId: "Use a pharmacy organization ID that already exists in the registry.",
   },
-  HEALTH_MINISTRY_ADMIN: {
-    credential: "Ministry admin accounts are centrally governed, so no organisation ID is needed here.",
-  },
+  HEALTH_MINISTRY_ADMIN: {},
 } as const;
 
 const ROLE_ICONS = {
@@ -179,17 +199,21 @@ export function RegisterPage() {
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registrationSchema),
+    mode: "onBlur",
+    reValidateMode: "onChange",
     defaultValues: {
       role: "PATIENT",
       fullName: "",
+      preferredName: "",
       email: "",
       nic: "",
       dob: "",
       gender: "",
+      address: "",
       parentNic: "",
       specialization: "",
       licenseNumber: "",
-      pharmacyId: "",
+      organisationId: "",
       password: "",
       confirmPassword: "",
     },
@@ -200,22 +224,22 @@ export function RegisterPage() {
   const selectedGender = watch("gender");
   const selectedSpecialization = watch("specialization");
   const passwordValue = watch("password");
-  const credentialFiles = watch("credentialFile");
+  const nicImageFiles = watch("nicImage");
   const age = calculateAge(selectedDob);
-  const showParentNic =
-    selectedRole === "PATIENT" && age !== null && age < 18;
-  const showCredentialUpload = selectedRole !== "PATIENT";
+  const showParentNic = selectedRole === "PATIENT" && age !== null && age < 18;
   const showOrganisationId =
-    selectedRole === "HOSPITAL_ADMIN" || selectedRole === "PHARMACY_ADMIN";
-  const credentialLabel =
-    selectedRole === "PHARMACIST" || selectedRole === "PHARMACY_ADMIN"
-      ? "Upload Pharmacy Credential"
-      : "Upload License / Credential";
+    selectedRole === "PHARMACIST" ||
+    selectedRole === "HOSPITAL_ADMIN" ||
+    selectedRole === "PHARMACY_ADMIN";
+  const showPharmacyLicenseNumber =
+    selectedRole === "PHARMACIST" || selectedRole === "PHARMACY_ADMIN";
+  const nicImageLabel =
+    selectedRole === "PATIENT" && showParentNic ? "Upload Guardian NIC Image" : "Upload NIC Image";
   const selectedRoleOption = useMemo(
     () => roleOptions.find((role) => role.value === selectedRole),
     [selectedRole],
   );
-  const selectedCredentialName = credentialFiles?.item(0)?.name;
+  const selectedNicImageName = nicImageFiles?.item(0)?.name;
   const isVerificationStage = submitMessage?.type === "success";
   const passwordRuleStates = PASSWORD_RULES.map((rule) => ({
     ...rule,
@@ -232,27 +256,26 @@ export function RegisterPage() {
 
     if (selectedRole !== "DOCTOR") {
       resetField("specialization", { defaultValue: "" });
+    }
+
+    if (!["DOCTOR", "PHARMACIST", "PHARMACY_ADMIN"].includes(selectedRole)) {
       resetField("licenseNumber", { defaultValue: "" });
     }
 
-    if (selectedRole !== "PHARMACIST") {
-      resetField("pharmacyId", { defaultValue: "" });
-    }
-
-    if (selectedRole !== "HOSPITAL_ADMIN" && selectedRole !== "PHARMACY_ADMIN") {
+    if (!["PHARMACIST", "HOSPITAL_ADMIN", "PHARMACY_ADMIN"].includes(selectedRole)) {
       resetField("organisationId", { defaultValue: "" });
     }
 
-    if (selectedRole === "PATIENT") {
-      resetField("credentialFile");
-    }
   }, [clearErrors, resetField, selectedRole]);
 
-  useEffect(() => () => {
-    if (redirectTimeoutRef.current) {
-      window.clearTimeout(redirectTimeoutRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (redirectTimeoutRef.current) {
+        window.clearTimeout(redirectTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     setIsRoleMenuOpen(false);
@@ -303,7 +326,7 @@ export function RegisterPage() {
       return;
     }
 
-    if (firstInvalidField !== "credentialFile") {
+    if (firstInvalidField !== "nicImage") {
       setFocus(firstInvalidField as keyof RegisterFormValues);
     }
 
@@ -324,8 +347,8 @@ export function RegisterPage() {
             <div>
               <h2>Secure Health Identity</h2>
               <p>
-                Join the centralized national framework for seamless healthcare
-                delivery. One ID, a lifetime of care.
+                Join the centralized national framework for seamless healthcare delivery. One ID, a
+                lifetime of care.
               </p>
             </div>
           </aside>
@@ -336,21 +359,20 @@ export function RegisterPage() {
                 1 Account Setup
               </div>
               <div className="line" />
-              <div className={isVerificationStage ? "step-strip__step active step-strip__step--verification" : "step-strip__step"}>
+              <div
+                className={
+                  isVerificationStage
+                    ? "step-strip__step active step-strip__step--verification"
+                    : "step-strip__step"
+                }
+              >
                 2 Verification
               </div>
             </div>
 
-            <form
-              className="auth-form"
-              onSubmit={handleSubmit(onSubmit, onInvalid)}
-              noValidate
-            >
+            <form className="auth-form" onSubmit={handleSubmit(onSubmit, onInvalid)} noValidate>
               {submitMessage && (
-                <AlertMessage
-                  type={submitMessage.type}
-                  message={submitMessage.text}
-                />
+                <AlertMessage type={submitMessage.type} message={submitMessage.text} />
               )}
 
               <label className="field-wrapper">
@@ -382,7 +404,7 @@ export function RegisterPage() {
 
                   {isRoleMenuOpen && (
                     <div className="custom-select__menu" role="listbox" aria-labelledby="role">
-                      {roleOptions.map((role) => (
+                      {roleOptions.map((role) =>
                         (() => {
                           const RoleIcon = ROLE_ICONS[role.value];
 
@@ -412,17 +434,12 @@ export function RegisterPage() {
                               </span>
                             </button>
                           );
-                        })()
-                      ))}
+                        })(),
+                      )}
                     </div>
                   )}
                 </div>
-                {errors.role?.message && (
-                  <span className="field-error">{errors.role.message}</span>
-                )}
-                {!errors.role?.message && selectedRoleOption?.description && (
-                  <span className="field-helper">{selectedRoleOption.description}</span>
-                )}
+                {errors.role?.message && <span className="field-error">{errors.role.message}</span>}
               </label>
 
               <div className="grid-two">
@@ -434,11 +451,25 @@ export function RegisterPage() {
                 />
 
                 <InputField
+                  id="preferredName"
+                  label="Preferred Name"
+                  {...register("preferredName")}
+                  error={errors.preferredName?.message}
+                />
+
+                <InputField
                   id="email"
                   type="email"
                   label="Primary Email"
                   {...register("email")}
                   error={errors.email?.message}
+                />
+
+                <InputField
+                  id="address"
+                  label="Home Address"
+                  {...register("address")}
+                  error={errors.address?.message}
                 />
 
                 {!showParentNic ? (
@@ -510,7 +541,9 @@ export function RegisterPage() {
                             role="option"
                             aria-selected={selectedGender === gender.value}
                             className={`custom-select__option custom-select__option--compact ${
-                              selectedGender === gender.value ? "custom-select__option--selected" : ""
+                              selectedGender === gender.value
+                                ? "custom-select__option--selected"
+                                : ""
                             }`}
                             onClick={() => {
                               setValue("gender", gender.value, {
@@ -540,9 +573,7 @@ export function RegisterPage() {
 
                 {showParentNic && (
                   <div className="grid-full">
-                    <span className="field-helper">
-                      Required for patients under 18 years old.
-                    </span>
+                    <span className="field-helper">Required for patients under 18 years old.</span>
                   </div>
                 )}
 
@@ -560,33 +591,19 @@ export function RegisterPage() {
                           shouldValidate: true,
                         });
                       }}
-                      options={doctorSpecializationOptions.map((option) => ({
-                        ...option,
-                        description: `Use ${option.label} as the public-facing doctor specialty label.`,
-                      }))}
+                      options={doctorSpecializationOptions}
                       placeholder="Select specialization"
-                      helperText={ROLE_HELPERS.DOCTOR.specialization}
                       error={errors.specialization?.message}
                     />
 
                     <InputField
                       id="licenseNumber"
                       label="License Number"
+                      placeholder="SLMC-12345"
                       {...register("licenseNumber")}
-                      helperText={ROLE_HELPERS.DOCTOR.licenseNumber}
                       error={errors.licenseNumber?.message}
                     />
                   </>
-                )}
-
-                {selectedRole === "PHARMACIST" && (
-                  <InputField
-                    id="pharmacyId"
-                    label="Pharmacy ID"
-                    {...register("pharmacyId")}
-                    helperText={ROLE_HELPERS.PHARMACIST.pharmacyId}
-                    error={errors.pharmacyId?.message}
-                  />
                 )}
 
                 {showOrganisationId && (
@@ -597,12 +614,23 @@ export function RegisterPage() {
                     helperText={
                       selectedRole === "HOSPITAL_ADMIN"
                         ? ROLE_HELPERS.HOSPITAL_ADMIN.organisationId
-                        : ROLE_HELPERS.PHARMACY_ADMIN.organisationId
+                        : selectedRole === "PHARMACIST" || selectedRole === "PHARMACY_ADMIN"
+                          ? ROLE_HELPERS.PHARMACY_ADMIN.organisationId
+                          : undefined
                     }
                     error={errors.organisationId?.message}
                   />
                 )}
 
+                {showPharmacyLicenseNumber && (
+                  <InputField
+                    id="licenseNumber"
+                    label="Pharmacy License Number"
+                    placeholder="PH-12345"
+                    {...register("licenseNumber")}
+                    error={errors.licenseNumber?.message}
+                  />
+                )}
               </div>
 
               <section className="password-section">
@@ -670,7 +698,11 @@ export function RegisterPage() {
                   {passwordRuleStates.map((rule) => (
                     <li
                       key={rule.id}
-                      className={rule.passed ? "password-requirements__item is-met" : "password-requirements__item"}
+                      className={
+                        rule.passed
+                          ? "password-requirements__item is-met"
+                          : "password-requirements__item"
+                      }
                     >
                       <span className="password-requirements__icon" aria-hidden="true">
                         {rule.passed ? <Check size={14} /> : <X size={14} />}
@@ -681,39 +713,32 @@ export function RegisterPage() {
                 </ul>
               </section>
 
-              {showCredentialUpload && (
-                <section className="upload-box">
-                  <div className="upload-head">
-                    <Upload size={18} />
-                    <h3>Professional Verification</h3>
-                  </div>
-                  {selectedRole === "HEALTH_MINISTRY_ADMIN" && (
-                    <p className="field-helper upload-helper">
-                      {ROLE_HELPERS.HEALTH_MINISTRY_ADMIN.credential}
-                    </p>
-                  )}
-                  <label className="upload-drop">
-                    <input
-                      key={selectedRole}
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      {...register("credentialFile")}
-                    />
-                    <span>{selectedCredentialName ?? credentialLabel}</span>
-                    <small>
-                      {selectedCredentialName
-                        ? "Selected file is ready to be submitted with this request."
-                        : "Max 5MB • PDF, JPG, PNG"}
-                    </small>
-                  </label>
-                </section>
-              )}
+              <section className="upload-box">
+                <div className="upload-head">
+                  <Upload size={18} />
+                  <h3>NIC Verification</h3>
+                </div>
+                <label className="upload-drop">
+                  <input
+                    key={selectedRole}
+                    type="file"
+                    accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                    {...register("nicImage")}
+                  />
+                  <span>{selectedNicImageName ?? nicImageLabel}</span>
+                  <small>
+                    {selectedNicImageName
+                      ? "Selected image will be sent to Gemini for NIC verification before registration succeeds."
+                      : "Max 5MB • JPG or PNG • registration stays blocked until verification passes"}
+                  </small>
+                </label>
+                {errors.nicImage?.message && (
+                  <span className="field-error">{errors.nicImage.message}</span>
+                )}
+              </section>
 
               <div className="register-actions">
-                <p>
-                  By continuing, you agree to the National Health Data
-                  Sovereignty Protocol.
-                </p>
+                <p>By continuing, you agree to the National Health Data Sovereignty Protocol.</p>
                 <Button
                   type="submit"
                   className="primary-button"
@@ -722,7 +747,7 @@ export function RegisterPage() {
                 >
                   {submitMessage?.type === "success"
                     ? "Redirecting..."
-                    : "Create Digital Health ID"}
+                    : "Create Account"}
                 </Button>
               </div>
 

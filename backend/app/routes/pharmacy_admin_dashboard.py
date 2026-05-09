@@ -376,19 +376,18 @@ def _build_fast_moving_items(dispensing_rows: list[dict]):
 
 
 def _build_staff_rows(pharmacy: dict):
-    organisation_id = pharmacy.get("organisation_id")
     pharmacist_rows = execute_with_retry(
         lambda: (
             supabase_admin.table("pharmacists")
             .select("*")
-            .eq("organisation_id", organisation_id)
+            .eq("pharmacy_id", pharmacy.get("id"))
             .order("created_at")
             .execute()
             .data
             or []
         ),
         default=[],
-    ) if organisation_id is not None else []
+    ) if pharmacy.get("id") is not None else []
 
     user_ids = [row.get("user_id") for row in pharmacist_rows if row.get("user_id")]
     user_rows = execute_with_retry(
@@ -428,10 +427,10 @@ def _build_staff_rows(pharmacy: dict):
             "name": user_lookup.get(row.get("user_id"), {}).get("name") or "Unnamed pharmacist",
             "email": user_lookup.get(row.get("user_id"), {}).get("email"),
             "license_no": row.get("license_no"),
-            "organisation_id": row.get("organisation_id"),
-            "status": user_lookup.get(row.get("user_id"), {}).get("status") or "active",
-            "dispense_events_count": staff_activity.get(str(row.get("user_id")), {}).get("dispense_events_count", 0),
-            "last_dispensed_at": staff_activity.get(str(row.get("user_id")), {}).get("last_dispensed_at"),
+            "pharmacy_id": pharmacy.get("organisation_id"),
+            "status": row.get("status") or user_lookup.get(row.get("user_id"), {}).get("status") or "pending",
+            "dispense_events_count": staff_activity.get(str(row.get("id")), {}).get("dispense_events_count", 0),
+            "last_dispensed_at": staff_activity.get(str(row.get("id")), {}).get("last_dispensed_at"),
         }
         for row in pharmacist_rows
     ]
@@ -460,7 +459,7 @@ def _build_dashboard_payload(pharmacy: dict):
             current_month_revenue += amount
 
     return {
-        "pharmacy_id": pharmacy.get("id"),
+        "pharmacy_id": pharmacy.get("organisation_id"),
         "organisation_id": pharmacy.get("organisation_id"),
         "inventory_summary": _build_inventory_summary(inventory_rows),
         "report_summary": {
@@ -527,7 +526,7 @@ def add_medicine(
 
     return {
         "message": "Medicine added",
-        "pharmacy_id": pharmacy["id"],
+        "pharmacy_id": pharmacy["organisation_id"],
         "medicine_name": medicine.get("name"),
         "unit_price": medicine.get("retail_price") or data.unit_price or 0,
     }
@@ -572,7 +571,7 @@ def get_inventory(
     return [
         {
             **row,
-            "pharmacy_id": pharmacy.get("id"),
+            "pharmacy_id": pharmacy.get("organisation_id"),
             "medicine_name": (
                 medicine_lookup.get(row.get("medicine_id"), {}).get("name")
                 or row.get("medicine_name")
@@ -655,6 +654,7 @@ def register_staff_member(
                 "user_metadata": {
                     "full_name": data.full_name.strip(),
                     "role": "pharmacist",
+                    "license_number": data.license_no,
                 },
             }
         )
@@ -676,8 +676,9 @@ def register_staff_member(
         supabase_admin.table("pharmacists").insert(
             {
                 "user_id": user_id,
-                "organisation_id": pharmacy.get("organisation_id"),
+                "pharmacy_id": pharmacy.get("id"),
                 "license_no": data.license_no.strip(),
+                "status": data.status,
             }
         ).execute()
     except HTTPException:
@@ -709,10 +710,10 @@ def update_staff_status(
     _assert_admin_scope(current_user, pharmacy)
 
     staff_row = _staff_member_or_404(staff_id)
-    if _coerce_int(staff_row.get("organisation_id"), -1) != _coerce_int(pharmacy.get("organisation_id"), -2):
+    if _coerce_int(staff_row.get("pharmacy_id"), -1) != _coerce_int(pharmacy.get("id"), -2):
         raise HTTPException(
             status_code=403,
-            detail="That pharmacist does not belong to your pharmacy organisation.",
+            detail="That pharmacist does not belong to your pharmacy.",
         )
 
     user_id = staff_row.get("user_id")
@@ -722,6 +723,8 @@ def update_staff_status(
     updated_rows = supabase_admin.table("users").update({"status": data.status}).eq("id", user_id).execute().data or []
     if not updated_rows:
         raise HTTPException(status_code=404, detail="Linked user account was not found.")
+
+    supabase_admin.table("pharmacists").update({"status": data.status}).eq("id", staff_id).execute()
 
     return {
         "message": f"Pharmacist account marked as {data.status}.",

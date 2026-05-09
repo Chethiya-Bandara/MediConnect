@@ -5,10 +5,7 @@ interface ErrorStateProps {
   message: string;
 }
 
-export function ErrorState({
-  title = "Something went wrong",
-  message,
-}: ErrorStateProps) {
+export function ErrorState({ title = "Something went wrong", message }: ErrorStateProps) {
   return (
     <div className="rounded-3xl border border-red-200 bg-white p-8 text-center shadow-sm dark:border-red-900/40 dark:bg-slate-900">
       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-300">

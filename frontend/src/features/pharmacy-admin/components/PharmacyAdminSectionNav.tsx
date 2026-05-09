@@ -7,10 +7,7 @@ interface PharmacyAdminSectionNavProps {
   onChange: (section: PharmacyAdminSection) => void;
 }
 
-export function PharmacyAdminSectionNav({
-  value,
-  onChange,
-}: PharmacyAdminSectionNavProps) {
+export function PharmacyAdminSectionNav({ value, onChange }: PharmacyAdminSectionNavProps) {
   return (
     <div className="flex flex-wrap gap-2">
       {pharmacyAdminSectionTabs.map((item) => {

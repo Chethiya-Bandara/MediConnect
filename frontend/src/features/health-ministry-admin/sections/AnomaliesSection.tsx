@@ -30,15 +30,20 @@ function formatDate(value: string | null): string {
 
 function statusBadge(status: AnomalyFlag["status"]) {
   if (status === "open") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
-  if (status === "resolved") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (status === "resolved")
+    return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
   return "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400";
 }
 
 function eventTypeBadge(eventType: string) {
-  if (eventType === "LOGIN_SPIKE") return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
-  if (eventType === "DHID_ENUMERATION") return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
-  if (eventType === "PASSWORD_RESET_ABUSE") return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300";
-  if (eventType === "REQUEST_FLOOD") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
+  if (eventType === "LOGIN_SPIKE")
+    return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
+  if (eventType === "DHID_ENUMERATION")
+    return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
+  if (eventType === "PASSWORD_RESET_ABUSE")
+    return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300";
+  if (eventType === "REQUEST_FLOOD")
+    return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
   return "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300";
 }
 
@@ -67,7 +72,9 @@ export function AnomaliesSection() {
     }
   }, [statusFilter]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const handleResolve = async (flagId: number, action: "resolved" | "dismissed") => {
     setSubmitting(flagId);
@@ -87,11 +94,10 @@ export function AnomaliesSection() {
     <section className="space-y-10">
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="font-headline text-3xl font-extrabold tracking-tight">
-            Anomaly Flags
-          </h1>
+          <h1 className="font-headline text-3xl font-extrabold tracking-tight">Anomaly Flags</h1>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            Unusual usage spikes detected by the in-memory sliding-window monitor. Review open flags and resolve or dismiss them after investigation.
+            Unusual usage spikes detected by the in-memory sliding-window monitor. Review open flags
+            and resolve or dismiss them after investigation.
           </p>
         </div>
         <button
@@ -108,17 +114,23 @@ export function AnomaliesSection() {
         <div className="flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800 dark:border-red-800/40 dark:bg-red-900/20 dark:text-red-300">
           <AlertTriangle size={16} className="shrink-0" />
           <span>
-            <span className="font-bold">{openCount} open flag{openCount !== 1 ? "s" : ""}</span> require investigation.
+            <span className="font-bold">
+              {openCount} open flag{openCount !== 1 ? "s" : ""}
+            </span>{" "}
+            require investigation.
           </span>
         </div>
       )}
 
       {actionMessage && (
-        <div className={`rounded-2xl border px-5 py-4 text-sm ${
-          actionMessage.toLowerCase().includes("fail") || actionMessage.toLowerCase().includes("error")
-            ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300"
-            : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-300"
-        }`}>
+        <div
+          className={`rounded-2xl border px-5 py-4 text-sm ${
+            actionMessage.toLowerCase().includes("fail") ||
+            actionMessage.toLowerCase().includes("error")
+              ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300"
+              : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-300"
+          }`}
+        >
           {actionMessage}
         </div>
       )}
@@ -175,7 +187,9 @@ export function AnomaliesSection() {
                 {flags.map((flag) => (
                   <tr key={flag.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="px-5 py-4">
-                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${eventTypeBadge(flag.eventType)}`}>
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${eventTypeBadge(flag.eventType)}`}
+                      >
                         {EVENT_LABELS[flag.eventType] ?? flag.eventType}
                       </span>
                     </td>
@@ -183,7 +197,9 @@ export function AnomaliesSection() {
                       {flag.sourceIp ?? "—"}
                     </td>
                     <td className="px-5 py-4">
-                      <span className="font-bold text-red-700 dark:text-red-400">{flag.eventCount}</span>
+                      <span className="font-bold text-red-700 dark:text-red-400">
+                        {flag.eventCount}
+                      </span>
                       <span className="text-slate-400"> / {flag.threshold}</span>
                     </td>
                     <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
@@ -193,7 +209,9 @@ export function AnomaliesSection() {
                       {formatDate(flag.flaggedAt)}
                     </td>
                     <td className="px-5 py-4">
-                      <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(flag.status)}`}>
+                      <span
+                        className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(flag.status)}`}
+                      >
                         {flag.status}
                       </span>
                       {flag.resolvedAt && (
@@ -225,7 +243,9 @@ export function AnomaliesSection() {
                           </button>
                         </div>
                       ) : (
-                        <div className="text-right text-xs text-slate-400 dark:text-slate-500">—</div>
+                        <div className="text-right text-xs text-slate-400 dark:text-slate-500">
+                          —
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -239,12 +259,29 @@ export function AnomaliesSection() {
       <aside className="rounded-2xl border border-slate-200 bg-slate-50 px-6 py-5 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
         <p className="font-semibold">Detection rules:</p>
         <ul className="mt-2 space-y-1">
-          <li><span className="font-medium text-slate-700 dark:text-slate-200">Login Spike</span> — 15+ login attempts from same IP in 5 minutes</li>
-          <li><span className="font-medium text-slate-700 dark:text-slate-200">DHID Enumeration</span> — 20+ DHID lookups from same IP in 10 minutes</li>
-          <li><span className="font-medium text-slate-700 dark:text-slate-200">Password Reset Abuse</span> — 8+ reset attempts from same IP in 10 minutes</li>
-          <li><span className="font-medium text-slate-700 dark:text-slate-200">Request Flood</span> — 500+ requests from same IP in 5 minutes</li>
+          <li>
+            <span className="font-medium text-slate-700 dark:text-slate-200">Login Spike</span> —
+            15+ login attempts from same IP in 5 minutes
+          </li>
+          <li>
+            <span className="font-medium text-slate-700 dark:text-slate-200">DHID Enumeration</span>{" "}
+            — 20+ DHID lookups from same IP in 10 minutes
+          </li>
+          <li>
+            <span className="font-medium text-slate-700 dark:text-slate-200">
+              Password Reset Abuse
+            </span>{" "}
+            — 8+ reset attempts from same IP in 10 minutes
+          </li>
+          <li>
+            <span className="font-medium text-slate-700 dark:text-slate-200">Request Flood</span> —
+            500+ requests from same IP in 5 minutes
+          </li>
         </ul>
-        <p className="mt-3">Flags are written once per source per event type per 15-minute cooldown window. Resolve a flag after confirming it is not a genuine attack, or dismiss it if it is a false positive.</p>
+        <p className="mt-3">
+          Flags are written once per source per event type per 15-minute cooldown window. Resolve a
+          flag after confirming it is not a genuine attack, or dismiss it if it is a false positive.
+        </p>
       </aside>
     </section>
   );

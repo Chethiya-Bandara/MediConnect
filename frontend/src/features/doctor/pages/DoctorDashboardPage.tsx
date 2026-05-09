@@ -49,6 +49,7 @@ import {
   createDoctorAvailability,
   deleteDoctorAvailability,
   getDoctorAffiliationHospitals,
+  searchDoctorDiseases,
   getDoctorAvailability,
   getDoctorDashboard,
   requestDoctorAffiliation,
@@ -63,6 +64,7 @@ import type {
   DoctorAffiliationHospitalOption,
   DoctorAvailabilitySlot,
   DoctorDashboardData,
+  DoctorDiseaseCatalogItem,
   DoctorMedicineCatalogItem,
   DoctorScheduleItem,
 } from "../types";
@@ -74,6 +76,7 @@ type Theme = "light" | "dark";
 
 type DraftPrescriptionItem = {
   id: string;
+  medicine_id: number | null;
   medicine_name: string;
   dosage: string;
   duration: string;
@@ -90,9 +93,6 @@ type DashboardSelectOption = {
   label: string;
 };
 
-const DICEBEAR_AVATAR_BASE = "https://api.dicebear.com/7.x/avataaars/svg";
-
-
 import MRI from "../../../assets/welcome/MRI.jpg";
 import Tools from "../../../assets/welcome/Tools.jpg";
 import HealthCamp from "../../../assets/welcome/HealthCamp.jpg";
@@ -106,13 +106,6 @@ const navItems = [
   { id: "appointments", label: "Schedule", icon: CalendarDays },
   { id: "affiliations", label: "Hospital Access", icon: Building2 },
   { id: "settings", label: "Profile Settings", icon: Settings },
-] as const;
-
-const commonIcdSuggestions = [
-  { code: "I10", name: "Essential (primary) hypertension" },
-  { code: "E11", name: "Type 2 diabetes mellitus" },
-  { code: "J00", name: "Acute nasopharyngitis [common cold]" },
-  { code: "M54.5", name: "Low back pain" },
 ] as const;
 
 const encounterTypeOptions: DashboardSelectOption[] = [
@@ -134,10 +127,7 @@ const DOCTOR_CHAT_PANEL_MAX_HEIGHT = 760;
 
 function clampChatPanelWidth(value: number) {
   if (typeof window === "undefined") {
-    return Math.min(
-      DOCTOR_CHAT_PANEL_MAX_WIDTH,
-      Math.max(DOCTOR_CHAT_PANEL_MIN_WIDTH, value),
-    );
+    return Math.min(DOCTOR_CHAT_PANEL_MAX_WIDTH, Math.max(DOCTOR_CHAT_PANEL_MIN_WIDTH, value));
   }
 
   const viewportMax = Math.max(
@@ -150,10 +140,7 @@ function clampChatPanelWidth(value: number) {
 
 function clampChatPanelHeight(value: number) {
   if (typeof window === "undefined") {
-    return Math.min(
-      DOCTOR_CHAT_PANEL_MAX_HEIGHT,
-      Math.max(DOCTOR_CHAT_PANEL_MIN_HEIGHT, value),
-    );
+    return Math.min(DOCTOR_CHAT_PANEL_MAX_HEIGHT, Math.max(DOCTOR_CHAT_PANEL_MIN_HEIGHT, value));
   }
 
   const viewportMax = Math.max(
@@ -243,12 +230,14 @@ function DashboardCustomSelect({
 }
 
 function makeDraftMedicine(
+  medicine_id: number | null,
   medicine_name: string,
   dosage: string,
   duration: string,
 ): DraftPrescriptionItem {
   return {
     id: `med-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    medicine_id,
     medicine_name,
     dosage,
     duration,
@@ -337,7 +326,11 @@ function affiliationTone(status: string) {
   if (normalized.includes("pending")) {
     return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
   }
-  if (normalized.includes("reject") || normalized.includes("revok") || normalized.includes("inactive")) {
+  if (
+    normalized.includes("reject") ||
+    normalized.includes("revok") ||
+    normalized.includes("inactive")
+  ) {
     return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
   }
   return "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200";
@@ -371,7 +364,10 @@ function getScheduleBadge(item: DoctorScheduleItem) {
   return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
 }
 
-function buildInitialAssistantMessage(activePatient: DoctorActivePatient | null, scheduleCount: number) {
+function buildInitialAssistantMessage(
+  activePatient: DoctorActivePatient | null,
+  scheduleCount: number,
+) {
   if (!activePatient) {
     return "No active patient is loaded from the database yet. I can still summarize your schedule once appointments show up.";
   }
@@ -383,11 +379,7 @@ function buildInitialAssistantMessage(activePatient: DoctorActivePatient | null,
 }
 
 function getInitials(value: string) {
-  const parts = value
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2);
+  const parts = value.trim().split(/\s+/).filter(Boolean).slice(0, 2);
 
   if (parts.length === 0) return "DR";
   return parts.map((part) => part[0]?.toUpperCase() ?? "").join("");
@@ -405,18 +397,25 @@ export function DoctorDashboardPage() {
   } | null>(null);
   const [dashboard, setDashboard] = useState<DoctorDashboardData | null>(null);
   const [availabilitySlots, setAvailabilitySlots] = useState<DoctorAvailabilitySlot[]>([]);
-  const [affiliationHospitals, setAffiliationHospitals] = useState<DoctorAffiliationHospitalOption[]>([]);
+  const [affiliationHospitals, setAffiliationHospitals] = useState<
+    DoctorAffiliationHospitalOption[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [diagnosisInput, setDiagnosisInput] = useState("");
+  const [diseaseSuggestions, setDiseaseSuggestions] = useState<DoctorDiseaseCatalogItem[]>([]);
+  const [selectedDiseaseSuggestion, setSelectedDiseaseSuggestion] =
+    useState<DoctorDiseaseCatalogItem | null>(null);
+  const [isDiseaseSearchLoading, setIsDiseaseSearchLoading] = useState(false);
   const [encounterType, setEncounterType] = useState("Routine Follow-up");
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [medName, setMedName] = useState("");
   const [medDose, setMedDose] = useState("");
   const [medDuration, setMedDuration] = useState("");
   const [medicineSuggestions, setMedicineSuggestions] = useState<DoctorMedicineCatalogItem[]>([]);
-  const [selectedMedicineSuggestion, setSelectedMedicineSuggestion] = useState<DoctorMedicineCatalogItem | null>(null);
+  const [selectedMedicineSuggestion, setSelectedMedicineSuggestion] =
+    useState<DoctorMedicineCatalogItem | null>(null);
   const [isMedicineSearchLoading, setIsMedicineSearchLoading] = useState(false);
   const [prescriptionDraft, setPrescriptionDraft] = useState<DraftPrescriptionItem[]>([]);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
@@ -437,7 +436,9 @@ export function DoctorDashboardPage() {
   const [availabilityDate, setAvailabilityDate] = useState(todayInputDate);
   const [availabilityStart, setAvailabilityStart] = useState("09:00");
   const [availabilityEnd, setAvailabilityEnd] = useState("12:00");
-  const [selectedAvailabilityHospitalId, setSelectedAvailabilityHospitalId] = useState<number | "">("");
+  const [selectedAvailabilityHospitalId, setSelectedAvailabilityHospitalId] = useState<number | "">(
+    "",
+  );
   const [activeAppointmentId, setActiveAppointmentId] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
@@ -448,6 +449,7 @@ export function DoctorDashboardPage() {
   const [chatResizeMode, setChatResizeMode] = useState<"width" | "height" | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const profilePhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const deferredDiseaseQuery = useDeferredValue(diagnosisInput.trim());
   const deferredMedicineQuery = useDeferredValue(medName.trim());
 
   const activePatient = dashboard?.active_patient ?? null;
@@ -457,6 +459,7 @@ export function DoctorDashboardPage() {
     dashboard?.user.email ||
     user?.email ||
     "Doctor";
+  const legalName = dashboard?.user.legal_name?.trim() || user?.legalName?.trim() || "Not available";
   const doctorInitials = getInitials(doctorName);
   const profilePreviewName = profileName.trim() || doctorName;
   const profilePreviewInitials = getInitials(profilePreviewName);
@@ -469,16 +472,6 @@ export function DoctorDashboardPage() {
     affiliations: "Hospital Access",
     settings: "Profile Settings",
   } satisfies Record<DoctorPage, string>;
-
-  const filteredCodes = useMemo(() => {
-    const query = diagnosisInput.trim().toLowerCase();
-    if (!query) return [];
-    return commonIcdSuggestions.filter(
-      (item) =>
-        item.code.toLowerCase().includes(query) ||
-        item.name.toLowerCase().includes(query),
-    );
-  }, [diagnosisInput]);
 
   const queueItems = useMemo(() => {
     const schedule = dashboard?.schedule ?? [];
@@ -514,25 +507,19 @@ export function DoctorDashboardPage() {
     [approvedHospitalOptions],
   );
 
-  const specializationSelectOptions = useMemo(
-    () => {
-      const trimmed = profileSpecialization.trim();
-      if (!trimmed) {
-        return doctorSpecializationOptions;
-      }
+  const specializationSelectOptions = useMemo(() => {
+    const trimmed = profileSpecialization.trim();
+    if (!trimmed) {
+      return doctorSpecializationOptions;
+    }
 
-      const exists = doctorSpecializationOptions.some((option) => option.value === trimmed);
-      if (exists) {
-        return doctorSpecializationOptions;
-      }
+    const exists = doctorSpecializationOptions.some((option) => option.value === trimmed);
+    if (exists) {
+      return doctorSpecializationOptions;
+    }
 
-      return [
-        { value: trimmed, label: `${trimmed} (Current)` },
-        ...doctorSpecializationOptions,
-      ];
-    },
-    [profileSpecialization],
-  );
+    return [{ value: trimmed, label: `${trimmed} (Current)` }, ...doctorSpecializationOptions];
+  }, [profileSpecialization]);
 
   const isProfileDirty = useMemo(() => {
     if (!dashboard) {
@@ -544,17 +531,59 @@ export function DoctorDashboardPage() {
       profileSpecialization.trim() !== (dashboard.doctor.specialization ?? "").trim() ||
       profileSlmcNumber.trim() !== (dashboard.doctor.slmc_number ?? "").trim()
     );
-  }, [
-    dashboard,
-    profileName,
-    profileSlmcNumber,
-    profileSpecialization,
-  ]);
+  }, [dashboard, profileName, profileSlmcNumber, profileSpecialization]);
 
   const isProfileFormValid =
     profileName.trim().length >= 2 &&
     profileSpecialization.trim().length >= 2 &&
     profileSlmcNumber.trim().length >= 2;
+
+  useEffect(() => {
+    const query = deferredDiseaseQuery;
+    if (query.length < 2) {
+      setDiseaseSuggestions([]);
+      setIsDiseaseSearchLoading(false);
+      setSelectedDiseaseSuggestion((current) =>
+        current &&
+        `${current.code ?? ""} - ${current.name}`.trim().toLowerCase() ===
+          diagnosisInput.trim().toLowerCase()
+          ? current
+          : null,
+      );
+      return;
+    }
+
+    let active = true;
+    setIsDiseaseSearchLoading(true);
+
+    void searchDoctorDiseases(query)
+      .then((items) => {
+        if (!active) return;
+        setDiseaseSuggestions(items);
+        const exactMatch = items.find((item) => {
+          const code = (item.code ?? "").trim();
+          const name = item.name.trim();
+          const exactLabels = [name.toLowerCase()];
+          if (code) {
+            exactLabels.push(code.toLowerCase(), `${code} - ${name}`.toLowerCase());
+          }
+          return exactLabels.includes(diagnosisInput.trim().toLowerCase());
+        });
+        setSelectedDiseaseSuggestion(exactMatch ?? null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setDiseaseSuggestions([]);
+      })
+      .finally(() => {
+        if (!active) return;
+        setIsDiseaseSearchLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [deferredDiseaseQuery, diagnosisInput]);
 
   useEffect(() => {
     if (selectedAvailabilityHospitalId || approvedHospitalOptions.length === 0) {
@@ -564,10 +593,7 @@ export function DoctorDashboardPage() {
     setSelectedAvailabilityHospitalId(approvedHospitalOptions[0].id);
   }, [approvedHospitalOptions, selectedAvailabilityHospitalId]);
 
-  const showToast = (
-    message: string,
-    tone: "success" | "error" | "info" = "success",
-  ) => {
+  const showToast = (message: string, tone: "success" | "error" | "info" = "success") => {
     setToast({ message, tone });
     window.setTimeout(() => setToast(null), 3200);
   };
@@ -596,17 +622,17 @@ export function DoctorDashboardPage() {
   };
 
   const [bgIndex, setBgIndex] = useState(0);
-  
-    useEffect(() => {
-      // Only run the timer if the user is actually on the home page
-      if (page !== "home") return;
-  
-      const interval = setInterval(() => {
-        setBgIndex((prev) => (prev + 1) % WELCOME_IMAGES.length);
-      }, 5000); // Change image every 5 seconds
-  
-      return () => clearInterval(interval);
-    }, [page]);
+
+  useEffect(() => {
+    // Only run the timer if the user is actually on the home page
+    if (page !== "home") return;
+
+    const interval = setInterval(() => {
+      setBgIndex((prev) => (prev + 1) % WELCOME_IMAGES.length);
+    }, 5000); // Change image every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [page]);
 
   useEffect(() => {
     const saved =
@@ -715,7 +741,9 @@ export function DoctorDashboardPage() {
       })
       .catch((err) => {
         if (!ignore) {
-          setAvailabilityError(err instanceof Error ? err.message : "Availability slots could not be loaded");
+          setAvailabilityError(
+            err instanceof Error ? err.message : "Availability slots could not be loaded",
+          );
         }
       });
 
@@ -833,12 +861,32 @@ export function DoctorDashboardPage() {
     setSelectedMedicineSuggestion(exactMatch ?? null);
   };
 
+  const handleDiagnosisInputChange = (value: string) => {
+    setDiagnosisInput(value);
+    const exactMatch = diseaseSuggestions.find((item) => {
+      const code = (item.code ?? "").trim();
+      const name = item.name.trim();
+      const exactLabels = [name.toLowerCase()];
+      if (code) {
+        exactLabels.push(code.toLowerCase(), `${code} - ${name}`.toLowerCase());
+      }
+      return exactLabels.includes(value.trim().toLowerCase());
+    });
+    setSelectedDiseaseSuggestion(exactMatch ?? null);
+  };
+
   const addMedicine = () => {
-    const matchedSuggestion = selectedMedicineSuggestion
-      ?? medicineSuggestions.find(
+    const matchedSuggestion =
+      selectedMedicineSuggestion ??
+      medicineSuggestions.find(
         (item) => item.name.toLowerCase() === medName.trim().toLowerCase(),
-      )
-      ?? null;
+      ) ??
+      null;
+    if (!matchedSuggestion) {
+      showToast("Pick a saved medicine from the catalog search results before adding it.", "error");
+      return;
+    }
+    const medicine_id = matchedSuggestion?.id ?? null;
     const medicine_name = matchedSuggestion?.name ?? medName.trim();
     if (!medicine_name) {
       showToast("Medicine name is required before adding a prescription item.", "error");
@@ -851,6 +899,7 @@ export function DoctorDashboardPage() {
           item.id === editingDraftId
             ? {
                 ...item,
+                medicine_id,
                 medicine_name,
                 dosage: medDose.trim(),
                 duration: medDuration.trim(),
@@ -863,7 +912,7 @@ export function DoctorDashboardPage() {
     } else {
       setPrescriptionDraft((current) => [
         ...current,
-        makeDraftMedicine(medicine_name, medDose.trim(), medDuration.trim()),
+        makeDraftMedicine(medicine_id, medicine_name, medDose.trim(), medDuration.trim()),
       ]);
       showToast("Medicine added to the encounter draft.");
     }
@@ -880,12 +929,18 @@ export function DoctorDashboardPage() {
     setMedName(item.medicine_name);
     setMedDose(item.dosage);
     setMedDuration(item.duration);
-    setSelectedMedicineSuggestion(null);
+    setSelectedMedicineSuggestion(
+      item.medicine_id
+        ? (medicineSuggestions.find((entry) => entry.id === item.medicine_id) ?? null)
+        : null,
+    );
   };
 
   const openAppointmentEncounter = async (appointmentId: number) => {
     setActiveAppointmentId(appointmentId);
     setDiagnosisInput("");
+    setDiseaseSuggestions([]);
+    setSelectedDiseaseSuggestion(null);
     setClinicalNotes("");
     setPrescriptionDraft([]);
     setEditingDraftId(null);
@@ -895,6 +950,8 @@ export function DoctorDashboardPage() {
 
   const cancelEncounterReview = async () => {
     setDiagnosisInput("");
+    setDiseaseSuggestions([]);
+    setSelectedDiseaseSuggestion(null);
     setClinicalNotes("");
     setPrescriptionDraft([]);
     setEditingDraftId(null);
@@ -920,15 +977,26 @@ export function DoctorDashboardPage() {
       return;
     }
 
+    if (!selectedDiseaseSuggestion) {
+      showToast(
+        "Pick a diagnosis from the saved disease search results before submitting.",
+        "error",
+      );
+      return;
+    }
+
     setSubmittingEncounter(true);
     try {
       await submitDoctorEncounter({
         patient_id: activePatient.patient.id,
         appointment_id: activePatient.appointment.id,
-        diagnosis: diagnosisInput.trim(),
+        diagnosis: selectedDiseaseSuggestion.code
+          ? `${selectedDiseaseSuggestion.code} - ${selectedDiseaseSuggestion.name}`
+          : selectedDiseaseSuggestion.name,
         encounter_type: encounterType,
         clinical_notes: clinicalNotes.trim(),
         prescription_items: prescriptionDraft.map((item) => ({
+          medicine_id: item.medicine_id,
           medicine_name: item.medicine_name,
           dosage: item.dosage,
           duration: item.duration,
@@ -936,6 +1004,8 @@ export function DoctorDashboardPage() {
       });
       setModal(null);
       setDiagnosisInput("");
+      setDiseaseSuggestions([]);
+      setSelectedDiseaseSuggestion(null);
       setClinicalNotes("");
       setPrescriptionDraft([]);
       setEditingDraftId(null);
@@ -949,10 +1019,7 @@ export function DoctorDashboardPage() {
       setPage("appointments");
       await loadDashboard(null);
     } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Encounter could not be saved",
-        "error",
-      );
+      showToast(err instanceof Error ? err.message : "Encounter could not be saved", "error");
     } finally {
       setSubmittingEncounter(false);
     }
@@ -960,7 +1027,7 @@ export function DoctorDashboardPage() {
 
   const saveProfile = async () => {
     if (!isProfileFormValid) {
-      showToast("Name, specialization, and SLMC number need at least 2 characters.", "error");
+      showToast("Preferred name, specialization, and SLMC number need at least 2 characters.", "error");
       return;
     }
 
@@ -972,17 +1039,14 @@ export function DoctorDashboardPage() {
     setSavingProfile(true);
     try {
       await updateDoctorProfile({
-        name: profileName.trim(),
+        preferred_name: profileName.trim(),
         specialization: profileSpecialization.trim(),
         slmc_number: profileSlmcNumber.trim(),
       });
       showToast("Doctor profile updated.");
       await loadDashboard();
     } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Profile update failed",
-        "error",
-      );
+      showToast(err instanceof Error ? err.message : "Profile update failed", "error");
     } finally {
       setSavingProfile(false);
     }
@@ -1063,7 +1127,8 @@ export function DoctorDashboardPage() {
       const slots = await getDoctorAvailability(availabilityDate, selectedAvailabilityHospitalId);
       setAvailabilitySlots(slots);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Availability slot could not be rescheduled";
+      const message =
+        err instanceof Error ? err.message : "Availability slot could not be rescheduled";
       setAvailabilityError(message);
       showToast(message, "error");
     } finally {
@@ -1093,10 +1158,7 @@ export function DoctorDashboardPage() {
       showToast("Hospital join request sent.");
       await loadDashboard();
     } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Hospital request could not be sent",
-        "error",
-      );
+      showToast(err instanceof Error ? err.message : "Hospital request could not be sent", "error");
     } finally {
       setRequestingHospitalId(null);
     }
@@ -1109,10 +1171,7 @@ export function DoctorDashboardPage() {
       showToast("Hospital access updated.");
       await loadDashboard();
     } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Affiliation could not be updated",
-        "error",
-      );
+      showToast(err instanceof Error ? err.message : "Affiliation could not be updated", "error");
     } finally {
       setRevokingAffiliationId(null);
     }
@@ -1136,10 +1195,7 @@ export function DoctorDashboardPage() {
           text: item.text,
         })),
       });
-      setChatMessages((current) => [
-        ...current,
-        makeChat("assistant", response.answer),
-      ]);
+      setChatMessages((current) => [...current, makeChat("assistant", response.answer)]);
     } catch (err) {
       setChatMessages((current) => [
         ...current,
@@ -1214,7 +1270,11 @@ export function DoctorDashboardPage() {
           })}
         </nav>
         <div className="mt-auto space-y-2 px-2">
-          <button type="button" onClick={logoutNow} className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-100 py-3 text-sm font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+          <button
+            type="button"
+            onClick={logoutNow}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-100 py-3 text-sm font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-100"
+          >
             <LogOut size={16} />
             Sign Out
           </button>
@@ -1224,15 +1284,21 @@ export function DoctorDashboardPage() {
       <header className="fixed left-64 right-0 top-0 z-30 flex items-center justify-between border-b border-slate-100 bg-white/80 px-8 py-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80">
         <div className="flex items-center gap-6">
           <div>
-            <h1 className="font-headline text-xl font-extrabold text-blue-900 dark:text-blue-400">{pageHeaderTitle[page]}</h1>
+            <h1 className="font-headline text-xl font-extrabold text-blue-900 dark:text-blue-400">
+              {pageHeaderTitle[page]}
+            </h1>
             {page === "encounter" ? (
               <div className="mt-0.5 flex items-center gap-2">
-                <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">Active Patient:</span>
+                <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">
+                  Active Patient:
+                </span>
                 <span className="text-sm font-semibold dark:text-slate-200">
                   {activePatient?.patient.name ?? "No patient selected"}
                 </span>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                  {activePatient?.patient.dhid ? `DHID: ${activePatient.patient.dhid}` : "Awaiting booking"}
+                  {activePatient?.patient.dhid
+                    ? `DHID: ${activePatient.patient.dhid}`
+                    : "Awaiting booking"}
                 </span>
               </div>
             ) : null}
@@ -1241,7 +1307,9 @@ export function DoctorDashboardPage() {
             <>
               <div className="hidden h-8 w-px bg-slate-200 lg:block dark:bg-slate-700" />
               <div className="hidden items-center gap-2 lg:flex">
-                <span className={`h-2 w-2 rounded-full ${activePatient?.appointment.consent.granted ? "animate-pulse bg-green-500" : "bg-amber-500"}`} />
+                <span
+                  className={`h-2 w-2 rounded-full ${activePatient?.appointment.consent.granted ? "animate-pulse bg-green-500" : "bg-amber-500"}`}
+                />
                 <span className="text-xs font-bold uppercase text-green-700 dark:text-green-400">
                   Consent: {activePatient?.appointment.consent.status ?? "Unavailable"}
                 </span>
@@ -1270,7 +1338,11 @@ export function DoctorDashboardPage() {
               Create
             </button>
           ) : null}
-          <button type="button" onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
+          <button
+            type="button"
+            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            className="rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+          >
             {theme === "dark" ? <SunMedium size={18} /> : <MoonStar size={18} />}
           </button>
           <div className="flex items-center gap-3 border-l border-slate-200 pl-4 dark:border-slate-700">
@@ -1280,9 +1352,17 @@ export function DoctorDashboardPage() {
                 {dashboard?.doctor.specialization ?? "Specialization pending"}
               </p>
             </div>
-            <button type="button" onClick={() => setPage("settings")} className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-blue-100 text-sm font-black text-blue-900 shadow-sm dark:border-slate-800 dark:bg-blue-900 dark:text-blue-100">
+            <button
+              type="button"
+              onClick={() => setPage("settings")}
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-blue-100 text-sm font-black text-blue-900 shadow-sm dark:border-slate-800 dark:bg-blue-900 dark:text-blue-100"
+            >
               {profilePhoto ? (
-                <img src={profilePhoto} alt={`${doctorName} avatar`} className="h-full w-full object-cover" />
+                <img
+                  src={profilePhoto}
+                  alt={`${doctorName} avatar`}
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 doctorInitials
               )}
@@ -1294,238 +1374,279 @@ export function DoctorDashboardPage() {
       <main className="ml-64 flex min-h-screen flex-col">
         <div className="flex-1 px-8 pb-12 pt-24">
           {page === "home" ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 flex flex-col gap-12 pb-16">
-            
-            {/* 1. HERO SECTION (Slideshow) */}
-            <section className="relative -mx-4 md:-mx-8 -mt-4 md:-mt-8 flex min-h-[70vh] items-center justify-center overflow-hidden shadow-2xl shadow-blue-900/10">
-              {/* Background Slideshow Layer */}
-              <div className="absolute inset-0 z-0">
-                {WELCOME_IMAGES.map((src, index) => (
-                  <div
-                    key={src}
-                    className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out ${
-                      index === bgIndex ? "opacity-100" : "opacity-0"
-                    }`}
-                    style={{ backgroundImage: `url(${src})` }}
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-b from-slate-900/40 via-slate-900/20 to-white/10 backdrop-blur-[1px]" />
-                  </div>
-                ))}
-              </div>
-
-              {/* Content Layer */}
-              <div className="relative z-10 max-w-4xl px-6 text-center text-white">
-                <span className="mb-4 inline-block rounded-full bg-blue-500/20 px-4 py-1.5 text-sm font-bold tracking-wide text-blue-100 backdrop-blur-md border border-blue-400/30">
-                  Clinical Management Portal
-                </span>
-                <h1 className="font-headline text-5xl font-extrabold tracking-tight sm:text-7xl drop-shadow-xl">
-                  Welcome, <span className="text-blue-400">Dr. {doctorName}</span>
-                </h1>
-                <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-100/90 drop-shadow-md sm:text-xl font-medium">
-                  Manage patient encounters, review clinical schedules, and coordinate 
-                  healthcare delivery across your authorized facilities.
-                </p>
-                
-                <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
-                  <button 
-                    onClick={() => setPage("overview")}
-                    className="group flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-8 py-4 font-bold text-white shadow-xl transition-all hover:bg-blue-700 hover:scale-105 active:scale-95"
-                  >
-                    <Activity className="h-5 w-5" />
-                    Practice Overview
-                  </button>
-                  <button 
-                    onClick={() => setPage("encounter")}
-                    className="flex items-center justify-center gap-2 rounded-2xl border border-white/30 bg-white/10 px-8 py-4 font-bold text-white backdrop-blur-md transition-all hover:bg-white/20 hover:scale-105 active:scale-95"
-                  >
-                    <ClipboardList className="h-5 w-5" />
-                    New Encounter
-                  </button>
-                </div>
-              </div>
-            </section>
-
-            {/* SECTION: CLINICAL ECOSYSTEM (DR DASHBOARD) */}
-            <section className="mt-6 border-t border-slate-100 pt-6 dark:border-white/5">
-              <div className="mb-6 flex flex-col items-start gap-4">
-                <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300">
-                  <Sparkles size={14} />
-                  Clinical Excellence Network
-                </span>
-                <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-                  Precision <span className="text-blue-600 dark:text-blue-400">Diagnostics.</span>
-                </h2>
-                <p className="max-w-2xl text-slate-500 dark:text-slate-400 text-sm md:text-base">
-                  MediConnect streamlines the physician workflow by providing a longitudinal view of patient health. 
-                  Access real-time diagnostic data and coordinate treatments across the national facility network.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-                {[
-                  {
-                    title: "Longitudinal Records",
-                    desc: "View a patient's complete history across all state facilities in one unified timeline. No more missing charts.",
-                    icon: ClipboardList,
-                    color: "blue"
-                  },
-                  {
-                    title: "Diagnostic Integration",
-                    desc: "Direct access to MRI, X-ray, and lab results verified by system-wide diagnostic standards.",
-                    icon: Activity,
-                    color: "emerald"
-                  },
-                  {
-                    title: "Clinical Permissions",
-                    desc: "Your credentials grant secure access to clinical notes and sensitive data within authorized hospital boundaries.",
-                    icon: ShieldPlus,
-                    color: "blue"
-                  }
-                ].map((feature, i) => (
-                  <div 
-                    key={i} 
-                    className="group relative overflow-hidden rounded-[2rem] border border-slate-100 bg-white p-8 transition-all hover:border-blue-500/30 dark:border-white/5 dark:bg-[#0a0a0a]"
-                  >
-                    <div className={`mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-${feature.color}-50 text-${feature.color}-600 transition-transform group-hover:scale-110 dark:bg-${feature.color}-500/10 dark:text-${feature.color}-400`}>
-                      <feature.icon size={28} />
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 flex flex-col gap-12 pb-16">
+              {/* 1. HERO SECTION (Slideshow) */}
+              <section className="relative -mx-4 md:-mx-8 -mt-4 md:-mt-8 flex min-h-[70vh] items-center justify-center overflow-hidden shadow-2xl shadow-blue-900/10">
+                {/* Background Slideshow Layer */}
+                <div className="absolute inset-0 z-0">
+                  {WELCOME_IMAGES.map((src, index) => (
+                    <div
+                      key={src}
+                      className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out ${
+                        index === bgIndex ? "opacity-100" : "opacity-0"
+                      }`}
+                      style={{ backgroundImage: `url(${src})` }}
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-b from-slate-900/40 via-slate-900/20 to-white/10 backdrop-blur-[1px]" />
                     </div>
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">{feature.title}</h3>
-                    <p className="mt-3 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-                      {feature.desc}
-                    </p>
-                    <div className={`absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-${feature.color}-500/5 blur-2xl transition-opacity group-hover:opacity-100`} />
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
 
-              {/* Clinical Compliance Banner */}
-              <div className="mt-10 rounded-[2.5rem] bg-slate-900 p-1 dark:bg-blue-600/5">
-                <div className="flex flex-col items-center justify-between gap-6 rounded-[2.3rem] bg-white px-10 py-6 dark:bg-[#050505] md:flex-row">
-                  <div className="flex items-center gap-6">
-                    <div className="hidden h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 md:flex">
-                      <BadgeCheck size={20} />
-                    </div>
-                    <div>
-                      <h4 className="text-base font-bold">Clinical Protocol Compliant</h4>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">All data handling follows national healthcare privacy standards.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
+                {/* Content Layer */}
+                <div className="relative z-10 max-w-4xl px-6 text-center text-white">
+                  <span className="mb-4 inline-block rounded-full bg-blue-500/20 px-4 py-1.5 text-sm font-bold tracking-wide text-blue-100 backdrop-blur-md border border-blue-400/30">
+                    Clinical Management Portal
+                  </span>
+                  <h1 className="font-headline text-5xl font-extrabold tracking-tight sm:text-7xl drop-shadow-xl">
+                    Welcome, <span className="text-blue-400">Dr. {doctorName}</span>
+                  </h1>
+                  <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-100/90 drop-shadow-md sm:text-xl font-medium">
+                    Manage patient encounters, review clinical schedules, and coordinate healthcare
+                    delivery across your authorized facilities.
+                  </p>
 
-            {/* 2. CLINICAL STATUS STATS */}
-            <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
-              <div className="group relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
-                <div className="flex items-center gap-4">
-                  <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30">
-                    <BadgeCheck className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-500">Credentials</p>
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Licensed Practitioner</h3>
+                  <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
+                    <button
+                      onClick={() => setPage("overview")}
+                      className="group flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-8 py-4 font-bold text-white shadow-xl transition-all hover:bg-blue-700 hover:scale-105 active:scale-95"
+                    >
+                      <Activity className="h-5 w-5" />
+                      Practice Overview
+                    </button>
+                    <button
+                      onClick={() => setPage("encounter")}
+                      className="flex items-center justify-center gap-2 rounded-2xl border border-white/30 bg-white/10 px-8 py-4 font-bold text-white backdrop-blur-md transition-all hover:bg-white/20 hover:scale-105 active:scale-95"
+                    >
+                      <ClipboardList className="h-5 w-5" />
+                      New Encounter
+                    </button>
                   </div>
                 </div>
-                <div className="mt-4 flex items-center gap-2 text-xs font-bold text-blue-600 uppercase tracking-wider">
-                  <ShieldCheck className="h-4 w-4" /> System Verified
-                </div>
-              </div>
+              </section>
 
-              <div className="group relative overflow-hidden rounded-3xl border border-emerald-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
-                <div className="flex items-center gap-4">
-                  <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-600 dark:bg-emerald-900/30">
-                    <CalendarDays className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-500">Today's Load</p>
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Daily Schedule</h3>
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center gap-2 text-xs font-bold text-emerald-600 uppercase tracking-wider">
-                  <Activity className="h-4 w-4" /> 8 Appointments Remaining
-                </div>
-              </div>
-
-              <div className="group relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
-                <div className="flex items-center gap-4">
-                  <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30">
-                    <ClipboardList className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-500">Documentation</p>
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Unsigned Charts</h3>
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center gap-2 text-xs font-bold text-blue-600 uppercase tracking-wider">
-                  <ShieldPlus className="h-4 w-4" /> 3 Pending Encounters
-                </div>
-              </div>
-            </section>
-
-            {/* 3. QUICK ACTIONS GRID (Mapped to Doctor Nav Items) */}
-            <section>
-              <div className="mb-6 flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Clinical Quick Actions</h2>
-              </div>
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5">
-                {[
-                  { label: "Overview", icon: Activity, color: "blue", target: "overview" },
-                  { label: "Encounters", icon: ClipboardList, color: "emerald", target: "encounter" },
-                  { label: "Schedule", icon: CalendarDays, color: "blue", target: "appointments" },
-                  { label: "Hospital Access", icon: ShieldCheck, color: "emerald", target: "affiliations" },
-                  { label: "Settings", icon: Settings, color: "slate", target: "settings" },
-                ].map((action) => (
-                  <button
-                    key={action.label}
-                    onClick={() => setPage(action.target as DoctorPage)}
-                    className="flex flex-col items-center gap-4 rounded-3xl border border-slate-100 bg-white p-6 transition-all hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg dark:border-slate-800 dark:bg-slate-800"
-                  >
-                    <div className={`rounded-2xl bg-${action.color}-50 p-4 text-${action.color}-600 dark:bg-${action.color}-900/20`}>
-                      <action.icon className="h-6 w-6" />
-                    </div>
-                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm text-center">{action.label}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            {/* 4. HOSPITAL CONNECT BANNER */}
-            <section className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-r from-slate-900 to-blue-900 p-10 text-white shadow-xl shadow-blue-900/20">
-              <div className="relative z-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-center">
-                <div className="max-w-md">
-                  <h2 className="text-3xl font-bold">Hospital Access Control</h2>
-                  <p className="mt-2 text-blue-100/80 font-medium">
-                    Authorized to practice at <span className="text-blue-300 font-bold">National Hospital Sri Lanka</span>. 
-                    View and manage your facility-wide clinical permissions here.
+              {/* SECTION: CLINICAL ECOSYSTEM (DR DASHBOARD) */}
+              <section className="mt-6 border-t border-slate-100 pt-6 dark:border-white/5">
+                <div className="mb-6 flex flex-col items-start gap-4">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300">
+                    <Sparkles size={14} />
+                    Clinical Excellence Network
+                  </span>
+                  <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    Precision <span className="text-blue-600 dark:text-blue-400">Diagnostics.</span>
+                  </h2>
+                  <p className="max-w-2xl text-slate-500 dark:text-slate-400 text-sm md:text-base">
+                    MediConnect streamlines the physician workflow by providing a longitudinal view
+                    of patient health. Access real-time diagnostic data and coordinate treatments
+                    across the national facility network.
                   </p>
                 </div>
-                <button 
-                  onClick={() => setPage("affiliations")}
-                  className="rounded-2xl bg-blue-500 px-8 py-4 font-bold text-white shadow-xl transition-all hover:bg-blue-400 hover:scale-105 active:scale-95"
-                >
-                  Manage Affiliations
-                </button>
-              </div>
-              {/* Abstract medical design elements */}
-              <div className="absolute -right-20 -top-20 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl" />
-              <div className="absolute -bottom-20 left-20 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
-            </section>
 
-          </div>
-        ) : null}
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+                  {[
+                    {
+                      title: "Longitudinal Records",
+                      desc: "View a patient's complete history across all state facilities in one unified timeline. No more missing charts.",
+                      icon: ClipboardList,
+                      color: "blue",
+                    },
+                    {
+                      title: "Diagnostic Integration",
+                      desc: "Direct access to MRI, X-ray, and lab results verified by system-wide diagnostic standards.",
+                      icon: Activity,
+                      color: "emerald",
+                    },
+                    {
+                      title: "Clinical Permissions",
+                      desc: "Your credentials grant secure access to clinical notes and sensitive data within authorized hospital boundaries.",
+                      icon: ShieldPlus,
+                      color: "blue",
+                    },
+                  ].map((feature, i) => (
+                    <div
+                      key={i}
+                      className="group relative overflow-hidden rounded-[2rem] border border-slate-100 bg-white p-8 transition-all hover:border-blue-500/30 dark:border-white/5 dark:bg-[#0a0a0a]"
+                    >
+                      <div
+                        className={`mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-${feature.color}-50 text-${feature.color}-600 transition-transform group-hover:scale-110 dark:bg-${feature.color}-500/10 dark:text-${feature.color}-400`}
+                      >
+                        <feature.icon size={28} />
+                      </div>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                        {feature.title}
+                      </h3>
+                      <p className="mt-3 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                        {feature.desc}
+                      </p>
+                      <div
+                        className={`absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-${feature.color}-500/5 blur-2xl transition-opacity group-hover:opacity-100`}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Clinical Compliance Banner */}
+                <div className="mt-10 rounded-[2.5rem] bg-slate-900 p-1 dark:bg-blue-600/5">
+                  <div className="flex flex-col items-center justify-between gap-6 rounded-[2.3rem] bg-white px-10 py-6 dark:bg-[#050505] md:flex-row">
+                    <div className="flex items-center gap-6">
+                      <div className="hidden h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 md:flex">
+                        <BadgeCheck size={20} />
+                      </div>
+                      <div>
+                        <h4 className="text-base font-bold">Clinical Protocol Compliant</h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          All data handling follows national healthcare privacy standards.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* 2. CLINICAL STATUS STATS */}
+              <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
+                <div className="group relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
+                  <div className="flex items-center gap-4">
+                    <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30">
+                      <BadgeCheck className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-500">Credentials</p>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                        Licensed Practitioner
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 text-xs font-bold text-blue-600 uppercase tracking-wider">
+                    <ShieldCheck className="h-4 w-4" /> System Verified
+                  </div>
+                </div>
+
+                <div className="group relative overflow-hidden rounded-3xl border border-emerald-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
+                  <div className="flex items-center gap-4">
+                    <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-600 dark:bg-emerald-900/30">
+                      <CalendarDays className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-500">Today's Load</p>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                        Daily Schedule
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 text-xs font-bold text-emerald-600 uppercase tracking-wider">
+                    <Activity className="h-4 w-4" /> 8 Appointments Remaining
+                  </div>
+                </div>
+
+                <div className="group relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
+                  <div className="flex items-center gap-4">
+                    <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30">
+                      <ClipboardList className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-500">Documentation</p>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                        Unsigned Charts
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 text-xs font-bold text-blue-600 uppercase tracking-wider">
+                    <ShieldPlus className="h-4 w-4" /> 3 Pending Encounters
+                  </div>
+                </div>
+              </section>
+
+              {/* 3. QUICK ACTIONS GRID (Mapped to Doctor Nav Items) */}
+              <section>
+                <div className="mb-6 flex items-center justify-between">
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+                    Clinical Quick Actions
+                  </h2>
+                </div>
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5">
+                  {[
+                    { label: "Overview", icon: Activity, color: "blue", target: "overview" },
+                    {
+                      label: "Encounters",
+                      icon: ClipboardList,
+                      color: "emerald",
+                      target: "encounter",
+                    },
+                    {
+                      label: "Schedule",
+                      icon: CalendarDays,
+                      color: "blue",
+                      target: "appointments",
+                    },
+                    {
+                      label: "Hospital Access",
+                      icon: ShieldCheck,
+                      color: "emerald",
+                      target: "affiliations",
+                    },
+                    { label: "Settings", icon: Settings, color: "slate", target: "settings" },
+                  ].map((action) => (
+                    <button
+                      key={action.label}
+                      onClick={() => setPage(action.target as DoctorPage)}
+                      className="flex flex-col items-center gap-4 rounded-3xl border border-slate-100 bg-white p-6 transition-all hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg dark:border-slate-800 dark:bg-slate-800"
+                    >
+                      <div
+                        className={`rounded-2xl bg-${action.color}-50 p-4 text-${action.color}-600 dark:bg-${action.color}-900/20`}
+                      >
+                        <action.icon className="h-6 w-6" />
+                      </div>
+                      <span className="font-bold text-slate-700 dark:text-slate-200 text-sm text-center">
+                        {action.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {/* 4. HOSPITAL CONNECT BANNER */}
+              <section className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-r from-slate-900 to-blue-900 p-10 text-white shadow-xl shadow-blue-900/20">
+                <div className="relative z-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-center">
+                  <div className="max-w-md">
+                    <h2 className="text-3xl font-bold">Hospital Access Control</h2>
+                    <p className="mt-2 text-blue-100/80 font-medium">
+                      Authorized to practice at{" "}
+                      <span className="text-blue-300 font-bold">National Hospital Sri Lanka</span>.
+                      View and manage your facility-wide clinical permissions here.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setPage("affiliations")}
+                    className="rounded-2xl bg-blue-500 px-8 py-4 font-bold text-white shadow-xl transition-all hover:bg-blue-400 hover:scale-105 active:scale-95"
+                  >
+                    Manage Affiliations
+                  </button>
+                </div>
+                {/* Abstract medical design elements */}
+                <div className="absolute -right-20 -top-20 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl" />
+                <div className="absolute -bottom-20 left-20 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
+              </section>
+            </div>
+          ) : null}
           {page === "overview" ? (
             <section className="animate-fadeIn">
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
                 <div className="rounded-[2rem] border border-slate-200 bg-[linear-gradient(135deg,_rgba(248,251,255,0.98),_rgba(239,246,255,0.96))] px-7 py-6 shadow-sm dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.2),_transparent_38%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(15,23,42,0.94))]">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div>
-                      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Doctor overview</p>
-                      <h2 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{doctorName}</h2>
+                      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">
+                        Doctor overview
+                      </p>
+                      <h2 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">
+                        {doctorName}
+                      </h2>
                       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                        {dashboard?.doctor.specialization ?? "Specialization pending"} • {formatDate(new Date().toISOString())}
+                        {dashboard?.doctor.specialization ?? "Specialization pending"} •{" "}
+                        {formatDate(new Date().toISOString())}
                       </p>
                       <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-                        Your live queue, encounter workload, and hospital-linked schedule status are all lined up here.
+                        Your live queue, encounter workload, and hospital-linked schedule status are
+                        all lined up here.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-3">
@@ -1548,23 +1669,35 @@ export function DoctorDashboardPage() {
 
                   <div className="mt-6 grid gap-4 md:grid-cols-3">
                     <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Scheduled today</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Scheduled today
+                      </p>
                       <div className="mt-3 flex items-end justify-between gap-4">
-                        <p className="text-3xl font-black text-slate-900 dark:text-white">{dashboard?.stats.scheduled_today ?? 0}</p>
+                        <p className="text-3xl font-black text-slate-900 dark:text-white">
+                          {dashboard?.stats.scheduled_today ?? 0}
+                        </p>
                         <CalendarDays className="text-blue-500 dark:text-blue-300" size={22} />
                       </div>
                     </div>
                     <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Approved hospitals</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Approved hospitals
+                      </p>
                       <div className="mt-3 flex items-end justify-between gap-4">
-                        <p className="text-3xl font-black text-slate-900 dark:text-white">{approvedAffiliations.length}</p>
+                        <p className="text-3xl font-black text-slate-900 dark:text-white">
+                          {approvedAffiliations.length}
+                        </p>
                         <Building2 className="text-emerald-500 dark:text-emerald-300" size={22} />
                       </div>
                     </div>
                     <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Queue ready</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Queue ready
+                      </p>
                       <div className="mt-3 flex items-end justify-between gap-4">
-                        <p className="text-3xl font-black text-slate-900 dark:text-white">{queueItems.length}</p>
+                        <p className="text-3xl font-black text-slate-900 dark:text-white">
+                          {queueItems.length}
+                        </p>
                         <CheckCircle2 className="text-violet-500 dark:text-violet-300" size={22} />
                       </div>
                     </div>
@@ -1574,8 +1707,12 @@ export function DoctorDashboardPage() {
                 <div className="rounded-[2rem] border border-blue-200 bg-[linear-gradient(135deg,_#0f3f75,_#0b5d91)] p-6 text-white shadow-[0_24px_50px_rgba(15,63,117,0.18)] dark:border-slate-800 dark:bg-slate-950 dark:shadow-xl dark:shadow-slate-900/20">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-blue-200/70">Current patient</p>
-                      <h3 className="mt-3 text-2xl font-black">{activePatient?.patient.name ?? "No active session"}</h3>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-blue-200/70">
+                        Current patient
+                      </p>
+                      <h3 className="mt-3 text-2xl font-black">
+                        {activePatient?.patient.name ?? "No active session"}
+                      </h3>
                     </div>
                     <div className="rounded-2xl bg-white/15 p-3 text-blue-100 dark:bg-white/10">
                       <ClipboardPlus size={22} />
@@ -1584,15 +1721,23 @@ export function DoctorDashboardPage() {
                   <div className="mt-5 space-y-3 rounded-[1.4rem] border border-white/15 bg-slate-950/10 p-4 dark:border-white/10 dark:bg-white/5">
                     <div className="flex items-center justify-between gap-3 text-sm">
                       <span className="text-blue-100/80 dark:text-slate-300">DHID</span>
-                      <span className="font-bold text-white">{activePatient?.patient.dhid ?? "Pending"}</span>
+                      <span className="font-bold text-white">
+                        {activePatient?.patient.dhid ?? "Pending"}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between gap-3 text-sm">
                       <span className="text-blue-100/80 dark:text-slate-300">Consent</span>
-                      <span className="font-bold text-white">{activePatient?.appointment.consent.status ?? "Unavailable"}</span>
+                      <span className="font-bold text-white">
+                        {activePatient?.appointment.consent.status ?? "Unavailable"}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between gap-3 text-sm">
                       <span className="text-blue-100/80 dark:text-slate-300">Last encounter</span>
-                      <span className="font-bold text-white">{activePatient?.summary.last_encounter_at ? formatDate(activePatient.summary.last_encounter_at) : "First review"}</span>
+                      <span className="font-bold text-white">
+                        {activePatient?.summary.last_encounter_at
+                          ? formatDate(activePatient.summary.last_encounter_at)
+                          : "First review"}
+                      </span>
                     </div>
                   </div>
                   <button
@@ -1610,8 +1755,12 @@ export function DoctorDashboardPage() {
                 <article className="rounded-[1.6rem] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Patients Seen Today</p>
-                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">{dashboard?.stats.patients_seen_today ?? 0}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Patients Seen Today
+                      </p>
+                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">
+                        {dashboard?.stats.patients_seen_today ?? 0}
+                      </p>
                     </div>
                     <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
                       <UserRound size={22} />
@@ -1622,8 +1771,12 @@ export function DoctorDashboardPage() {
                 <article className="rounded-[1.6rem] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Pending Reports</p>
-                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">{dashboard?.stats.pending_reports ?? 0}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Pending Reports
+                      </p>
+                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">
+                        {dashboard?.stats.pending_reports ?? 0}
+                      </p>
                     </div>
                     <div className="rounded-2xl bg-orange-50 p-3 text-orange-500 dark:bg-orange-900/30 dark:text-orange-300">
                       <AlertTriangle size={22} />
@@ -1634,8 +1787,12 @@ export function DoctorDashboardPage() {
                 <article className="rounded-[1.6rem] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Recorded Encounters</p>
-                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">{dashboard?.stats.recorded_encounters ?? 0}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Recorded Encounters
+                      </p>
+                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">
+                        {dashboard?.stats.recorded_encounters ?? 0}
+                      </p>
                     </div>
                     <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
                       <FileArchive size={22} />
@@ -1646,8 +1803,12 @@ export function DoctorDashboardPage() {
                 <article className="rounded-[1.6rem] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Active Affiliations</p>
-                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">{dashboard?.stats.active_affiliations ?? 0}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Active Affiliations
+                      </p>
+                      <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">
+                        {dashboard?.stats.active_affiliations ?? 0}
+                      </p>
                     </div>
                     <div className="rounded-2xl bg-violet-50 p-3 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
                       <Building2 size={22} />
@@ -1660,40 +1821,63 @@ export function DoctorDashboardPage() {
                 <div className="rounded-[1.8rem] border border-slate-100 bg-white p-7 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="mb-6 flex items-center justify-between">
                     <div>
-                      <h3 className="text-xl font-black text-slate-900 dark:text-white">Upcoming In Queue</h3>
-                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Patients lined up from your affiliated hospitals.</p>
+                      <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                        Upcoming In Queue
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        Patients lined up from your affiliated hospitals.
+                      </p>
                     </div>
-                    <button type="button" onClick={() => setPage("appointments")} className="text-sm font-bold text-primary dark:text-blue-400">View Full Schedule</button>
+                    <button
+                      type="button"
+                      onClick={() => setPage("appointments")}
+                      className="text-sm font-bold text-primary dark:text-blue-400"
+                    >
+                      View Full Schedule
+                    </button>
                   </div>
                   <div className="space-y-4">
-                    {queueItems.length > 0 ? queueItems.map((item) => (
-                      <div key={item.id} className="rounded-[1.45rem] border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
-                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                          <div className="flex items-center gap-4">
-                            <div className="flex h-14 min-w-14 items-center justify-center rounded-2xl bg-blue-100 px-3 text-sm font-black text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                              {formatDateTime(item.start_time).split(", ").slice(-1)[0]}
+                    {queueItems.length > 0 ? (
+                      queueItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-[1.45rem] border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"
+                        >
+                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className="flex h-14 min-w-14 items-center justify-center rounded-2xl bg-blue-100 px-3 text-sm font-black text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                {formatDateTime(item.start_time).split(", ").slice(-1)[0]}
+                              </div>
+                              <div>
+                                <p className="font-bold text-slate-900 dark:text-white">
+                                  {item.patient.name}
+                                </p>
+                                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                  {item.organisation.name}
+                                </p>
+                                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                                  {item.patient.dhid ?? "DHID pending"}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-bold text-slate-900 dark:text-white">{item.patient.name}</p>
-                              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.organisation.name}</p>
-                              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                                {item.patient.dhid ?? "DHID pending"}
-                              </p>
+                            <div className="flex items-center gap-3">
+                              <span
+                                className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${getScheduleBadge(item)}`}
+                              >
+                                {item.status}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void openAppointmentEncounter(item.id)}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                              >
+                                {item.encounter ? "Review" : "Open"}
+                              </button>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${getScheduleBadge(item)}`}>{item.status}</span>
-                            <button
-                              type="button"
-                              onClick={() => void openAppointmentEncounter(item.id)}
-                              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                            >
-                              {item.encounter ? "Review" : "Open"}
-                            </button>
                           </div>
                         </div>
-                      </div>
-                    )) : (
+                      ))
+                    ) : (
                       <EmptyState
                         title="No schedule entries yet"
                         description="Once patients book through your affiliated organisations, upcoming appointments will appear here."
@@ -1705,24 +1889,38 @@ export function DoctorDashboardPage() {
 
                 <div className="space-y-6">
                   <div className="rounded-[1.8rem] border border-slate-200 bg-slate-50 p-7 shadow-sm dark:border-slate-800 dark:bg-slate-800/50">
-                    <h3 className="text-xl font-black text-slate-900 dark:text-white">Clinical pulse</h3>
+                    <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                      Clinical pulse
+                    </h3>
                     <div className="mt-5 space-y-4">
                       <div className="rounded-[1.2rem] bg-white px-5 py-4 dark:bg-slate-900">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Latest saved record</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                          Latest saved record
+                        </p>
                         <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
-                          {activePatient?.summary.last_encounter_at ? formatDate(activePatient.summary.last_encounter_at) : "No recent encounter"}
+                          {activePatient?.summary.last_encounter_at
+                            ? formatDate(activePatient.summary.last_encounter_at)
+                            : "No recent encounter"}
                         </p>
                       </div>
                       <div className="rounded-[1.2rem] bg-white px-5 py-4 dark:bg-slate-900">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Queue status</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                          Queue status
+                        </p>
                         <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
-                          {queueItems.length > 0 ? `${queueItems.length} patient(s) waiting` : "Queue is clear"}
+                          {queueItems.length > 0
+                            ? `${queueItems.length} patient(s) waiting`
+                            : "Queue is clear"}
                         </p>
                       </div>
                       <div className="rounded-[1.2rem] bg-white px-5 py-4 dark:bg-slate-900">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Access state</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                          Access state
+                        </p>
                         <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
-                          {approvedAffiliations.length > 0 ? "Hospital access approved" : "Waiting for hospital approvals"}
+                          {approvedAffiliations.length > 0
+                            ? "Hospital access approved"
+                            : "Waiting for hospital approvals"}
                         </p>
                       </div>
                     </div>
@@ -1736,29 +1934,80 @@ export function DoctorDashboardPage() {
             <section className="grid grid-cols-12 gap-8 animate-fadeIn">
               <div className="col-span-12 space-y-8 lg:col-span-8">
                 <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-primary dark:text-blue-400"><ClipboardPlus size={18} />Encounter Details</h3>
+                  <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-primary dark:text-blue-400">
+                    <ClipboardPlus size={18} />
+                    Encounter Details
+                  </h3>
                   {activePatient ? (
                     <>
                       <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2">
                         <div className="space-y-2">
-                          <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Primary Diagnosis (ICD-10 quick search)</label>
+                          <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                            Primary Diagnosis (ICD-10 quick search)
+                          </label>
                           <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                            <input value={diagnosisInput} onChange={(event) => setDiagnosisInput(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 py-3 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Search or type diagnosis..." />
-                            {filteredCodes.length > 0 ? (
-                              <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-48 overflow-y-auto rounded-xl border border-slate-100 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-800">
-                                {filteredCodes.map((item) => (
-                                  <button key={item.code} type="button" onClick={() => setDiagnosisInput(`${item.code} - ${item.name}`)} className="flex w-full justify-between border-b border-slate-50 px-4 py-3 text-left text-xs hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700">
-                                    <span className="font-bold text-blue-700 dark:text-blue-300">{item.code}</span>
-                                    <span className="text-slate-500 dark:text-slate-400">{item.name}</span>
+                            <Search
+                              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                              size={16}
+                            />
+                            <input
+                              value={diagnosisInput}
+                              onChange={(event) => handleDiagnosisInputChange(event.target.value)}
+                              className="w-full rounded-xl border-0 bg-slate-50 py-3 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white"
+                              placeholder="Search disease catalog..."
+                            />
+                            {diseaseSuggestions.length > 0 ? (
+                              <div className="scrollbar-slim absolute left-0 right-0 top-full z-50 mt-2 max-h-48 overflow-y-auto rounded-xl border border-slate-100 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-800">
+                                {diseaseSuggestions.map((item) => (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => {
+                                      const nextValue = item.code
+                                        ? `${item.code} - ${item.name}`
+                                        : item.name;
+                                      setDiagnosisInput(nextValue);
+                                      setSelectedDiseaseSuggestion(item);
+                                    }}
+                                    className="flex w-full justify-between border-b border-slate-50 px-4 py-3 text-left text-xs hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700"
+                                  >
+                                    <span className="font-bold text-blue-700 dark:text-blue-300">
+                                      {item.code ?? "DB"}
+                                    </span>
+                                    <span className="text-slate-500 dark:text-slate-400">
+                                      {item.name}
+                                    </span>
                                   </button>
                                 ))}
                               </div>
                             ) : null}
                           </div>
+                          {diagnosisInput.trim().length >= 2 ? (
+                            <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-300">
+                              {isDiseaseSearchLoading ? (
+                                <span>Loading disease catalog...</span>
+                              ) : selectedDiseaseSuggestion ? (
+                                <span>
+                                  Using saved disease:{" "}
+                                  <span className="font-bold text-primary dark:text-blue-400">
+                                    {selectedDiseaseSuggestion.code
+                                      ? `${selectedDiseaseSuggestion.code} - ${selectedDiseaseSuggestion.name}`
+                                      : selectedDiseaseSuggestion.name}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span>
+                                  No saved disease match yet. Pick one from the database search
+                                  results before submitting this encounter.
+                                </span>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                         <div className="space-y-2">
-                          <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Encounter Type</label>
+                          <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                            Encounter Type
+                          </label>
                           <DashboardCustomSelect
                             value={encounterType}
                             onChange={setEncounterType}
@@ -1768,17 +2017,32 @@ export function DoctorDashboardPage() {
                         </div>
                       </div>
                       <div className="mb-8 space-y-2">
-                        <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Clinical Notes</label>
-                        <textarea value={clinicalNotes} onChange={(event) => setClinicalNotes(event.target.value)} className="w-full resize-none rounded-xl border-0 bg-slate-50 px-4 py-4 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Document findings and assessment..." rows={6} />
+                        <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          Clinical Notes
+                        </label>
+                        <textarea
+                          value={clinicalNotes}
+                          onChange={(event) => setClinicalNotes(event.target.value)}
+                          className="w-full resize-none rounded-xl border-0 bg-slate-50 px-4 py-4 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white"
+                          placeholder="Document findings and assessment..."
+                          rows={6}
+                        />
                       </div>
                       <div className="space-y-2">
-                        <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Attachments</label>
+                        <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          Attachments
+                        </label>
                         <div className="mt-2 flex flex-wrap gap-4">
                           <div className="flex min-h-20 flex-1 items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
                             <Upload size={18} />
                             <div>
-                              <p className="font-semibold text-slate-700 dark:text-slate-200">Attachments are currently read-only</p>
-                              <p className="mt-1 text-xs">Lab files and images can be reviewed here once backend upload support is enabled for the doctor workspace.</p>
+                              <p className="font-semibold text-slate-700 dark:text-slate-200">
+                                Attachments are currently read-only
+                              </p>
+                              <p className="mt-1 text-xs">
+                                Lab files and images can be reviewed here once backend upload
+                                support is enabled for the doctor workspace.
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -1795,14 +2059,25 @@ export function DoctorDashboardPage() {
 
                 <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="mb-8 flex items-center justify-between">
-                    <h3 className="flex items-center gap-2 text-lg font-bold text-primary dark:text-blue-400"><Pill size={18} />ePrescription</h3>
+                    <h3 className="flex items-center gap-2 text-lg font-bold text-primary dark:text-blue-400">
+                      <Pill size={18} />
+                      ePrescription
+                    </h3>
                     <div className="flex items-center gap-2">
                       <ShieldCheck className="text-green-500" size={16} />
-                      <span className="text-[10px] font-black uppercase tracking-widest text-green-600 dark:text-green-400">DB Ready</span>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-green-600 dark:text-green-400">
+                        DB Ready
+                      </span>
                     </div>
                   </div>
                   <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
-                    <input value={medName} list="doctor-medicine-catalog" onChange={(event) => handleMedicineNameChange(event.target.value)} className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Drug name" />
+                    <input
+                      value={medName}
+                      list="doctor-medicine-catalog"
+                      onChange={(event) => handleMedicineNameChange(event.target.value)}
+                      className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white"
+                      placeholder="Drug name"
+                    />
                     <datalist id="doctor-medicine-catalog">
                       {medicineSuggestions.map((item) => (
                         <option key={item.id} value={item.name}>
@@ -1810,9 +2085,23 @@ export function DoctorDashboardPage() {
                         </option>
                       ))}
                     </datalist>
-                    <input value={medDose} onChange={(event) => setMedDose(event.target.value)} className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Dosage" />
-                    <input value={medDuration} onChange={(event) => setMedDuration(event.target.value)} className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white" placeholder="Duration" />
-                    <button type="button" onClick={addMedicine} className="flex items-center justify-center rounded-xl bg-primary-container py-3 text-white shadow-md shadow-blue-500/20 hover:bg-primary">
+                    <input
+                      value={medDose}
+                      onChange={(event) => setMedDose(event.target.value)}
+                      className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white"
+                      placeholder="Dosage"
+                    />
+                    <input
+                      value={medDuration}
+                      onChange={(event) => setMedDuration(event.target.value)}
+                      className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white"
+                      placeholder="Duration"
+                    />
+                    <button
+                      type="button"
+                      onClick={addMedicine}
+                      className="flex items-center justify-center rounded-xl bg-primary-container py-3 text-white shadow-md shadow-blue-500/20 hover:bg-primary"
+                    >
                       {editingDraftId ? <PencilLine size={18} /> : <Plus size={18} />}
                     </button>
                   </div>
@@ -1822,20 +2111,36 @@ export function DoctorDashboardPage() {
                         <span>Loading central medicine catalog...</span>
                       ) : selectedMedicineSuggestion ? (
                         <>
-                          <span className="font-bold text-primary dark:text-blue-400">{selectedMedicineSuggestion.name}</span>
+                          <span className="font-bold text-primary dark:text-blue-400">
+                            {selectedMedicineSuggestion.name}
+                          </span>
                           <span>{selectedMedicineSuggestion.unit ?? "Unit not set"}</span>
-                          <span>Retail {selectedMedicineSuggestion.retail_price !== null ? `LKR ${selectedMedicineSuggestion.retail_price.toFixed(2)}` : "price missing"}</span>
+                          <span>
+                            Retail{" "}
+                            {selectedMedicineSuggestion.retail_price !== null
+                              ? `LKR ${selectedMedicineSuggestion.retail_price.toFixed(2)}`
+                              : "price missing"}
+                          </span>
                         </>
                       ) : medicineSuggestions.length > 0 ? (
-                        <span>{medicineSuggestions.length} catalog match(es) loaded. Pick one to keep pharmacy pricing clean.</span>
+                        <span>
+                          {medicineSuggestions.length} catalog match(es) loaded. Pick one to keep
+                          pharmacy pricing clean.
+                        </span>
                       ) : (
-                        <span>No catalog match yet. Free-text still works, but billing will love you more if you pick a real medicine.</span>
+                        <span>
+                          No catalog match yet. Free-text is blocked now because dispensing must map
+                          to a saved medicine ID.
+                        </span>
                       )}
                     </div>
                   ) : null}
                   {editingDraftId ? (
                     <div className="mb-4 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200">
-                      <span>Editing an existing prescription item. Save changes or clear the fields to stop editing.</span>
+                      <span>
+                        Editing an existing prescription item. Save changes or clear the fields to
+                        stop editing.
+                      </span>
                       <button
                         type="button"
                         onClick={() => {
@@ -1863,25 +2168,51 @@ export function DoctorDashboardPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {prescriptionDraft.length > 0 ? prescriptionDraft.map((item) => (
-                          <tr key={item.id} className="border-b border-slate-50 dark:border-slate-800/50">
-                            <td className="px-2 py-4 font-bold dark:text-slate-200">{item.medicine_name}</td>
-                            <td className="px-2 py-4 text-slate-500 dark:text-slate-400">{item.dosage || "As directed"}</td>
-                            <td className="px-2 py-4 text-slate-500 dark:text-slate-400">{item.duration || "N/A"}</td>
-                            <td className="px-2 py-4 text-right">
-                              <div className="flex justify-end gap-2">
-                                <button type="button" onClick={() => editMedicine(item)} className="rounded-lg bg-blue-50 p-2 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40">
-                                  <PencilLine size={15} />
-                                </button>
-                                <button type="button" onClick={() => setPrescriptionDraft((current) => current.filter((entry) => entry.id !== item.id))} className="rounded-lg bg-red-50 p-2 text-red-500 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40">
-                                  <Trash2 size={15} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )) : (
+                        {prescriptionDraft.length > 0 ? (
+                          prescriptionDraft.map((item) => (
+                            <tr
+                              key={item.id}
+                              className="border-b border-slate-50 dark:border-slate-800/50"
+                            >
+                              <td className="px-2 py-4 font-bold dark:text-slate-200">
+                                {item.medicine_name}
+                              </td>
+                              <td className="px-2 py-4 text-slate-500 dark:text-slate-400">
+                                {item.dosage || "As directed"}
+                              </td>
+                              <td className="px-2 py-4 text-slate-500 dark:text-slate-400">
+                                {item.duration || "N/A"}
+                              </td>
+                              <td className="px-2 py-4 text-right">
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => editMedicine(item)}
+                                    className="rounded-lg bg-blue-50 p-2 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                                  >
+                                    <PencilLine size={15} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setPrescriptionDraft((current) =>
+                                        current.filter((entry) => entry.id !== item.id),
+                                      )
+                                    }
+                                    className="rounded-lg bg-red-50 p-2 text-red-500 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40"
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
                           <tr>
-                            <td colSpan={4} className="px-2 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                            <td
+                              colSpan={4}
+                              className="px-2 py-6 text-center text-sm text-slate-500 dark:text-slate-400"
+                            >
                               No prescription items added yet.
                             </td>
                           </tr>
@@ -1893,63 +2224,118 @@ export function DoctorDashboardPage() {
               </div>
 
               <div className="col-span-12 space-y-6 lg:col-span-4">
-                <button type="button" onClick={() => setModal("archives")} className="group flex w-full items-center justify-between rounded-2xl bg-secondary p-4 text-white shadow-lg transition-all hover:-translate-y-1 hover:shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => setModal("archives")}
+                  className="group flex w-full items-center justify-between rounded-2xl bg-secondary p-4 text-white shadow-lg transition-all hover:-translate-y-1 hover:shadow-xl"
+                >
                   <div className="flex items-center gap-3">
-                    <div className="rounded-xl bg-white/20 p-2"><FolderOpen size={18} /></div>
+                    <div className="rounded-xl bg-white/20 p-2">
+                      <FolderOpen size={18} />
+                    </div>
                     <div className="text-left">
                       <p className="font-bold">Medical Archives</p>
-                      <p className="text-[10px] uppercase tracking-widest opacity-80">Saved patient records</p>
+                      <p className="text-[10px] uppercase tracking-widest opacity-80">
+                        Saved patient records
+                      </p>
                     </div>
                   </div>
-                  <ChevronRight className="transition-transform group-hover:translate-x-1" size={18} />
+                  <ChevronRight
+                    className="transition-transform group-hover:translate-x-1"
+                    size={18}
+                  />
                 </button>
 
                 <div className="rounded-3xl bg-primary p-6 text-white shadow-xl">
-                  <h4 className="mb-4 text-[10px] font-bold uppercase tracking-widest opacity-60">Patient Profile</h4>
-                  {activePatient ? (
-                    <>
-                      <div className="mb-6 flex items-center gap-4">
-                        <div className="h-16 w-16 rounded-2xl border border-white/30 bg-white/20 p-1">
-                          <img className="h-full w-full rounded-xl object-cover" src={`${DICEBEAR_AVATAR_BASE}?seed=${encodeURIComponent(activePatient.patient.name)}`} alt={activePatient.patient.name} />
-                        </div>
-                        <div>
-                          <h2 className="text-xl font-bold">{activePatient.patient.name}</h2>
-                          <p className="text-xs opacity-70">{activePatient.patient.dhid ?? "DHID pending"} • {activePatient.patient.email ?? "No email saved"}</p>
+                  <h4 className="mb-4 text-[10px] font-bold uppercase tracking-widest opacity-60">
+                    Patient Profile
+                  </h4>
+                    {activePatient ? (
+                      <>
+                        <div className="mb-6 flex items-center gap-4">
+                          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/30 bg-white/90 text-xl font-black tracking-[0.12em] text-blue-900 shadow-sm">
+                            {getInitials(activePatient.patient.name || "Patient")}
+                          </div>
+                          <div>
+                            <h2 className="text-xl font-bold">{activePatient.patient.name}</h2>
+                          <p className="text-xs opacity-70">
+                            {activePatient.patient.dhid ?? "DHID pending"} •{" "}
+                            {activePatient.patient.email ?? "No email saved"}
+                          </p>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-xl border border-white/5 bg-white/10 p-3"><p className="text-[8px] font-bold uppercase opacity-60">Records</p><p className="text-lg font-bold">{activePatient.summary.medical_records}</p></div>
-                        <div className="rounded-xl border border-white/5 bg-white/10 p-3"><p className="text-[8px] font-bold uppercase opacity-60">Prescriptions</p><p className="text-lg font-bold">{activePatient.summary.active_prescriptions}</p></div>
+                        <div className="rounded-xl border border-white/5 bg-white/10 p-3">
+                          <p className="text-[8px] font-bold uppercase opacity-60">Records</p>
+                          <p className="text-lg font-bold">
+                            {activePatient.summary.medical_records}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/5 bg-white/10 p-3">
+                          <p className="text-[8px] font-bold uppercase opacity-60">Prescriptions</p>
+                          <p className="text-lg font-bold">
+                            {activePatient.summary.active_prescriptions}
+                          </p>
+                        </div>
                       </div>
                     </>
                   ) : (
-                    <p className="text-sm text-blue-100/80">No patient is attached to the current doctor session yet.</p>
+                    <p className="text-sm text-blue-100/80">
+                      No patient is attached to the current doctor session yet.
+                    </p>
                   )}
                 </div>
 
                 <div className="rounded-3xl border border-red-100 bg-red-50 p-6 shadow-sm dark:border-red-900/30 dark:bg-red-950/20">
-                  <h4 className="mb-4 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-red-600 dark:text-red-400"><AlertTriangle size={12} />Patient Allergies</h4>
+                  <h4 className="mb-4 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-red-600 dark:text-red-400">
+                    <AlertTriangle size={12} />
+                    Patient Allergies
+                  </h4>
                   <div className="flex flex-wrap gap-2">
-                    {activePatient?.allergies.length ? activePatient.allergies.map((item) => (
-                      <span key={item} className="rounded-lg bg-red-600 px-3 py-1 text-[10px] font-bold uppercase text-white">{item}</span>
-                    )) : (
-                      <span className="rounded-lg bg-slate-200 px-3 py-1 text-[10px] font-bold uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-400">No allergy data saved</span>
+                    {activePatient?.allergies.length ? (
+                      activePatient.allergies.map((item) => (
+                        <span
+                          key={item}
+                          className="rounded-lg bg-red-600 px-3 py-1 text-[10px] font-bold uppercase text-white"
+                        >
+                          {item}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="rounded-lg bg-slate-200 px-3 py-1 text-[10px] font-bold uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                        No allergy data saved
+                      </span>
                     )}
                   </div>
                 </div>
 
                 <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <h4 className="mb-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Clinical History</h4>
+                  <h4 className="mb-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    Clinical History
+                  </h4>
                   <div className="relative space-y-6 before:absolute before:bottom-2 before:left-[7px] before:top-2 before:w-px before:bg-slate-100 dark:before:bg-slate-800">
-                    {activePatient?.history.length ? activePatient.history.slice(0, 5).map((item, index) => (
-                      <div key={item.id} className="relative pl-6">
-                        <div className={`absolute left-0 top-1.5 z-10 h-4 w-4 rounded-full border-4 border-white dark:border-slate-900 ${index === 0 ? "bg-primary" : "bg-slate-300 dark:bg-slate-700"}`} />
-                        <p className="text-[10px] font-bold text-slate-400">{formatDate(item.created_at)}</p>
-                        <p className="text-sm font-bold dark:text-slate-200">{item.notes?.split("\n")[0] ?? "Encounter record"}</p>
-                        <p className="text-[10px] text-slate-500">{item.doctor_name}{item.organisation_name ? ` • ${item.organisation_name}` : ""}</p>
-                      </div>
-                    )) : (
-                      <p className="text-sm text-slate-500 dark:text-slate-400">No clinical history saved for the active patient yet.</p>
+                    {activePatient?.history.length ? (
+                      activePatient.history.slice(0, 5).map((item, index) => (
+                        <div key={item.id} className="relative pl-6">
+                          <div
+                            className={`absolute left-0 top-1.5 z-10 h-4 w-4 rounded-full border-4 border-white dark:border-slate-900 ${index === 0 ? "bg-primary" : "bg-slate-300 dark:bg-slate-700"}`}
+                          />
+                          <p className="text-[10px] font-bold text-slate-400">
+                            {formatDate(item.created_at)}
+                          </p>
+                          <p className="text-sm font-bold dark:text-slate-200">
+                            {item.notes?.split("\n")[0] ?? "Encounter record"}
+                          </p>
+                          <p className="text-[10px] text-slate-500">
+                            {item.doctor_name}
+                            {item.organisation_name ? ` • ${item.organisation_name}` : ""}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        No clinical history saved for the active patient yet.
+                      </p>
                     )}
                   </div>
                 </div>
@@ -1964,12 +2350,23 @@ export function DoctorDashboardPage() {
                     >
                       Cancel Review
                     </button>
-                    <button type="button" onClick={() => setModal("submit")} disabled={!activePatient || submittingEncounter} className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary py-4 font-bold text-white shadow-lg shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-60">
-                      {submittingEncounter ? <LoaderCircle className="animate-spin" size={18} /> : <Lock size={18} />}
+                    <button
+                      type="button"
+                      onClick={() => setModal("submit")}
+                      disabled={!activePatient || submittingEncounter}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary py-4 font-bold text-white shadow-lg shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {submittingEncounter ? (
+                        <LoaderCircle className="animate-spin" size={18} />
+                      ) : (
+                        <Lock size={18} />
+                      )}
                       Finish & Submit
                     </button>
                   </div>
-                  <p className="mt-3 text-center text-[9px] italic text-slate-400">On submit, the  encounter is saved and the appointment is marked completed.</p>
+                  <p className="mt-3 text-center text-[9px] italic text-slate-400">
+                    On submit, the encounter is saved and the appointment is marked completed.
+                  </p>
                 </div>
               </div>
             </section>
@@ -1980,8 +2377,12 @@ export function DoctorDashboardPage() {
               <div className="mb-8 rounded-[2rem] border border-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.14),_transparent_34%),linear-gradient(135deg,_rgba(255,255,255,0.98),_rgba(241,245,249,0.96))] px-7 py-6 shadow-sm dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_34%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(15,23,42,0.94))]">
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Schedule</p>
-                    <h3 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">Today's consultation timeline</h3>
+                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">
+                      Schedule
+                    </p>
+                    <h3 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">
+                      Today's consultation timeline
+                    </h3>
                     <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                       Review booked patients, consent status, and jump straight into encounter work.
                     </p>
@@ -1991,8 +2392,12 @@ export function DoctorDashboardPage() {
                       <CalendarDays size={22} />
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Live date</p>
-                      <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">{formatDate(new Date().toISOString())}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Live date
+                      </p>
+                      <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">
+                        {formatDate(new Date().toISOString())}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -2000,24 +2405,49 @@ export function DoctorDashboardPage() {
               <div className="relative rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div className="absolute bottom-12 left-16 top-12 w-px bg-slate-200 dark:bg-slate-700" />
                 <div className="space-y-8">
-                  {dashboard?.schedule.length ? dashboard.schedule.map((item) => (
-                    <div key={item.id} className="relative flex items-start gap-6">
-                      <div className="w-16 pt-1 text-right"><p className="text-sm font-bold dark:text-slate-300">{formatDateTime(item.start_time).split(", ").slice(-1)[0]}</p><p className="text-[10px] font-bold tracking-widest text-slate-500">{item.start_time ? new Date(item.start_time).toLocaleTimeString([], { hour12: true }).split(" ")[1] : "--"}</p></div>
-                      <div className={`absolute left-[4.75rem] top-2 z-10 h-3 w-3 -translate-x-1/2 rounded-full ring-4 ring-white dark:ring-slate-900 ${getTimelineTone(item)}`} />
-                      <div className="flex-1 rounded-2xl border border-slate-100 bg-slate-50 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/50">
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <p className="text-lg font-bold dark:text-slate-200">{item.patient.name}</p>
-                            <p className="mt-1 text-xs text-slate-500">{item.organisation.name} • {item.patient.dhid ?? "DHID pending"}</p>
-                            <p className="mt-1 text-xs font-medium text-blue-700 dark:text-blue-300">Consent: {formatStatusLabel(item.consent.status)}</p>
+                  {dashboard?.schedule.length ? (
+                    dashboard.schedule.map((item) => (
+                      <div key={item.id} className="relative flex items-start gap-6">
+                        <div className="w-16 pt-1 text-right">
+                          <p className="text-sm font-bold dark:text-slate-300">
+                            {formatDateTime(item.start_time).split(", ").slice(-1)[0]}
+                          </p>
+                          <p className="text-[10px] font-bold tracking-widest text-slate-500">
+                            {item.start_time
+                              ? new Date(item.start_time)
+                                  .toLocaleTimeString([], { hour12: true })
+                                  .split(" ")[1]
+                              : "--"}
+                          </p>
+                        </div>
+                        <div
+                          className={`absolute left-[4.75rem] top-2 z-10 h-3 w-3 -translate-x-1/2 rounded-full ring-4 ring-white dark:ring-slate-900 ${getTimelineTone(item)}`}
+                        />
+                        <div className="flex-1 rounded-2xl border border-slate-100 bg-slate-50 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/50">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="text-lg font-bold dark:text-slate-200">
+                                {item.patient.name}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {item.organisation.name} • {item.patient.dhid ?? "DHID pending"}
+                              </p>
+                              <p className="mt-1 text-xs font-medium text-blue-700 dark:text-blue-300">
+                                Consent: {formatStatusLabel(item.consent.status)}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void openAppointmentEncounter(item.id)}
+                              className="rounded-lg bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white"
+                            >
+                              {item.encounter ? "Review" : "Open"}
+                            </button>
                           </div>
-                          <button type="button" onClick={() => void openAppointmentEncounter(item.id)} className="rounded-lg bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white">
-                            {item.encounter ? "Review" : "Open"}
-                          </button>
                         </div>
                       </div>
-                    </div>
-                  )) : (
+                    ))
+                  ) : (
                     <EmptyState
                       title="No appointments yet"
                       description="Upcoming visits will appear here once patients book against your live availability."
@@ -2034,17 +2464,26 @@ export function DoctorDashboardPage() {
               <div className="mb-8 rounded-[2rem] border border-slate-100 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),linear-gradient(135deg,_rgba(255,255,255,0.98),_rgba(241,245,249,0.96))] px-7 py-6 shadow-sm dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_34%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(15,23,42,0.94))]">
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Hospital access</p>
-                    <h3 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">Organisation access control</h3>
+                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">
+                      Hospital access
+                    </p>
+                    <h3 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">
+                      Organisation access control
+                    </h3>
                     <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                      Track approvals, send join requests, and keep only ready hospitals in your scheduling flow.
+                      Track approvals, send join requests, and keep only ready hospitals in your
+                      scheduling flow.
                     </p>
                   </div>
                   <div className="min-w-[260px] rounded-[1.6rem] border border-white/70 bg-white/80 px-5 py-4 shadow-sm dark:border-white/10 dark:bg-white/5">
                     <div className="flex items-center justify-between gap-4">
                       <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">Approved Access</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-500 dark:text-slate-400">Hospitals ready for scheduling</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">
+                          Approved Access
+                        </p>
+                        <p className="mt-2 text-sm font-semibold text-slate-500 dark:text-slate-400">
+                          Hospitals ready for scheduling
+                        </p>
                       </div>
                       <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-2xl font-black text-emerald-600 shadow-sm dark:bg-emerald-900/30 dark:text-emerald-300">
                         {approvedAffiliations.length}
@@ -2058,8 +2497,12 @@ export function DoctorDashboardPage() {
                 <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="mb-6 flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Join Requests</p>
-                      <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">Approved hospitals directory</h3>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                        Join Requests
+                      </p>
+                      <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">
+                        Approved hospitals directory
+                      </h3>
                     </div>
                     <div className="rounded-2xl bg-blue-50 px-4 py-3 text-xs text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
                       Pick a hospital, send the join request, then wait for admin approval.
@@ -2067,66 +2510,88 @@ export function DoctorDashboardPage() {
                   </div>
 
                   <div className="grid gap-4">
-                    {affiliationHospitals.length ? affiliationHospitals.map((hospital) => {
-                      const normalizedStatus = (hospital.current_status ?? "").toLowerCase();
-                      const hasApproved = normalizedStatus.includes("approved") || normalizedStatus.includes("active");
-                      const hasPending = normalizedStatus.includes("pending");
+                    {affiliationHospitals.length ? (
+                      affiliationHospitals.map((hospital) => {
+                        const normalizedStatus = (hospital.current_status ?? "").toLowerCase();
+                        const hasApproved =
+                          normalizedStatus.includes("approved") ||
+                          normalizedStatus.includes("active");
+                        const hasPending = normalizedStatus.includes("pending");
 
-                      return (
-                        <div key={hospital.id} className="rounded-3xl border border-slate-100 bg-slate-50 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-800/40">
-                          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-3">
-                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                                  <Building2 size={20} />
+                        return (
+                          <div
+                            key={hospital.id}
+                            className="rounded-3xl border border-slate-100 bg-slate-50 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-800/40"
+                          >
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                    <Building2 size={20} />
+                                  </div>
+                                  <div>
+                                    <p className="text-lg font-extrabold dark:text-slate-100">
+                                      {hospital.name}
+                                    </p>
+                                    <p className="text-xs uppercase tracking-widest text-slate-500">
+                                      {hospital.type ?? "Hospital"} •{" "}
+                                      {formatStatusLabel(hospital.status)}
+                                    </p>
+                                  </div>
                                 </div>
-                                <div>
-                                  <p className="text-lg font-extrabold dark:text-slate-100">{hospital.name}</p>
-                                  <p className="text-xs uppercase tracking-widest text-slate-500">{hospital.type ?? "Hospital"} • {formatStatusLabel(hospital.status)}</p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span
+                                    className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${hospital.current_status ? affiliationTone(hospital.current_status) : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"}`}
+                                  >
+                                    {hospital.current_status ?? "No Request Yet"}
+                                  </span>
+                                  {hasApproved ? (
+                                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                      Ready For Scheduling
+                                    </span>
+                                  ) : null}
                                 </div>
                               </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${hospital.current_status ? affiliationTone(hospital.current_status) : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"}`}>
-                                  {hospital.current_status ?? "No Request Yet"}
-                                </span>
-                                {hasApproved ? (
-                                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                                    Ready For Scheduling
-                                  </span>
+
+                              <div className="flex flex-wrap gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => void submitAffiliationRequest(hospital.id)}
+                                  disabled={
+                                    !hospital.can_request || requestingHospitalId === hospital.id
+                                  }
+                                  className="rounded-2xl bg-primary px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {requestingHospitalId === hospital.id
+                                    ? "Sending..."
+                                    : hasApproved
+                                      ? "Already Joined"
+                                      : hasPending
+                                        ? "Pending Review"
+                                        : "Request Join"}
+                                </button>
+                                {hospital.current_affiliation_id ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void revokeAffiliation(hospital.current_affiliation_id!)
+                                    }
+                                    disabled={
+                                      revokingAffiliationId === hospital.current_affiliation_id
+                                    }
+                                    className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-xs font-bold uppercase tracking-widest text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300"
+                                  >
+                                    {revokingAffiliationId === hospital.current_affiliation_id
+                                      ? "Updating..."
+                                      : "Withdraw"}
+                                  </button>
                                 ) : null}
                               </div>
                             </div>
-
-                            <div className="flex flex-wrap gap-3">
-                              <button
-                                type="button"
-                                onClick={() => void submitAffiliationRequest(hospital.id)}
-                                disabled={!hospital.can_request || requestingHospitalId === hospital.id}
-                                className="rounded-2xl bg-primary px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-md disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {requestingHospitalId === hospital.id
-                                  ? "Sending..."
-                                  : hasApproved
-                                    ? "Already Joined"
-                                    : hasPending
-                                      ? "Pending Review"
-                                      : "Request Join"}
-                              </button>
-                              {hospital.current_affiliation_id ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void revokeAffiliation(hospital.current_affiliation_id!)}
-                                  disabled={revokingAffiliationId === hospital.current_affiliation_id}
-                                  className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-xs font-bold uppercase tracking-widest text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300"
-                                >
-                                  {revokingAffiliationId === hospital.current_affiliation_id ? "Updating..." : "Withdraw"}
-                                </button>
-                              ) : null}
-                            </div>
                           </div>
-                        </div>
-                      );
-                    }) : (
+                        );
+                      })
+                    ) : (
                       <EmptyState
                         title="No hospitals available"
                         description="Approved hospital organisations are not visible yet, so there is nothing to request from this doctor workspace."
@@ -2138,22 +2603,39 @@ export function DoctorDashboardPage() {
 
                 <div className="space-y-6">
                   <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Your Status</p>
-                    <h3 className="mt-2 text-2xl font-extrabold dark:text-white">Current hospital links</h3>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                      Your Status
+                    </p>
+                    <h3 className="mt-2 text-2xl font-extrabold dark:text-white">
+                      Current hospital links
+                    </h3>
                     <div className="mt-6 space-y-3">
-                      {dashboard?.affiliations.length ? dashboard.affiliations.map((item) => (
-                        <div key={item.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
-                          <div className="flex items-start justify-between gap-4">
-                            <div>
-                              <p className="font-bold dark:text-slate-200">{item.organisation.name}</p>
-                              <p className="mt-1 text-xs text-slate-500">{item.created_at ? `Requested ${formatDate(item.created_at)}` : "Join request on file"}</p>
+                      {dashboard?.affiliations.length ? (
+                        dashboard.affiliations.map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <p className="font-bold dark:text-slate-200">
+                                  {item.organisation.name}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {item.created_at
+                                    ? `Requested ${formatDate(item.created_at)}`
+                                    : "Join request on file"}
+                                </p>
+                              </div>
+                              <span
+                                className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${affiliationTone(item.status)}`}
+                              >
+                                {formatStatusLabel(item.status)}
+                              </span>
                             </div>
-                            <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${affiliationTone(item.status)}`}>
-                              {formatStatusLabel(item.status)}
-                            </span>
                           </div>
-                        </div>
-                      )) : (
+                        ))
+                      ) : (
                         <EmptyState
                           title="No hospital links yet"
                           description="Send a join request from the directory and it will land here with its live approval status."
@@ -2164,12 +2646,15 @@ export function DoctorDashboardPage() {
                   </div>
 
                   <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <h3 className="text-lg font-bold text-primary dark:text-blue-400">Scheduling rule</h3>
+                    <h3 className="text-lg font-bold text-primary dark:text-blue-400">
+                      Scheduling rule
+                    </h3>
                     <p className="mt-3 text-sm leading-7 text-slate-500 dark:text-slate-400">
                       You need at least one approved hospital before publishing live availability.
                     </p>
                     <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
-                      Affiliate yourself with at least one hospital before publishing availability slots.
+                      Affiliate yourself with at least one hospital before publishing availability
+                      slots.
                     </div>
                   </div>
                 </div>
@@ -2184,7 +2669,11 @@ export function DoctorDashboardPage() {
                   <div className="flex items-center gap-4">
                     <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-3xl border border-white/60 bg-white/70 text-2xl font-black text-blue-900 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-blue-100">
                       {profilePhoto ? (
-                        <img src={profilePhoto} alt={`${profilePreviewName} avatar`} className="h-full w-full object-cover" />
+                        <img
+                          src={profilePhoto}
+                          alt={`${profilePreviewName} avatar`}
+                          className="h-full w-full object-cover"
+                        />
                       ) : (
                         profilePreviewInitials
                       )}
@@ -2193,36 +2682,48 @@ export function DoctorDashboardPage() {
                       <p className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-1 text-[10px] font-black uppercase tracking-[0.3em] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
                         Doctor Profile
                       </p>
-                      <h2 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{profilePreviewName}</h2>
+                      <h2 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">
+                        {profilePreviewName}
+                      </h2>
                       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                         {profileSpecialization.trim() || "Specialization pending"}
                       </p>
                     </div>
                   </div>
-                  <button type="button" onClick={logoutNow} className="rounded-2xl border border-white/60 bg-white/60 px-6 py-3 text-sm font-bold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  <button
+                    type="button"
+                    onClick={logoutNow}
+                    className="rounded-2xl border border-white/60 bg-white/60 px-6 py-3 text-sm font-bold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  >
                     Sign Out
                   </button>
                 </div>
               </div>
 
               <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-              <div className="rounded-3xl border border-sky-100 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm dark:border-sky-900/50 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
-                <div className="mb-6 flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-sky-600 dark:text-sky-400">Profile</p>
-                    <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">Identity settings</h3>
-                    <p className="mt-2 text-sm text-slate-500 dark:text-sky-200/60">
-                      Update the doctor-facing profile details patients and hospitals see.
-                    </p>
+                <div className="rounded-3xl border border-sky-100 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm dark:border-sky-900/50 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
+                  <div className="mb-6 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-sky-600 dark:text-sky-400">
+                        Profile
+                      </p>
+                      <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">
+                        Identity settings
+                      </h3>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-sky-200/60">
+                        Update the doctor-facing profile details patients and hospitals see.
+                      </p>
+                    </div>
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-sky-200 bg-white text-sky-600 shadow-sm dark:border-sky-700 dark:bg-sky-900 dark:text-sky-300">
+                      <UserRound size={22} />
+                    </div>
                   </div>
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-sky-200 bg-white text-sky-600 shadow-sm dark:border-sky-700 dark:bg-sky-900 dark:text-sky-300">
-                    <UserRound size={22} />
-                  </div>
-                </div>
 
                   <div className="grid gap-5 md:grid-cols-2">
                     <label className="block">
-                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Full Name & Title</span>
+                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                        Preferred Name
+                      </span>
                       <input
                         type="text"
                         value={profileName}
@@ -2231,6 +2732,13 @@ export function DoctorDashboardPage() {
                         placeholder="Dr. Jane Silva"
                       />
                     </label>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Legal name on NIC
+                      </p>
+                      <p className="mt-2 font-semibold">{legalName}</p>
+                    </div>
 
                     <CustomSelectField
                       id="doctor-specialization"
@@ -2247,7 +2755,9 @@ export function DoctorDashboardPage() {
 
                   <div className="mt-5 grid gap-5 md:grid-cols-[1fr_auto]">
                     <label className="block">
-                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">SLMC Registration Number</span>
+                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                        SLMC Registration Number
+                      </span>
                       <input
                         type="text"
                         value={profileSlmcNumber}
@@ -2258,7 +2768,9 @@ export function DoctorDashboardPage() {
                     </label>
 
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300 md:min-w-[14rem]">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Profile status</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Profile status
+                      </p>
                       <p className="mt-2 font-semibold">
                         {isProfileDirty ? "Unsaved changes" : "Everything saved"}
                       </p>
@@ -2270,13 +2782,19 @@ export function DoctorDashboardPage() {
                       <div className="flex items-center gap-4">
                         <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-lg font-black tracking-[0.08em] text-slate-700 dark:bg-slate-700 dark:text-slate-100">
                           {profilePhoto ? (
-                            <img src={profilePhoto} alt={`${profilePreviewName} avatar`} className="h-full w-full object-cover" />
+                            <img
+                              src={profilePhoto}
+                              alt={`${profilePreviewName} avatar`}
+                              className="h-full w-full object-cover"
+                            />
                           ) : (
                             profilePreviewInitials
                           )}
                         </div>
                         <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Profile photo</p>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                            Profile photo
+                          </p>
                           <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                             Upload a photo or keep the initials badge.
                           </p>
@@ -2312,7 +2830,9 @@ export function DoctorDashboardPage() {
                   <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/70">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Workspace theme</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                          Workspace theme
+                        </p>
                         <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                           Select preferred theme for your workspace.
                         </p>
@@ -2367,54 +2887,82 @@ export function DoctorDashboardPage() {
                 </div>
 
                 <div className="space-y-6">
-                {/* Consistent solid Sky Blue theme */}
-                <div className="rounded-3xl border border-sky-100 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm dark:border-sky-900/50 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
-                  <div className="mb-6 flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-sky-500/70 dark:text-sky-400/50">Read Only</p>
-                      <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">Doctor details</h3>
-                      <p className="mt-2 text-sm text-slate-500 dark:text-sky-200/60">
-                        Verified clinical identity from the National Health Registry.
-                      </p>
+                  {/* Consistent solid Sky Blue theme */}
+                  <div className="rounded-3xl border border-sky-100 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm dark:border-sky-900/50 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
+                    <div className="mb-6 flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-sky-500/70 dark:text-sky-400/50">
+                          Read Only
+                        </p>
+                        <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">
+                          Doctor details
+                        </h3>
+                        <p className="mt-2 text-sm text-slate-500 dark:text-sky-200/60">
+                          Verified clinical identity from the National Health Registry.
+                        </p>
+                      </div>
+                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-sky-200 bg-white text-sky-600 shadow-sm dark:border-sky-700 dark:bg-sky-900 dark:text-sky-300">
+                        <ShieldCheck size={22} />
+                      </div>
                     </div>
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-sky-200 bg-white text-sky-600 shadow-sm dark:border-sky-700 dark:bg-sky-900 dark:text-sky-300">
-                      <ShieldCheck size={22} />
-                    </div>
-                  </div>
 
                     <div className="overflow-hidden rounded-3xl border border-slate-100 dark:border-slate-800">
                       <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Primary Email</p>
-                        <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">{dashboard?.user.email ?? "No email saved"}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                          Primary Email
+                        </p>
+                        <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">
+                          {dashboard?.user.email ?? "No email saved"}
+                        </p>
                       </div>
                       <div className="border-b border-slate-100 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">SLMC Reg Number</p>
-                        <p className="mt-2 text-xl font-black text-blue-900 dark:text-blue-300">{profileSlmcNumber || "Unavailable"}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                          SLMC Reg Number
+                        </p>
+                        <p className="mt-2 text-xl font-black text-blue-900 dark:text-blue-300">
+                          {profileSlmcNumber || "Unavailable"}
+                        </p>
                       </div>
                       <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Specialization</p>
-                        <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">{profileSpecialization || "Pending"}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                          Specialization
+                        </p>
+                        <p className="mt-2 text-xl font-black text-slate-900 dark:text-white">
+                          {profileSpecialization || "Pending"}
+                        </p>
                       </div>
                       <div className="bg-white px-5 py-4 dark:bg-slate-900">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Approved Hospitals</p>
-                        <p className="mt-2 text-lg font-black text-slate-900 dark:text-white">{approvedAffiliations.length}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                          Approved Hospitals
+                        </p>
+                        <p className="mt-2 text-lg font-black text-slate-900 dark:text-white">
+                          {approvedAffiliations.length}
+                        </p>
                       </div>
                     </div>
                   </div>
 
                   <div className="rounded-3xl border border-slate-100 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm dark:border-slate-800 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Account summary</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                      Account summary
+                    </p>
                     <div className="mt-6 space-y-4">
                       <div className="rounded-2xl border border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Current theme</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                          Current theme
+                        </p>
                         <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
                           {theme === "dark" ? "Dark mode" : "Light mode"}
                         </p>
                       </div>
                       <div className="rounded-2xl border border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Doctor record created</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                          Doctor record created
+                        </p>
                         <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
-                          {dashboard?.doctor.created_at ? formatDate(dashboard.doctor.created_at) : "Unavailable"}
+                          {dashboard?.doctor.created_at
+                            ? formatDate(dashboard.doctor.created_at)
+                            : "Unavailable"}
                         </p>
                       </div>
                     </div>
@@ -2427,45 +2975,145 @@ export function DoctorDashboardPage() {
 
         <footer className="border-t border-slate-100 bg-slate-50 px-8 py-12 dark:border-slate-800 dark:bg-slate-900/50">
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
-            <div><p className="text-sm font-bold dark:text-slate-300">National Health Identity System</p><p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">© 2026 Digital Health Ministry SL • Doctor Portal v3.1</p></div>
-            <div className="flex gap-8">{["Privacy", "Terms", "Security"].map((item) => <a key={item} href="#" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:underline">{item}</a>)}</div>
+            <div>
+              <p className="text-sm font-bold dark:text-slate-300">
+                National Health Identity System
+              </p>
+              <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">
+                © 2026 Digital Health Ministry SL • Doctor Portal v3.1
+              </p>
+            </div>
+            <div className="flex gap-8">
+              {["Privacy", "Terms", "Security"].map((item) => (
+                <a
+                  key={item}
+                  href="#"
+                  className="text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:underline"
+                >
+                  {item}
+                </a>
+              ))}
+            </div>
           </div>
         </footer>
       </main>
 
       {modal ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-md" onClick={(event) => event.target === event.currentTarget && setModal(null)}>
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-md"
+          onClick={(event) => event.target === event.currentTarget && setModal(null)}
+        >
           {modal === "submit" ? (
             <div className="w-full max-w-sm rounded-3xl border border-slate-200/70 bg-white/96 p-8 text-center shadow-[0_32px_80px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900/96 dark:shadow-[0_36px_90px_rgba(2,6,23,0.7)]">
-              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"><Lock size={28} /></div>
+              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                <Lock size={28} />
+              </div>
               <h3 className="mb-2 text-xl font-bold dark:text-white">Finalize & Lock?</h3>
-              <p className="mb-8 text-sm leading-relaxed text-slate-500 dark:text-slate-400">This saves the encounter and pushes the prescription into the actual patient record.</p>
-              <div className="flex gap-3"><button type="button" onClick={() => setModal(null)} className="flex-1 rounded-xl bg-slate-100 py-3 font-bold dark:bg-slate-800">Cancel</button><button type="button" onClick={() => void submitEncounter()} disabled={submittingEncounter || !activePatient} className="flex-1 rounded-xl bg-primary py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">{submittingEncounter ? "Saving..." : "Submit"}</button></div>
+              <p className="mb-8 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                This saves the encounter and pushes the prescription into the actual patient record.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setModal(null)}
+                  className="flex-1 rounded-xl bg-slate-100 py-3 font-bold dark:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void submitEncounter()}
+                  disabled={submittingEncounter || !activePatient}
+                  className="flex-1 rounded-xl bg-primary py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {submittingEncounter ? "Saving..." : "Submit"}
+                </button>
+              </div>
             </div>
           ) : null}
 
           {modal === "urgent" ? (
             <div className="w-full max-w-md rounded-3xl border border-slate-200/70 bg-white/96 p-8 shadow-[0_32px_80px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900/96 dark:shadow-[0_36px_90px_rgba(2,6,23,0.7)]">
-              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"><ShieldAlert size={28} /></div>
-              <h3 className="mb-2 text-xl font-bold dark:text-white">Activate Emergency Protocol?</h3>
-              <p className="mb-6 text-sm leading-relaxed text-slate-500 dark:text-slate-400">Emergency escalation controls are not available in this portal. Use your hospital emergency workflow for live urgent escalation.</p>
-              <div className="flex gap-3"><button type="button" onClick={() => setModal(null)} className="flex-1 rounded-xl bg-slate-100 py-3 font-bold dark:bg-slate-800">Close</button><button type="button" onClick={() => setModal(null)} className="flex-1 rounded-xl bg-red-600 py-3 font-bold text-white">Understood</button></div>
+              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
+                <ShieldAlert size={28} />
+              </div>
+              <h3 className="mb-2 text-xl font-bold dark:text-white">
+                Activate Emergency Protocol?
+              </h3>
+              <p className="mb-6 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                Emergency escalation controls are not available in this portal. Use your hospital
+                emergency workflow for live urgent escalation.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setModal(null)}
+                  className="flex-1 rounded-xl bg-slate-100 py-3 font-bold dark:bg-slate-800"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModal(null)}
+                  className="flex-1 rounded-xl bg-red-600 py-3 font-bold text-white"
+                >
+                  Understood
+                </button>
+              </div>
             </div>
           ) : null}
 
           {modal === "archives" ? (
             <div className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-3xl border border-slate-200/70 bg-white/96 p-8 shadow-[0_32px_80px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900/96 dark:shadow-[0_36px_90px_rgba(2,6,23,0.7)]">
               <div className="mb-6 flex items-center justify-between">
-                <div><h3 className="text-2xl font-bold dark:text-white">{activePatient?.patient.name ?? "Patient"} archives</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Saved encounters and prescriptions only.</p></div>
-                <button type="button" onClick={() => setModal(null)} className="rounded-full bg-slate-100 p-2 dark:bg-slate-800"><X size={18} /></button>
+                <div>
+                  <h3 className="text-2xl font-bold dark:text-white">
+                    {activePatient?.patient.name ?? "Patient"} archives
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Saved encounters and prescriptions only.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setModal(null)}
+                  className="rounded-full bg-slate-100 p-2 dark:bg-slate-800"
+                >
+                  <X size={18} />
+                </button>
               </div>
               <div className="space-y-4 overflow-y-auto pr-2">
-                {activePatient?.archives.length ? activePatient.archives.map((item) => (
-                  <div key={item.id} className="group flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
-                    <div className="flex items-center gap-4"><div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">{item.type === "prescription" ? <Pill size={18} /> : <FileArchive size={18} />}</div><div><p className="font-bold dark:text-slate-200">{item.title}</p><p className="text-xs font-medium text-slate-500">{item.meta}</p></div></div>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{item.type}</span>
-                  </div>
-                )) : <EmptyState title="No saved archives yet" description="Encounter and prescription archive entries will appear here after records have been saved for the active patient." className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40" />}
+                {activePatient?.archives.length ? (
+                  activePatient.archives.map((item) => (
+                    <div
+                      key={item.id}
+                      className="group flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                          {item.type === "prescription" ? (
+                            <Pill size={18} />
+                          ) : (
+                            <FileArchive size={18} />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-bold dark:text-slate-200">{item.title}</p>
+                          <p className="text-xs font-medium text-slate-500">{item.meta}</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                        {item.type}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyState
+                    title="No saved archives yet"
+                    description="Encounter and prescription archive entries will appear here after records have been saved for the active patient."
+                    className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
+                  />
+                )}
               </div>
             </div>
           ) : null}
@@ -2474,43 +3122,88 @@ export function DoctorDashboardPage() {
             <div className="flex max-h-[84vh] w-full max-w-5xl flex-col rounded-3xl border border-slate-200 bg-white p-8 shadow-2xl dark:border-slate-800 dark:bg-slate-950 dark:shadow-[0_28px_70px_rgba(2,6,23,0.55)]">
               <div className="mb-6 flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">Availability Management</p>
-                  <h3 className="mt-2 text-2xl font-extrabold dark:text-white">Create clinic slots</h3>
-                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Pick a hospital, choose the clinic date, then publish a time period.</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                    Availability Management
+                  </p>
+                  <h3 className="mt-2 text-2xl font-extrabold dark:text-white">
+                    Create clinic slots
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    Pick a hospital, choose the clinic date, then publish a time period.
+                  </p>
                 </div>
-                <button type="button" onClick={() => setModal(null)} className="rounded-full bg-slate-100 p-2 dark:bg-slate-900">
+                <button
+                  type="button"
+                  onClick={() => setModal(null)}
+                  className="rounded-full bg-slate-100 p-2 dark:bg-slate-900"
+                >
                   <X size={18} />
                 </button>
               </div>
 
               <div className="space-y-5 overflow-y-auto pr-2">
                 {approvedHospitalOptions.length === 0 ? (
-                  <AlertBanner tone="info" message="No approved hospital access yet. Open the Hospital Access tab and send a join request before you publish availability." />
+                  <AlertBanner
+                    tone="info"
+                    message="No approved hospital access yet. Open the Hospital Access tab and send a join request before you publish availability."
+                  />
                 ) : null}
                 <div className="grid gap-4 md:grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_auto]">
                   <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Hospital</label>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                      Hospital
+                    </label>
                     <DashboardCustomSelect
-                      value={selectedAvailabilityHospitalId ? String(selectedAvailabilityHospitalId) : ""}
-                      onChange={(value) => setSelectedAvailabilityHospitalId(value ? Number(value) : "")}
+                      value={
+                        selectedAvailabilityHospitalId ? String(selectedAvailabilityHospitalId) : ""
+                      }
+                      onChange={(value) =>
+                        setSelectedAvailabilityHospitalId(value ? Number(value) : "")
+                      }
                       options={availabilityHospitalOptions}
                       placeholder="Select hospital"
                       disabled={approvedHospitalOptions.length === 0}
                     />
                   </div>
                   <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Date</label>
-                    <input type="date" value={availabilityDate} onChange={(event) => setAvailabilityDate(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                      Date
+                    </label>
+                    <input
+                      type="date"
+                      value={availabilityDate}
+                      onChange={(event) => setAvailabilityDate(event.target.value)}
+                      className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
+                    />
                   </div>
                   <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">Start</label>
-                    <input type="time" value={availabilityStart} onChange={(event) => setAvailabilityStart(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                      Start
+                    </label>
+                    <input
+                      type="time"
+                      value={availabilityStart}
+                      onChange={(event) => setAvailabilityStart(event.target.value)}
+                      className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
+                    />
                   </div>
                   <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">End</label>
-                    <input type="time" value={availabilityEnd} onChange={(event) => setAvailabilityEnd(event.target.value)} className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white" />
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                      End
+                    </label>
+                    <input
+                      type="time"
+                      value={availabilityEnd}
+                      onChange={(event) => setAvailabilityEnd(event.target.value)}
+                      className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
+                    />
                   </div>
-                  <button type="button" onClick={() => void saveAvailability()} disabled={savingAvailability || approvedHospitalOptions.length === 0} className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md disabled:cursor-not-allowed disabled:opacity-60 md:self-end">
+                  <button
+                    type="button"
+                    onClick={() => void saveAvailability()}
+                    disabled={savingAvailability || approvedHospitalOptions.length === 0}
+                    className="rounded-xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-md disabled:cursor-not-allowed disabled:opacity-60 md:self-end"
+                  >
                     {savingAvailability ? "Saving..." : "Create Slots"}
                   </button>
                 </div>
@@ -2523,59 +3216,108 @@ export function DoctorDashboardPage() {
 
                 <div className="grid gap-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-sm font-bold dark:text-slate-200">Published Slots For {formatDate(`${availabilityDate}T00:00:00`)}</h4>
+                    <h4 className="text-sm font-bold dark:text-slate-200">
+                      Published Slots For {formatDate(`${availabilityDate}T00:00:00`)}
+                    </h4>
                     <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                       {availabilitySlots.length} slot(s)
                     </span>
                   </div>
-                  {availabilitySlots.length ? availabilitySlots.map((slot) => {
-                    const isEditing = editingAvailabilityId === slot.id;
-                    const isBusy = deletingAvailabilityId === slot.id || reschedulingAvailabilityId === slot.id;
+                  {availabilitySlots.length ? (
+                    availabilitySlots.map((slot) => {
+                      const isEditing = editingAvailabilityId === slot.id;
+                      const isBusy =
+                        deletingAvailabilityId === slot.id ||
+                        reschedulingAvailabilityId === slot.id;
 
-                    return (
-                      <div key={slot.id} className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50 md:flex-row md:items-center md:justify-between">
-                        <div className="min-w-0">
-                          <p className="font-bold dark:text-slate-200">{formatDate(slot.start_time)}</p>
-                          {isEditing ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              <input type="time" value={editingAvailabilityStart} onChange={(event) => setEditingAvailabilityStart(event.target.value)} className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white" />
-                              <input type="time" value={editingAvailabilityEnd} onChange={(event) => setEditingAvailabilityEnd(event.target.value)} className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white" />
-                            </div>
-                          ) : (
-                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{formatTimeWindow(slot.start_time, slot.end_time)}</p>
-                          )}
+                      return (
+                        <div
+                          key={slot.id}
+                          className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50 md:flex-row md:items-center md:justify-between"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-bold dark:text-slate-200">
+                              {formatDate(slot.start_time)}
+                            </p>
+                            {isEditing ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <input
+                                  type="time"
+                                  value={editingAvailabilityStart}
+                                  onChange={(event) =>
+                                    setEditingAvailabilityStart(event.target.value)
+                                  }
+                                  className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white"
+                                />
+                                <input
+                                  type="time"
+                                  value={editingAvailabilityEnd}
+                                  onChange={(event) =>
+                                    setEditingAvailabilityEnd(event.target.value)
+                                  }
+                                  className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white"
+                                />
+                              </div>
+                            ) : (
+                              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                {formatTimeWindow(slot.start_time, slot.end_time)}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <span
+                              className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${slot.is_booked ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}
+                            >
+                              {slot.is_booked ? "Booked" : "Open"}
+                            </span>
+                            {isEditing ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void saveRescheduledAvailability(slot.id)}
+                                  disabled={isBusy}
+                                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <CheckCircle2 size={14} />
+                                  {reschedulingAvailabilityId === slot.id ? "Saving..." : "Save"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelReschedulingAvailability}
+                                  disabled={isBusy}
+                                  className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:text-slate-200"
+                                >
+                                  <X size={14} />
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => startReschedulingAvailability(slot)}
+                                  disabled={Boolean(slot.is_booked) || isBusy}
+                                  className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-blue-900/20 dark:text-blue-300"
+                                >
+                                  <PencilLine size={14} />
+                                  Reschedule
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void removeAvailability(slot.id)}
+                                  disabled={Boolean(slot.is_booked) || isBusy}
+                                  className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300"
+                                >
+                                  <Trash2 size={14} />
+                                  {deletingAvailabilityId === slot.id ? "Removing..." : "Remove"}
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${slot.is_booked ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
-                            {slot.is_booked ? "Booked" : "Open"}
-                          </span>
-                          {isEditing ? (
-                            <>
-                              <button type="button" onClick={() => void saveRescheduledAvailability(slot.id)} disabled={isBusy} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
-                                <CheckCircle2 size={14} />
-                                {reschedulingAvailabilityId === slot.id ? "Saving..." : "Save"}
-                              </button>
-                              <button type="button" onClick={cancelReschedulingAvailability} disabled={isBusy} className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:text-slate-200">
-                                <X size={14} />
-                                Cancel
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button type="button" onClick={() => startReschedulingAvailability(slot)} disabled={Boolean(slot.is_booked) || isBusy} className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-blue-900/20 dark:text-blue-300">
-                                <PencilLine size={14} />
-                                Reschedule
-                              </button>
-                              <button type="button" onClick={() => void removeAvailability(slot.id)} disabled={Boolean(slot.is_booked) || isBusy} className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300">
-                                <Trash2 size={14} />
-                                {deletingAvailabilityId === slot.id ? "Removing..." : "Remove"}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  }) : (
+                      );
+                    })
+                  ) : (
                     <EmptyState
                       title="No availability published yet"
                       description="Add a valid slot above to make your schedule bookable from the patient side."
@@ -2616,18 +3358,71 @@ export function DoctorDashboardPage() {
           >
             <span className="mx-auto block h-full w-px bg-slate-200/80 dark:bg-slate-700/80" />
           </button>
-          <div className="flex items-center justify-between bg-primary p-4 text-white"><div className="flex items-center gap-2"><Sparkles size={18} /><span className="text-base font-bold">Clinical AI</span></div><button type="button" onClick={() => setChatOpen(false)}><X size={18} /></button></div>
-          <div className="border-b border-amber-100 bg-amber-50 px-3 py-2 text-center dark:border-amber-900 dark:bg-amber-900/30"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-400">Disclaimer: AI is advisory only, not diagnostic.</p></div>
-          <div ref={chatScrollRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-slate-50/50 p-4 dark:bg-slate-800/30">
-            {chatMessages.map((message) => (
-              <div key={message.id} className={`max-w-[85%] rounded-xl p-3.5 text-sm leading-6 shadow-sm ${message.role === "assistant" ? "self-start bg-blue-100 text-blue-900 dark:bg-blue-900/50 dark:text-blue-100" : "self-end bg-white dark:bg-slate-700 dark:text-white"}`}>{message.text}</div>
-            ))}
-            {chatLoading ? <div className="self-start rounded-xl bg-blue-100 p-3.5 text-sm text-blue-900 shadow-sm dark:bg-blue-900/50 dark:text-blue-100">Thinking...</div> : null}
+          <div className="flex items-center justify-between bg-primary p-4 text-white">
+            <div className="flex items-center gap-2">
+              <Sparkles size={18} />
+              <span className="text-base font-bold">Clinical AI</span>
+            </div>
+            <button type="button" onClick={() => setChatOpen(false)}>
+              <X size={18} />
+            </button>
           </div>
-          <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800"><button type="button" onClick={() => void sendMessage("Summarize the active patient history for me.")} className="w-full rounded-md bg-slate-100 py-2 text-center text-sm font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Summarize Medical History</button></div>
-          <div className="flex gap-2 border-t border-slate-100 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"><input value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={onChatKeyDown} className="flex-1 rounded-lg border-0 bg-slate-50 px-3 py-2.5 text-sm focus:ring-1 focus:ring-primary dark:bg-slate-800 dark:text-white" placeholder="Ask AI clinical advice..." /><button type="button" onClick={() => void sendMessage()} className="text-primary dark:text-blue-400"><SendHorizontal size={20} /></button></div>
+          <div className="border-b border-amber-100 bg-amber-50 px-3 py-2 text-center dark:border-amber-900 dark:bg-amber-900/30">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-400">
+              Disclaimer: AI is advisory only, not diagnostic.
+            </p>
+          </div>
+          <div
+            ref={chatScrollRef}
+            className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-slate-50/50 p-4 dark:bg-slate-800/30"
+          >
+            {chatMessages.map((message) => (
+              <div
+                key={message.id}
+                className={`max-w-[85%] rounded-xl p-3.5 text-sm leading-6 shadow-sm ${message.role === "assistant" ? "self-start bg-blue-100 text-blue-900 dark:bg-blue-900/50 dark:text-blue-100" : "self-end bg-white dark:bg-slate-700 dark:text-white"}`}
+              >
+                {message.text}
+              </div>
+            ))}
+            {chatLoading ? (
+              <div className="self-start rounded-xl bg-blue-100 p-3.5 text-sm text-blue-900 shadow-sm dark:bg-blue-900/50 dark:text-blue-100">
+                Thinking...
+              </div>
+            ) : null}
+          </div>
+          <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => void sendMessage("Summarize the active patient history for me.")}
+              className="w-full rounded-md bg-slate-100 py-2 text-center text-sm font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+            >
+              Summarize Medical History
+            </button>
+          </div>
+          <div className="flex gap-2 border-t border-slate-100 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <input
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              onKeyDown={onChatKeyDown}
+              className="flex-1 rounded-lg border-0 bg-slate-50 px-3 py-2.5 text-sm focus:ring-1 focus:ring-primary dark:bg-slate-800 dark:text-white"
+              placeholder="Ask AI clinical advice..."
+            />
+            <button
+              type="button"
+              onClick={() => void sendMessage()}
+              className="text-primary dark:text-blue-400"
+            >
+              <SendHorizontal size={20} />
+            </button>
+          </div>
         </div>
-        <button type="button" onClick={() => setChatOpen((current) => !current)} className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg shadow-primary/30">{chatOpen ? <X size={24} /> : <MessageCircle size={24} />}</button>
+        <button
+          type="button"
+          onClick={() => setChatOpen((current) => !current)}
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg shadow-primary/30"
+        >
+          {chatOpen ? <X size={24} /> : <MessageCircle size={24} />}
+        </button>
       </div>
 
       {toast ? <ToastMessage message={toast.message} tone={toast.tone} /> : null}

@@ -28,13 +28,11 @@ function buildInventoryStats(items: PharmacyInventoryItem[]): PharmacyInventoryS
   const outOfStockItems = items.filter((item) => (item.stockQuantity ?? 0) <= 0).length;
   const pricedItems = items.filter((item) => (item.unitPrice ?? 0) > 0).length;
 
-  const totalStockValue =
-    items.every((item) => item.stockQuantity !== null && item.unitPrice !== null)
-      ? items.reduce(
-          (sum, item) => sum + (item.stockQuantity ?? 0) * (item.unitPrice ?? 0),
-          0,
-        )
-      : null;
+  const totalStockValue = items.every(
+    (item) => item.stockQuantity !== null && item.unitPrice !== null,
+  )
+    ? items.reduce((sum, item) => sum + (item.stockQuantity ?? 0) * (item.unitPrice ?? 0), 0)
+    : null;
 
   const averageUnitPrice =
     pricedItems > 0
@@ -53,11 +51,7 @@ function buildInventoryStats(items: PharmacyInventoryItem[]): PharmacyInventoryS
 
 function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
   const csv = rows
-    .map((row) =>
-      row
-        .map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`)
-        .join(","),
-    )
+    .map((row) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(","))
     .join("\n");
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -99,9 +93,7 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
     setActivePharmacyId(nextId);
   }, [organisationId]);
 
-  const loadDashboardSummary = async (
-    pharmacyId = activePharmacyId ?? pharmacyIdInput.trim(),
-  ) => {
+  const loadDashboardSummary = async (pharmacyId = activePharmacyId ?? pharmacyIdInput.trim()) => {
     if (!pharmacyId) {
       setSummary(null);
       return null;
@@ -153,9 +145,7 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
       setInventory([]);
       setSelectedItemId(null);
       setActivePharmacyId(null);
-      setError(
-        loadError instanceof Error ? loadError.message : "Inventory could not be loaded.",
-      );
+      setError(loadError instanceof Error ? loadError.message : "Inventory could not be loaded.");
       return false;
     } finally {
       setIsLoadingInventory(false);
@@ -181,9 +171,7 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
       return true;
     } catch (mutationError) {
       setActionMessage(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "Medicine creation failed.",
+        mutationError instanceof Error ? mutationError.message : "Medicine creation failed.",
       );
       return false;
     } finally {
@@ -204,9 +192,7 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
       return true;
     } catch (mutationError) {
       setActionMessage(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "Inventory update failed.",
+        mutationError instanceof Error ? mutationError.message : "Inventory update failed.",
       );
       return false;
     } finally {
@@ -227,9 +213,7 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
       return true;
     } catch (mutationError) {
       setActionMessage(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "Inventory delete failed.",
+        mutationError instanceof Error ? mutationError.message : "Inventory delete failed.",
       );
       return false;
     } finally {
@@ -300,9 +284,7 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
       return true;
     } catch (mutationError) {
       setActionMessage(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "Pharmacist registration failed.",
+        mutationError instanceof Error ? mutationError.message : "Pharmacist registration failed.",
       );
       return false;
     } finally {
@@ -321,9 +303,7 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
       return true;
     } catch (mutationError) {
       setActionMessage(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "Staff status update failed.",
+        mutationError instanceof Error ? mutationError.message : "Staff status update failed.",
       );
       return false;
     } finally {

@@ -4,9 +4,7 @@ interface PrescriptionStatusBadgeProps {
   status: string;
 }
 
-export function PrescriptionStatusBadge({
-  status,
-}: PrescriptionStatusBadgeProps) {
+export function PrescriptionStatusBadge({ status }: PrescriptionStatusBadgeProps) {
   const normalized = status.trim().toUpperCase();
 
   return (

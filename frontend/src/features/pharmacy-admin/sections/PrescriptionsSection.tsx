@@ -3,13 +3,7 @@ import { EmptyState } from "../../../components/feedback/EmptyState";
 import { pharmacyAdminComplianceNotes } from "../constants";
 import type { PharmacyInventoryItem, PharmacyInventoryStats } from "../types";
 
-const prescriptionStatuses = [
-  "ISSUED",
-  "PARTIALLY_DISPENSED",
-  "DISPENSED",
-  "CANCELLED",
-  "EXPIRED",
-];
+const prescriptionStatuses = ["ISSUED", "PARTIALLY_DISPENSED", "DISPENSED", "CANCELLED", "EXPIRED"];
 
 interface PrescriptionsSectionProps {
   activePharmacyId: string | null;
@@ -39,7 +33,8 @@ export function PrescriptionsSection({
                 Prescription Operations
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Pharmacy admin is mostly about pricing and inventory readiness. Dispensing itself belongs to pharmacist workflows.
+                Pharmacy admin is mostly about pricing and inventory readiness. Dispensing itself
+                belongs to pharmacist workflows.
               </p>
             </div>
           </div>
@@ -75,7 +70,8 @@ export function PrescriptionsSection({
                 Fulfilment Readiness
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Pharmacy {activePharmacyId ?? "not loaded"} currently has {stats.outOfStockItems} stock blockers and {stats.lowStockItems} warning items.
+                Pharmacy {activePharmacyId ?? "not loaded"} currently has {stats.outOfStockItems}{" "}
+                stock blockers and {stats.lowStockItems} warning items.
               </p>
             </div>
           </div>
@@ -114,9 +110,7 @@ export function PrescriptionsSection({
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
           <article className="rounded-[1.8rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-              Stock Blockers
-            </h3>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Stock Blockers</h3>
             <div className="mt-5 space-y-3">
               {blockers.length === 0 ? (
                 <EmptyState
@@ -133,7 +127,8 @@ export function PrescriptionsSection({
                       <AlertTriangle className="mt-0.5 shrink-0" size={16} />
                       <div>
                         <strong className="block">{item.medicineName}</strong>
-                        Inventory ID {item.id} is at zero stock and can block prescription fulfilment.
+                        Inventory ID {item.id} is at zero stock and can block prescription
+                        fulfilment.
                       </div>
                     </div>
                   </div>
@@ -159,7 +154,8 @@ export function PrescriptionsSection({
                     className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300"
                   >
                     <strong className="block">{item.medicineName}</strong>
-                    Only {item.stockQuantity ?? 0} units remain. That is not catastrophic yet, but it is definitely not cute.
+                    Only {item.stockQuantity ?? 0} units remain. That is not catastrophic yet, but
+                    it is definitely not cute.
                   </div>
                 ))
               )}

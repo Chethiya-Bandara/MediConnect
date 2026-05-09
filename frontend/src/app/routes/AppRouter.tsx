@@ -12,13 +12,25 @@ import { pharmacistRoutes } from "./PharmacistRoutes";
 import { pharmacyAdminRoutes } from "./PharmacyAdminRoutes";
 import { ProtectedRoute } from "./ProtectedRoute";
 
-const dashboardRoutesByRole: Record<UserRole, RouteObject[]> = {
-  PATIENT: patientRoutes,
-  DOCTOR: doctorRoutes,
-  PHARMACIST: pharmacistRoutes,
-  PHARMACY_ADMIN: pharmacyAdminRoutes,
-  HOSPITAL_ADMIN: hospitalAdminRoutes,
-  HEALTH_MINISTRY_ADMIN: healthMinistryAdminRoutes,
+const dashboardPathByRole: Record<UserRole, string> = {
+  PATIENT: "patient",
+  DOCTOR: "doctor",
+  PHARMACIST: "pharmacist",
+  PHARMACY_ADMIN: "pharmacy-admin",
+  HOSPITAL_ADMIN: "hospital-admin",
+  HEALTH_MINISTRY_ADMIN: "health-ministry-admin",
+};
+
+const dashboardRoutesByRole: Record<UserRole, RouteObject> = {
+  PATIENT: { path: dashboardPathByRole.PATIENT, children: patientRoutes },
+  DOCTOR: { path: dashboardPathByRole.DOCTOR, children: doctorRoutes },
+  PHARMACIST: { path: dashboardPathByRole.PHARMACIST, children: pharmacistRoutes },
+  PHARMACY_ADMIN: { path: dashboardPathByRole.PHARMACY_ADMIN, children: pharmacyAdminRoutes },
+  HOSPITAL_ADMIN: { path: dashboardPathByRole.HOSPITAL_ADMIN, children: hospitalAdminRoutes },
+  HEALTH_MINISTRY_ADMIN: {
+    path: dashboardPathByRole.HEALTH_MINISTRY_ADMIN,
+    children: healthMinistryAdminRoutes,
+  },
 };
 
 export function AppRouter() {
@@ -34,7 +46,13 @@ export function AppRouter() {
           <DashboardShell />
         </ProtectedRoute>
       ),
-      children: dashboardRoutesByRole[role],
+      children: [
+        {
+          index: true,
+          element: <Navigate to={dashboardPathByRole[role]} replace />,
+        },
+        ...Object.values(dashboardRoutesByRole),
+      ],
     },
     {
       path: "/",

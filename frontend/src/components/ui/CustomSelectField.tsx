@@ -89,7 +89,11 @@ export function CustomSelectField({
         </button>
 
         {open && !disabled ? (
-          <div className="custom-select__menu max-h-72 overflow-y-auto" role="listbox" aria-labelledby={id}>
+          <div
+            className="custom-select__menu max-h-72 overflow-y-auto"
+            role="listbox"
+            aria-labelledby={id}
+          >
             {options.map((option) => (
               <button
                 key={option.value}
@@ -116,9 +120,9 @@ export function CustomSelectField({
       </div>
       {error ? (
         <span className="field-error">{error}</span>
-      ) : (
-        helperText ? <span className="field-helper">{helperText}</span> : null
-      )}
+      ) : helperText ? (
+        <span className="field-helper">{helperText}</span>
+      ) : null}
     </label>
   );
 }

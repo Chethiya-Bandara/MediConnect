@@ -38,10 +38,7 @@ export function ForgotPasswordPage() {
     setSubmitMessage({
       type: result.success ? "success" : "error",
       text:
-        result.message ??
-        (result.success
-          ? "Reset link sent."
-          : "Password reset request failed."),
+        result.message ?? (result.success ? "Reset link sent." : "Password reset request failed."),
     });
   };
 
@@ -54,10 +51,9 @@ export function ForgotPasswordPage() {
           <p className="hero-kicker">Credential Recovery</p>
           <h1>Reset your portal access without the usual circus.</h1>
           <p>
-            Enter the email linked to your account and we will trigger the
-            password recovery flow through the secure auth service.
+            Enter the email linked to your account and we will trigger the password recovery flow
+            through the secure auth service.
           </p>
-
         </section>
 
         <section className="auth-card">
@@ -68,10 +64,7 @@ export function ForgotPasswordPage() {
 
           <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
             {submitMessage ? (
-              <AlertMessage
-                type={submitMessage.type}
-                message={submitMessage.text}
-              />
+              <AlertMessage type={submitMessage.type} message={submitMessage.text} />
             ) : null}
 
             <InputField
@@ -85,11 +78,7 @@ export function ForgotPasswordPage() {
               helperText="Use the same email you used during registration."
             />
 
-            <Button
-              type="submit"
-              className="primary-button"
-              isLoading={isSubmitting}
-            >
+            <Button type="submit" className="primary-button" isLoading={isSubmitting}>
               Send Reset Link
             </Button>
 

@@ -41,9 +41,7 @@ export function DoctorsSection({
   const [inviteHospitalId, setInviteHospitalId] = useState("");
   const [availabilityDoctorId, setAvailabilityDoctorId] = useState("");
   const [availabilityHospitalId, setAvailabilityHospitalId] = useState("");
-  const [availabilityDate, setAvailabilityDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [availabilityDate, setAvailabilityDate] = useState(new Date().toISOString().slice(0, 10));
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("12:00");
 

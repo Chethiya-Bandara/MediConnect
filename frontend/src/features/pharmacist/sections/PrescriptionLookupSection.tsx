@@ -46,7 +46,8 @@ export function PrescriptionLookupSection({
             Prescription Lookup
           </h2>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            Search by DHID, prescription ID, patient name, or doctor name. NIC stays out of this screen on purpose.
+            Search by DHID, prescription ID, patient name, or doctor name. NIC stays out of this
+            screen on purpose.
           </p>
         </div>
 

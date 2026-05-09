@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -57,22 +57,22 @@ class ConsentUpdateRequest(BaseModel):
 
 
 class ProfileUpdateRequest(BaseModel):
-    name: Optional[str] = None
+    preferred_name: Optional[str] = None
     medical_record_consent_default: Optional[bool] = None
 
-    @field_validator("name")
+    @field_validator("preferred_name")
     @classmethod
-    def validate_name(cls, value: Optional[str]):
+    def validate_preferred_name(cls, value: Optional[str]):
         if value is None:
             return value
         cleaned = value.strip()
-        if len(cleaned) < 3:
-            raise ValueError("Name must be at least 3 characters")
+        if len(cleaned) < 2:
+            raise ValueError("Preferred name must be at least 2 characters")
         return cleaned
 
     @model_validator(mode="after")
     def validate_payload(self):
-        if self.name is None and self.medical_record_consent_default is None:
+        if self.preferred_name is None and self.medical_record_consent_default is None:
             raise ValueError("Provide at least one profile field to update")
         return self
 
@@ -105,6 +105,37 @@ class AssistantRequest(BaseModel):
         if len(cleaned) > 4000:
             raise ValueError("Message is too long")
         return cleaned
+
+
+_APPOINTMENT_CONFIRM_PATTERN = re.compile(
+    r"\bconfirm\s+booking\s+slot\s+(?P<slot_id>\d+)\b",
+    re.IGNORECASE,
+)
+_MEDICINE_STRENGTH_PATTERN = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:mcg|mg|g|kg|ml|l|iu|%|units?)\b",
+    re.IGNORECASE,
+)
+_MEDICINE_FORM_TOKENS = {
+    "tablet",
+    "tablets",
+    "capsule",
+    "capsules",
+    "syrup",
+    "suspension",
+    "solution",
+    "cream",
+    "ointment",
+    "gel",
+    "drops",
+    "drop",
+    "spray",
+    "inhaler",
+    "patch",
+    "injection",
+    "injectable",
+    "ampoule",
+    "vial",
+}
 
 
 def _bearer_token(authorization: Optional[str]) -> str:
@@ -211,7 +242,8 @@ def _doctor_map(doctor_ids: set[int]):
     for row in rows:
         linked_user = user_lookup.get(row.get("user_id"), {})
         display_name = (
-            linked_user.get("name")
+            linked_user.get("pref_name")
+            or linked_user.get("name")
             or linked_user.get("email")
             or f"Doctor #{row['id']}"
         )
@@ -221,7 +253,6 @@ def _doctor_map(doctor_ids: set[int]):
             "email": linked_user.get("email"),
         }
     return result
-
 
 def _organisation_map(organisation_ids: set[int]):
     if not organisation_ids:
@@ -552,6 +583,269 @@ def _prescription_quantity_label(item: dict) -> Optional[str]:
     return None
 
 
+def _clean_free_text(value: Optional[str]) -> str:
+    return " ".join((value or "").replace("\xa0", " ").split())
+
+
+def _message_requests_booking(message: str) -> bool:
+    normalized = message.lower()
+    booking_verbs = ("book", "booking", "schedule", "reserve")
+    booking_objects = ("appointment", "slot", "doctor", "clinic", "hospital")
+    return any(token in normalized for token in booking_verbs) and any(
+        token in normalized for token in booking_objects
+    )
+
+
+def _extract_confirmation_slot_id(message: str) -> Optional[int]:
+    match = _APPOINTMENT_CONFIRM_PATTERN.search(message)
+    if not match:
+        return None
+    try:
+        return int(match.group("slot_id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_requested_date(message: str) -> Optional[str]:
+    normalized = message.lower()
+    today_local = datetime.now().astimezone().date()
+
+    if "tomorrow" in normalized:
+        return (today_local + timedelta(days=1)).isoformat()
+    if "today" in normalized:
+        return today_local.isoformat()
+
+    iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", message)
+    if iso_match:
+        return iso_match.group(1)
+
+    slash_match = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", message)
+    if slash_match:
+        day_value, month_value, year_value = slash_match.groups()
+        try:
+            parsed = date(int(year_value), int(month_value), int(day_value))
+            return parsed.isoformat()
+        except ValueError:
+            return None
+
+    return None
+
+
+def _assistant_slot_matches_message(slot: dict, normalized_message: str) -> tuple[int, bool]:
+    score = 0
+    matched_any_named_filter = False
+
+    requested_date = _extract_requested_date(normalized_message)
+    slot_date = None
+    if slot.get("start_time"):
+        parsed = _parse_iso_datetime(slot.get("start_time"))
+        slot_date = parsed.astimezone().date().isoformat() if parsed else None
+    if requested_date:
+        if slot_date != requested_date:
+            return -1, True
+        score += 50
+        matched_any_named_filter = True
+
+    for field, weight in (
+        ("doctor_name", 30),
+        ("specialization", 20),
+        ("organisation_name", 15),
+    ):
+        value = _clean_free_text(slot.get(field)).lower()
+        if value and value in normalized_message:
+            score += weight
+            matched_any_named_filter = True
+
+    return score, matched_any_named_filter
+
+
+def _pick_booking_slot(snapshot: dict, message: str) -> tuple[Optional[dict], list[dict]]:
+    normalized = message.lower()
+    slots = snapshot.get("bookable_slots", [])
+    if not slots:
+        return None, []
+
+    scored: list[tuple[int, dict]] = []
+    saw_named_filter = False
+    for slot in slots:
+        score, matched_named_filter = _assistant_slot_matches_message(slot, normalized)
+        if score < 0:
+            continue
+        saw_named_filter = saw_named_filter or matched_named_filter
+        scored.append((score, slot))
+
+    if not scored:
+        return None, []
+
+    scored.sort(
+        key=lambda item: (
+            -item[0],
+            item[1].get("start_time") or "",
+            item[1].get("doctor_name") or "",
+        )
+    )
+    ranked_slots = [slot for _, slot in scored]
+    if saw_named_filter:
+        filtered = [slot for score, slot in scored if score > 0]
+        if filtered:
+            return filtered[0], filtered
+    return ranked_slots[0], ranked_slots
+
+
+def _medicine_profile(name: Optional[str], unit: Optional[str]) -> dict[str, str]:
+    name_text = _clean_free_text(name).lower()
+    unit_text = _clean_free_text(unit).lower()
+    combined = f"{name_text} {unit_text}".strip()
+
+    strength_match = _MEDICINE_STRENGTH_PATTERN.search(combined)
+    strength = strength_match.group(0).lower() if strength_match else ""
+
+    form = ""
+    for token in _MEDICINE_FORM_TOKENS:
+        if re.search(rf"\b{re.escape(token)}\b", combined):
+            form = token.rstrip("s")
+            break
+
+    ingredient_source = combined
+    if strength:
+        ingredient_source = ingredient_source.replace(strength, " ")
+    for token in _MEDICINE_FORM_TOKENS:
+        ingredient_source = re.sub(
+            rf"\b{re.escape(token)}\b", " ", ingredient_source, flags=re.IGNORECASE
+        )
+    ingredient_key = re.sub(r"[^a-z0-9]+", " ", ingredient_source).strip()
+    ingredient_key = re.sub(r"\s+", " ", ingredient_key)
+
+    return {
+        "ingredient_key": ingredient_key,
+        "strength": strength,
+        "form": form,
+    }
+
+
+def _message_requests_generic_equivalent(message: str) -> bool:
+    normalized = message.lower()
+    generic_tokens = ("generic", "equivalent", "same ingredient", "alternative")
+    medicine_tokens = ("medicine", "medicines", "drug", "tablet", "capsule", "prescription")
+    return any(token in normalized for token in generic_tokens) and any(
+        token in normalized for token in medicine_tokens
+    )
+
+
+def _message_requests_therapeutic_alternative(message: str) -> bool:
+    normalized = message.lower()
+    return "therapeutic alternative" in normalized or (
+        "therapeutic" in normalized and "alternative" in normalized
+    )
+
+
+def _resolve_medicine_from_message(message: str, snapshot: dict) -> Optional[dict]:
+    normalized = _normalize_medicine_key(message)
+    latest_items = (
+        snapshot.get("latest_prescription", {}).get("items", [])
+        if snapshot.get("latest_prescription")
+        else []
+    )
+    ranked: list[tuple[int, dict]] = []
+    for item in latest_items:
+        candidate_name = _clean_free_text(item.get("medicine_name"))
+        candidate_key = _normalize_medicine_key(candidate_name)
+        if not candidate_key:
+            continue
+        if candidate_key in normalized or normalized in candidate_key:
+            ranked.append((len(candidate_key), item))
+
+    if ranked:
+        ranked.sort(key=lambda item: -item[0])
+        return ranked[0][1]
+
+    if len(latest_items) == 1:
+        return latest_items[0]
+
+    return None
+
+
+def _medicine_catalog_entry(medicine_id: Optional[int], medicine_name: Optional[str]) -> Optional[dict]:
+    if medicine_id:
+        rows = execute_with_retry(
+            lambda: (
+                supabase_admin.table("medicines")
+                .select("id, name, unit, retail_price, wholesale_price")
+                .eq("id", medicine_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            ),
+            default=[],
+        )
+        if rows:
+            return rows[0]
+
+    cleaned_name = _clean_free_text(medicine_name)
+    if not cleaned_name:
+        return None
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, name, unit, retail_price, wholesale_price")
+            .ilike("name", cleaned_name)
+            .limit(5)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    normalized_target = _normalize_medicine_key(cleaned_name)
+    for row in rows:
+        if _normalize_medicine_key(row.get("name")) == normalized_target:
+            return row
+    return rows[0] if rows else None
+
+
+def _generic_equivalent_candidates(medicine: dict) -> list[dict]:
+    profile = _medicine_profile(medicine.get("name"), medicine.get("unit"))
+    if not profile["ingredient_key"] or not profile["strength"] or not profile["form"]:
+        return []
+
+    search_token = profile["ingredient_key"].split(" ", 1)[0]
+    candidate_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("medicines")
+            .select("id, name, unit, retail_price, wholesale_price")
+            .ilike("name", f"%{search_token}%")
+            .limit(80)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+    equivalents = []
+    target_key = _normalize_medicine_key(medicine.get("name"))
+    target_id = medicine.get("id")
+    for row in candidate_rows:
+        if row.get("id") == target_id:
+            continue
+        if _normalize_medicine_key(row.get("name")) == target_key:
+            continue
+        candidate_profile = _medicine_profile(row.get("name"), row.get("unit"))
+        if candidate_profile != profile:
+            continue
+        equivalents.append(row)
+
+    equivalents.sort(
+        key=lambda row: (
+            float(row.get("retail_price") or row.get("wholesale_price") or 0),
+            _clean_free_text(row.get("name")).lower(),
+        )
+    )
+    return equivalents[:5]
+
+
 def _log_audit_action(user_id: str, action: str, entity: str, entity_id: int):
     now = datetime.now().astimezone().isoformat()
     supabase_admin.table("audit_logs").insert(
@@ -738,6 +1032,7 @@ def _build_assistant_snapshot(patient: dict, user: dict):
 
     latest_medicines = [
         {
+            "medicine_id": item.get("medicine_id"),
             "medicine_name": item.get("medicine_name"),
             "dosage": item.get("dosage"),
             "quantity": _prescription_quantity_label(item),
@@ -754,10 +1049,11 @@ def _build_assistant_snapshot(patient: dict, user: dict):
     )
     latest_doctor = doctor_lookup.get(latest_record["doctor_id"], {}) if latest_record else {}
     available_doctors = []
+    bookable_slots = []
     seen_doctors = set()
     for slot in availability_rows:
         doctor_id = slot.get("doctor_id")
-        if not doctor_id or doctor_id in seen_doctors:
+        if not doctor_id:
             continue
 
         start_time = _parse_iso_datetime(slot.get("start_time"))
@@ -765,7 +1061,6 @@ def _build_assistant_snapshot(patient: dict, user: dict):
         if not start_time or not end_time or end_time < now:
             continue
 
-        seen_doctors.add(doctor_id)
         doctor = booking_doctor_lookup.get(doctor_id, {})
         resolved_organisation_id = _resolve_slot_organisation_id(
             slot,
@@ -773,21 +1068,32 @@ def _build_assistant_snapshot(patient: dict, user: dict):
             booking_hospital_lookup,
         )
         organisation = booking_org_lookup.get(resolved_organisation_id, {})
+        slot_summary = {
+            "slot_id": slot.get("id"),
+            "doctor_id": doctor_id,
+            "doctor_name": doctor.get("display_name", f"Doctor #{doctor_id}"),
+            "specialization": doctor.get("specialization"),
+            "organisation_id": resolved_organisation_id,
+            "organisation_name": organisation.get(
+                "name",
+                (
+                    f"Organisation #{resolved_organisation_id}"
+                    if resolved_organisation_id
+                    else "Hospital assignment pending"
+                ),
+            ),
+            "start_time": slot.get("start_time"),
+            "end_time": slot.get("end_time"),
+        }
+        bookable_slots.append(slot_summary)
+
+        if doctor_id in seen_doctors:
+            continue
+
+        seen_doctors.add(doctor_id)
         available_doctors.append(
             {
-                "doctor_id": doctor_id,
-                "doctor_name": doctor.get("display_name", f"Doctor #{doctor_id}"),
-                "specialization": doctor.get("specialization"),
-                "organisation_name": organisation.get(
-                    "name",
-                    (
-                        f"Organisation #{resolved_organisation_id}"
-                        if resolved_organisation_id
-                        else "Hospital assignment pending"
-                    ),
-                ),
-                "start_time": slot.get("start_time"),
-                "end_time": slot.get("end_time"),
+                **slot_summary,
             }
         )
 
@@ -809,6 +1115,7 @@ def _build_assistant_snapshot(patient: dict, user: dict):
         },
         "booking_options": booking_options[:12],
         "available_doctors": available_doctors[:8],
+        "bookable_slots": bookable_slots[:20],
         "next_appointment": {
             "doctor_name": next_doctor.get("display_name"),
             "doctor_specialization": next_doctor.get("specialization"),
@@ -1004,6 +1311,209 @@ def _fallback_assistant_answer(message: str, snapshot: dict) -> str:
     )
 
 
+def _book_slot_for_patient(context: dict, slot_id: int):
+    patient = context["patient"]
+    default_consent = _patient_default_consent_state(patient["id"])
+
+    slot = (
+        supabase_admin.table("availability_slots")
+        .select("*")
+        .eq("id", slot_id)
+        .eq("is_booked", False)
+        .single()
+        .execute()
+        .data
+    )
+
+    if not slot:
+        raise HTTPException(status_code=400, detail="Slot not available")
+
+    slot_start = slot["start_time"]
+    slot_end = slot["end_time"]
+
+    patient_conflicts = (
+        supabase_admin.table("appointments")
+        .select("id, start_time, end_time, status")
+        .eq("patient_id", patient["id"])
+        .not_.in_("status", ["cancelled", "completed"])
+        .lt("start_time", slot_end)
+        .gt("end_time", slot_start)
+        .execute()
+        .data
+        or []
+    )
+
+    if patient_conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "Double booking detected",
+                "message": "You already have an appointment during this time slot. Please cancel it before booking a new one.",
+                "conflict_appointment_id": patient_conflicts[0]["id"],
+            },
+        )
+
+    doctor_conflicts = (
+        supabase_admin.table("appointments")
+        .select("id, start_time, end_time, status")
+        .eq("doctor_id", slot["doctor_id"])
+        .not_.in_("status", ["cancelled", "completed"])
+        .lt("start_time", slot_end)
+        .gt("end_time", slot_start)
+        .execute()
+        .data
+        or []
+    )
+
+    if doctor_conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "Doctor unavailable",
+                "message": "This doctor already has an appointment during this time. Please choose a different time slot.",
+            },
+        )
+
+    approved_affiliations_by_doctor = _approved_affiliations_by_doctor()
+    approved_affiliations = approved_affiliations_by_doctor.get(slot["doctor_id"], [])
+    hospital_lookup = _hospital_map(
+        {row["hospital_id"] for row in approved_affiliations if row.get("hospital_id")}
+    )
+    resolved_organisation_id = _resolve_slot_organisation_id(
+        slot,
+        approved_affiliations_by_doctor,
+        hospital_lookup,
+    )
+
+    if not approved_affiliations:
+        raise HTTPException(400, "Doctor is not approved for any hospital yet")
+
+    if not resolved_organisation_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This doctor has multiple hospital affiliations, but the selected slot is not linked "
+                "to one hospital in the current schema. Ask the doctor to keep one active hospital or update the slot model."
+            ),
+        )
+
+    if not any(
+        (
+            hospital_lookup.get(row.get("hospital_id"), {}).get("organisation_id")
+            == resolved_organisation_id
+        )
+        and (row.get("status") or "").lower() in {"approved", "active"}
+        for row in approved_affiliations
+    ):
+        raise HTTPException(400, "Doctor not approved for this organisation")
+
+    created = (
+        supabase_admin.table("appointments")
+        .insert(
+            {
+                "patient_id": patient["id"],
+                "doctor_id": slot["doctor_id"],
+                "organisation_id": resolved_organisation_id,
+                "start_time": slot["start_time"],
+                "end_time": slot["end_time"],
+                "status": "pending",
+            }
+        )
+        .execute()
+    )
+
+    if not created.data:
+        raise HTTPException(status_code=500, detail="Failed to create appointment")
+
+    appointment = created.data[0]
+
+    supabase_admin.table("availability_slots").update({"is_booked": True}).eq("id", slot_id).execute()
+
+    _log_audit_action(context["user_id"], "APPOINTMENT_CREATED", "appointments", appointment["id"])
+    _log_audit_action(
+        context["user_id"],
+        "CONSENT_GRANTED" if default_consent["granted"] else "CONSENT_REVOKED",
+        "appointment_consent",
+        appointment["id"],
+    )
+
+    doctor_lookup = _doctor_map({appointment["doctor_id"]})
+    organisation_lookup = _organisation_map({appointment["organisation_id"]})
+
+    return _format_appointment_with_consent(
+        appointment,
+        doctor_lookup,
+        organisation_lookup,
+        {
+            appointment["id"]: {
+                "granted": bool(default_consent["granted"]),
+                "last_updated": datetime.now().astimezone().isoformat(),
+            }
+        },
+    )
+
+
+def _build_booking_confirmation_answer(slot: dict) -> str:
+    return (
+        f"I found a live slot with {slot.get('doctor_name')} at {slot.get('organisation_name')} on "
+        f"{_assistant_datetime_label(slot.get('start_time'))}. "
+        f"Reply exactly `Confirm booking slot {slot.get('slot_id')}` if you want me to book it. "
+        "I will not place the booking until you send that confirmation."
+    )
+
+
+def _build_generic_equivalent_answer(message: str, snapshot: dict) -> Optional[str]:
+    if _message_requests_therapeutic_alternative(message):
+        return (
+            "I cannot suggest therapeutic alternatives here. "
+            "I only surface exact generic-equivalent options when the ingredient, strength, and dosage form all match a saved medicine."
+        )
+
+    if not _message_requests_generic_equivalent(message):
+        return None
+
+    target = _resolve_medicine_from_message(message, snapshot)
+    if not target:
+        return (
+            "I could not safely identify which medicine you mean from your saved prescription context. "
+            "Mention the exact medicine name, and I will only check exact generic-equivalent matches."
+        )
+
+    medicine = _medicine_catalog_entry(target.get("medicine_id"), target.get("medicine_name"))
+    if not medicine:
+        return (
+            f"I could not map {target.get('medicine_name') or 'that medicine'} to the saved medicine registry, "
+            "so I am not going to guess a therapeutic substitute."
+        )
+
+    profile = _medicine_profile(medicine.get("name"), medicine.get("unit"))
+    if not profile["ingredient_key"] or not profile["strength"] or not profile["form"]:
+        return (
+            f"I found {medicine.get('name')}, but I cannot verify a full ingredient/strength/form profile from the saved registry data. "
+            "Because of that, I will not suggest a therapeutic alternative."
+        )
+
+    equivalents = _generic_equivalent_candidates(medicine)
+    if not equivalents:
+        return (
+            f"I found {medicine.get('name')}, but I do not see another saved medicine with the same ingredient, strength, and dosage form. "
+            "I will not suggest a therapeutic alternative instead."
+        )
+
+    lines = []
+    for row in equivalents[:3]:
+        price = row.get("retail_price") or row.get("wholesale_price")
+        price_label = f"LKR {float(price):,.2f}" if price not in (None, "") else "price not listed"
+        lines.append(f"{row.get('name')} ({row.get('unit') or 'unit not listed'}) - {price_label}")
+
+    return (
+        f"Exact generic-equivalent matches for {medicine.get('name')} are: "
+        + "; ".join(lines)
+        + ". I filtered these to the same ingredient, strength, and dosage form only. "
+        "I am intentionally not suggesting therapeutic alternatives."
+    )
+
+
 @router.get("/overview", dependencies=[Depends(RoleChecker(["patient"]))])
 def get_overview(authorization: Optional[str] = Header(None)):
     context = _require_patient_context(authorization)
@@ -1095,6 +1605,8 @@ def get_overview(authorization: Optional[str] = Header(None)):
             "id": context["user"]["id"],
             "email": context["user"]["email"],
             "name": context["user"].get("name"),
+            "legal_name": context["user"].get("legal_name"),
+            "preferred_name": context["user"].get("preferred_name"),
         },
         "patient": {
             "id": patient["id"],
@@ -1187,16 +1699,16 @@ def update_profile(
     updated = []
     resolved_name = context["user"].get("name")
 
-    if payload.name is not None:
+    if payload.preferred_name is not None:
         updated = (
             supabase_admin.table("users")
-            .update({"name": payload.name})
+            .update({"pref_name": payload.preferred_name})
             .eq("id", context["user_id"])
             .execute()
             .data
             or []
         )
-        resolved_name = payload.name
+        resolved_name = payload.preferred_name
         _log_audit_action(context["user_id"], "PROFILE_UPDATED", "users", context["patient"]["id"])
 
     if payload.medical_record_consent_default is not None:
@@ -1212,6 +1724,8 @@ def update_profile(
         "id": row["id"],
         "email": row["email"],
         "name": resolved_name,
+        "legal_name": row.get("name"),
+        "preferred_name": row.get("pref_name") or resolved_name,
         "role": row.get("role"),
         "medical_record_consent_default": (
             payload.medical_record_consent_default
@@ -1334,157 +1848,7 @@ def create_appointment(
     authorization: Optional[str] = Header(None)
 ):
     context = _require_patient_context(authorization)
-    patient = context["patient"]
-    default_consent = _patient_default_consent_state(patient["id"])
-
-    # Get slot
-    slot = (
-        supabase_admin.table("availability_slots")
-        .select("*")
-        .eq("id", payload.slot_id)
-        .eq("is_booked", False)
-        .single()
-        .execute()
-        .data
-    )
-
-    if not slot:
-        raise HTTPException(status_code=400, detail="Slot not available")
-
-    # ── Double-Booking Prevention (Bihanga B-3.2.2) ───────────────
-
-    # Check 1 — Patient doesn't already have an overlapping appointment
-    slot_start = slot["start_time"]
-    slot_end   = slot["end_time"]
-
-    patient_conflicts = (
-        supabase_admin.table("appointments")
-        .select("id, start_time, end_time, status")
-        .eq("patient_id", patient["id"])
-        .not_.in_("status", ["cancelled", "completed"])
-        .lt("start_time", slot_end)
-        .gt("end_time", slot_start)
-        .execute()
-        .data or []
-    )
-
-    if patient_conflicts:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "Double booking detected",
-                "message": "You already have an appointment during this time slot. "
-                           "Please cancel it before booking a new one.",
-                "conflict_appointment_id": patient_conflicts[0]["id"]
-            }
-        )
-
-    # Check 2 — Doctor doesn't already have another patient at same time
-    doctor_conflicts = (
-        supabase_admin.table("appointments")
-        .select("id, start_time, end_time, status")
-        .eq("doctor_id", slot["doctor_id"])
-        .not_.in_("status", ["cancelled", "completed"])
-        .lt("start_time", slot_end)
-        .gt("end_time", slot_start)
-        .execute()
-        .data or []
-    )
-
-    if doctor_conflicts:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "Doctor unavailable",
-                "message": "This doctor already has an appointment during this time. "
-                           "Please choose a different time slot.",
-            }
-        )
-
-    approved_affiliations_by_doctor = _approved_affiliations_by_doctor()
-    approved_affiliations = approved_affiliations_by_doctor.get(slot["doctor_id"], [])
-    hospital_lookup = _hospital_map(
-        {row["hospital_id"] for row in approved_affiliations if row.get("hospital_id")}
-    )
-    resolved_organisation_id = _resolve_slot_organisation_id(
-        slot,
-        approved_affiliations_by_doctor,
-        hospital_lookup,
-    )
-
-    if not approved_affiliations:
-        raise HTTPException(400, "Doctor is not approved for any hospital yet")
-
-    if not resolved_organisation_id:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This doctor has multiple hospital affiliations, but the selected slot is not linked "
-                "to one hospital in the current schema. Ask the doctor to keep one active hospital or update the slot model."
-            ),
-        )
-
-    if not any(
-        (
-            hospital_lookup.get(row.get("hospital_id"), {}).get("organisation_id")
-            == resolved_organisation_id
-        )
-        and (row.get("status") or "").lower() in {"approved", "active"}
-        for row in approved_affiliations
-    ):
-        raise HTTPException(400, "Doctor not approved for this organisation")
-
-    # Create appointment
-    created = (
-        supabase_admin.table("appointments")
-        .insert({
-            "patient_id": patient["id"],
-            "doctor_id": slot["doctor_id"],
-            "organisation_id": resolved_organisation_id,
-            "start_time": slot["start_time"],
-            "end_time": slot["end_time"],
-            "status": "pending",
-        })
-        .execute()
-    )
-
-    if not created.data:
-        raise HTTPException(status_code=500, detail="Failed to create appointment")
-
-    appointment = created.data[0]
-
-    # Lock slot
-    supabase_admin.table("availability_slots").update({
-        "is_booked": True
-    }).eq("id", payload.slot_id).execute()
-
-    _log_audit_action(
-        context["user_id"],
-        "APPOINTMENT_CREATED",
-        "appointments",
-        appointment["id"]
-    )
-    _log_audit_action(
-        context["user_id"],
-        "CONSENT_GRANTED" if default_consent["granted"] else "CONSENT_REVOKED",
-        "appointment_consent",
-        appointment["id"],
-    )
-
-    doctor_lookup = _doctor_map({appointment["doctor_id"]})
-    organisation_lookup = _organisation_map({appointment["organisation_id"]})
-
-    return _format_appointment_with_consent(
-        appointment,
-        doctor_lookup,
-        organisation_lookup,
-        {
-            appointment["id"]: {
-                "granted": bool(default_consent["granted"]),
-                "last_updated": datetime.now().astimezone().isoformat(),
-            }
-        },
-    )
+    return _book_slot_for_patient(context, payload.slot_id)
 
 
 @router.patch("/appointments/{appointment_id}", dependencies=[Depends(RoleChecker(["patient"]))])
@@ -2111,6 +2475,55 @@ def assistant_respond(
 ):
     context = _require_patient_context(authorization)
     snapshot = _build_assistant_snapshot(context["patient"], context["user"])
+
+    confirmed_slot_id = _extract_confirmation_slot_id(payload.message)
+    if confirmed_slot_id is not None:
+        try:
+            appointment = _book_slot_for_patient(context, confirmed_slot_id)
+            answer = (
+                f"Confirmed. I booked your appointment with {appointment['doctor']['name']} at "
+                f"{appointment['organisation']['name']} on {_assistant_datetime_label(appointment.get('start_time'))}. "
+                "Check the Appointments section if you want to review or cancel it."
+            )
+        except HTTPException as exc:
+            detail = exc.detail
+            if isinstance(detail, dict):
+                detail = detail.get("message") or detail.get("error") or "Booking could not be completed."
+            answer = f"I could not complete that booking. {detail}"
+        return build_safe_response(
+            answer=answer,
+            source="patient_fallback",
+            role="patient",
+        )
+
+    generic_answer = _build_generic_equivalent_answer(payload.message, snapshot)
+    if generic_answer:
+        return build_safe_response(
+            answer=generic_answer,
+            source="patient_fallback",
+            role="patient",
+        )
+
+    if _message_requests_booking(payload.message):
+        candidate_slot, candidate_slots = _pick_booking_slot(snapshot, payload.message)
+        if candidate_slot:
+            answer = _build_booking_confirmation_answer(candidate_slot)
+            if len(candidate_slots) > 1:
+                runner_up = candidate_slots[1]
+                answer += (
+                    f" Backup option: {runner_up.get('doctor_name')} at {runner_up.get('organisation_name')} on "
+                    f"{_assistant_datetime_label(runner_up.get('start_time'))}."
+                )
+        else:
+            answer = (
+                "I could not find a matching live slot from the current saved availability. "
+                "Try mentioning a doctor, hospital, or a date like 2026-05-10, and I will narrow it down."
+            )
+        return build_safe_response(
+            answer=answer,
+            source="patient_fallback",
+            role="patient",
+        )
 
     edge_answer, gemini_issue = _call_gemini_ai(payload.message, payload.history, snapshot)
     if edge_answer:

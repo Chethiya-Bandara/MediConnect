@@ -140,7 +140,8 @@ export function InventorySection({
               Inventory Control
             </h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Load a pharmacy inventory, add medicines, and update pricing or stock without touching clinical notes.
+              Load a pharmacy inventory, add medicines, and update pricing or stock without touching
+              clinical notes.
             </p>
           </div>
 
@@ -180,9 +181,7 @@ export function InventorySection({
           <div className="flex items-start gap-3">
             <PackagePlus className="mt-1 text-primary dark:text-blue-400" size={20} />
             <div>
-              <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                Add Medicine
-              </h3>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Add Medicine</h3>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                 Create a new inventory item for the active pharmacy catalog.
               </p>

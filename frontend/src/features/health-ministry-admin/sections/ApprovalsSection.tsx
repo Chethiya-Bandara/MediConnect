@@ -17,8 +17,7 @@ export function ApprovalsSection({
   onApproveDoctor,
 }: ApprovalsSectionProps) {
   const [organizationId, setOrganizationId] = useState("");
-  const [organizationStatus, setOrganizationStatus] =
-    useState<ApprovalStatus>("approved");
+  const [organizationStatus, setOrganizationStatus] = useState<ApprovalStatus>("approved");
   const [doctorId, setDoctorId] = useState("");
   const [doctorStatus, setDoctorStatus] = useState<ApprovalStatus>("approved");
 
@@ -32,7 +31,8 @@ export function ApprovalsSection({
               Organisation Approval
             </h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Review hospital or pharmacy onboarding by organisation ID. This matches the current backend more than a fancy table would.
+              Review hospital or pharmacy onboarding by organisation ID. This matches the current
+              backend more than a fancy table would.
             </p>
           </div>
         </div>
@@ -84,7 +84,8 @@ export function ApprovalsSection({
               Doctor Approval
             </h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Approve or reject doctor registration review using the backend’s current doctor approval endpoint.
+              Approve or reject doctor registration review using the backend’s current doctor
+              approval endpoint.
             </p>
           </div>
         </div>

@@ -54,8 +54,8 @@ export function OverviewSection({ stats }: OverviewSectionProps) {
                 Pharmacy Privacy Guardrails
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                The proposal is strict here: pharmacist flows should verify and dispense prescriptions,
-                not snoop around diagnosis notes like a nosy auntie.
+                The proposal is strict here: pharmacist flows should verify and dispense
+                prescriptions, not snoop around diagnosis notes like a nosy auntie.
               </p>
             </div>
           </div>

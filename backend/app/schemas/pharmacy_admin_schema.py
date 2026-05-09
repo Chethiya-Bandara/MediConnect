@@ -1,5 +1,9 @@
+import re
+
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.utils.helpers import is_valid_password
+
+PHARMACY_LICENSE_PATTERN = re.compile(r"^PH-\d{5}$")
 
 class InventoryItemRequest(BaseModel):
     medicine_name: str
@@ -25,7 +29,7 @@ class CreatePharmacyStaffRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=10, max_length=128)
     license_no: str = Field(min_length=3, max_length=80)
-    status: str = "active"
+    status: str = "pending"
 
     @field_validator("password")
     @classmethod
@@ -37,11 +41,19 @@ class CreatePharmacyStaffRequest(BaseModel):
             )
         return value
 
+    @field_validator("license_no")
+    @classmethod
+    def validate_license_no(cls, value: str) -> str:
+        normalized = (value or "").strip().upper()
+        if not PHARMACY_LICENSE_PATTERN.match(normalized):
+            raise ValueError("Pharmacy license number must match PH-12345 format")
+        return normalized
+
     @field_validator("status")
     @classmethod
     def normalize_status(cls, value: str):
         normalized = value.strip().lower()
-        if normalized not in {"active", "suspended"}:
+        if normalized not in {"pending", "approved", "suspended"}:
             raise ValueError("Invalid staff status")
         return normalized
 
@@ -54,6 +66,6 @@ class UpdateStaffStatusRequest(BaseModel):
     @classmethod
     def normalize_status(cls, value: str):
         normalized = value.strip().lower()
-        if normalized not in {"active", "suspended"}:
+        if normalized not in {"approved", "suspended"}:
             raise ValueError("Invalid staff status")
         return normalized

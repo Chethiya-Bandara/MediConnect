@@ -1,17 +1,23 @@
--- Performance indexes — NFR-4.1
+-- Performance indexes — NFR-4.1 / NFR-4.2
 -- Run this once in your Supabase SQL editor.
 -- These indexes support the most frequent filter patterns in common dashboard queries.
+-- NOTE:
+--   The live analytics schema currently filters by date, but does not expose a district
+--   column on encounter diagnosis data. Date indexes are applied below now. District
+--   indexes are included as ready-to-run statements for the day that column lands.
 
 -- Appointments: patient and doctor lookups, time ordering
 CREATE INDEX IF NOT EXISTS idx_appointments_patient_id   ON appointments (patient_id);
 CREATE INDEX IF NOT EXISTS idx_appointments_doctor_id    ON appointments (doctor_id);
 CREATE INDEX IF NOT EXISTS idx_appointments_start_time   ON appointments (start_time);
 CREATE INDEX IF NOT EXISTS idx_appointments_status       ON appointments (status);
+CREATE INDEX IF NOT EXISTS idx_appointments_org_start    ON appointments (organisation_id, start_time);
 
 -- Encounters: patient and doctor lookups, recency ordering
 CREATE INDEX IF NOT EXISTS idx_encounters_patient_id     ON encounters (patient_id);
 CREATE INDEX IF NOT EXISTS idx_encounters_doctor_id      ON encounters (doctor_id);
 CREATE INDEX IF NOT EXISTS idx_encounters_created_at     ON encounters (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_encounters_created_date   ON encounters (created_at);
 
 -- Prescriptions: patient lookups, recency ordering
 CREATE INDEX IF NOT EXISTS idx_prescriptions_patient_id  ON prescriptions (patient_id);
@@ -25,3 +31,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_entity         ON audit_logs (entity);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id        ON audit_logs (user_id);
 
 -- Anomaly flags: already indexed via create_anomaly_flags.sql
+
+-- District-ready analytics indexes
+-- Enable these after the underlying tables actually include a district column.
+-- CREATE INDEX IF NOT EXISTS idx_encounters_district_created_at ON encounters (district, created_at DESC);
+-- CREATE INDEX IF NOT EXISTS idx_appointments_district_start    ON appointments (district, start_time DESC);

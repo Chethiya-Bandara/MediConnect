@@ -132,9 +132,7 @@ export function useHospitalAdminDashboard() {
       setAvailabilitySlots([]);
       setActiveDoctorId(doctorId);
       setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Doctor availability could not be loaded.",
+        loadError instanceof Error ? loadError.message : "Doctor availability could not be loaded.",
       );
       return false;
     } finally {
@@ -153,13 +151,9 @@ export function useHospitalAdminDashboard() {
     try {
       const response = await createAvailabilitySlot(payload);
       setDoctorsMessage(
-        response.message ??
-          `Created ${response.created_count ?? 0} availability slot(s).`,
+        response.message ?? `Created ${response.created_count ?? 0} availability slot(s).`,
       );
-      await Promise.all([
-        loadAvailability(payload.doctorId, payload.slotDate),
-        refreshDashboard(),
-      ]);
+      await Promise.all([loadAvailability(payload.doctorId, payload.slotDate), refreshDashboard()]);
       return true;
     } catch (availabilityError) {
       setDoctorsMessage(
@@ -262,9 +256,7 @@ export function useHospitalAdminDashboard() {
       return true;
     } catch (decisionError) {
       setAffiliationsMessage(
-        decisionError instanceof Error
-          ? decisionError.message
-          : "Affiliation decision failed.",
+        decisionError instanceof Error ? decisionError.message : "Affiliation decision failed.",
       );
       return false;
     } finally {

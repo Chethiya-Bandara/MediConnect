@@ -100,7 +100,10 @@ function asBoolean(value: unknown) {
   return null;
 }
 
-function buildFallbackId(prefix: string, raw: RawPrescription | RawPrescriptionItem | RawHistoryEntry) {
+function buildFallbackId(
+  prefix: string,
+  raw: RawPrescription | RawPrescriptionItem | RawHistoryEntry,
+) {
   return [
     prefix,
     asString("id" in raw ? raw.id : null) ?? "unknown",
@@ -130,9 +133,7 @@ function normalizeItem(raw: RawPrescriptionItem): PharmacistPrescriptionItem {
   const prescribedQuantity = asNumber(raw.quantity ?? raw.quantity_prescribed);
   const dispensedQuantity = asNumber(raw.dispensed_quantity) ?? 0;
   const remainingQuantity =
-    prescribedQuantity === null
-      ? null
-      : Math.max(prescribedQuantity - dispensedQuantity, 0);
+    prescribedQuantity === null ? null : Math.max(prescribedQuantity - dispensedQuantity, 0);
 
   return {
     id: asString(raw.id) ?? buildFallbackId("item", raw),
@@ -177,9 +178,7 @@ export async function getPharmacistPrescriptionDetail(prescriptionId: string) {
   return {
     prescription: normalizePrescription(response.prescription ?? {}),
     items: (response.items ?? []).map((item) => normalizeItem(item)),
-    dispensationHistory: (response.dispensations ?? []).map((item) =>
-      normalizeHistory(item),
-    ),
+    dispensationHistory: (response.dispensations ?? []).map((item) => normalizeHistory(item)),
   } satisfies PharmacistPrescriptionDetail;
 }
 

@@ -9,11 +9,7 @@ interface SettingsSectionProps {
   onLogout: () => void;
 }
 
-export function SettingsSection({
-  user,
-  activePharmacyId,
-  onLogout,
-}: SettingsSectionProps) {
+export function SettingsSection({ user, activePharmacyId, onLogout }: SettingsSectionProps) {
   return (
     <section className="grid gap-4 lg:grid-cols-[0.8fr,1.2fr]">
       <article className="rounded-[1.8rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -31,9 +27,7 @@ export function SettingsSection({
 
         <div className="mt-6 space-y-4">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
-              Name
-            </p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Name</p>
             <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
               {user?.name ?? "Unknown administrator"}
             </p>
@@ -47,9 +41,7 @@ export function SettingsSection({
             </p>
           </div>
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
-              Role
-            </p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Role</p>
             <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
               {user?.role ?? "Unknown"}
             </p>

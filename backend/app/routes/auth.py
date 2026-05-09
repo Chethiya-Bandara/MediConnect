@@ -1,8 +1,9 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from app.config.supabase import supabase, supabase_admin
+from app.middleware.file_validator import validate_upload_file
 from app.middleware.role_checker import build_user_context
 from app.schemas.auth_schema import (
     LoginRequest,
@@ -10,13 +11,251 @@ from app.schemas.auth_schema import (
     RegisterRequest,
 )
 from app.utils.helpers import hash_nic, generate_dhid, is_valid_password, get_password_errors, validate_dhid
+from app.utils.gemini_client import verify_identity_document
 from supabase_auth.errors import AuthApiError
 
 
 router = APIRouter()
+_ADMIN_ROLES = {"hospital_admin", "pharmacy_admin", "health_ministry_admin"}
+
+_STATUS_ALIASES = {
+    "approve": "approved",
+    "approved": "approved",
+    "active": "approved",
+    "pending": "pending",
+    "reject": "rejected",
+    "rejected": "rejected",
+    "suspend": "suspended",
+    "suspended": "suspended",
+}
+
+def _normalize_for_match(value: str) -> str:
+    return "".join(ch.lower() for ch in value if ch.isalnum())
+
+
+def _normalize_gender(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"m", "male"}:
+        return "male"
+    if normalized in {"f", "female"}:
+        return "female"
+    return normalized
+
+
+def _verify_registration_nic_document(
+    *,
+    file_bytes: bytes,
+    file: UploadFile,
+    expected_nic: str,
+    expected_full_name: str,
+    expected_dob: str,
+    expected_gender: str,
+    require_name_match: bool,
+    require_dob_match: bool,
+    require_gender_match: bool,
+):
+    verification, issue = verify_identity_document(
+        image_bytes=file_bytes,
+        mime_type=file.content_type or "image/jpeg",
+        expected_nic=expected_nic,
+        expected_full_name=expected_full_name,
+        expected_dob=expected_dob,
+        expected_gender=expected_gender,
+    )
+    if verification is None:
+        raise HTTPException(
+            status_code=503,
+            detail=issue or "NIC verification is unavailable right now",
+        )
+
+
+def _normalize_admin_status(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    return _STATUS_ALIASES.get(normalized, normalized)
+
+
+def _get_user_row(user_id: str) -> dict | None:
+    rows = (
+        supabase_admin.table("users")
+        .select("id, email, role, status, name, pref_name")
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
+
+
+def _parse_organisation_id(raw_value: str | None) -> int | None:
+    if raw_value is None or not str(raw_value).strip():
+        return None
+    if not str(raw_value).strip().isdigit():
+        raise HTTPException(status_code=400, detail="Organization ID must be a valid number")
+    return int(str(raw_value).strip())
+
+
+def _require_organisation_by_type(organisation_id: int | None, expected_type: str) -> dict:
+    if organisation_id is None:
+        raise HTTPException(status_code=400, detail="Organization ID is required for this role")
+
+    organisation_rows = (
+        supabase_admin.table("organisations")
+        .select("id, name, type, status")
+        .eq("id", organisation_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not organisation_rows:
+        raise HTTPException(status_code=404, detail="Organization was not found")
+
+    organisation = organisation_rows[0]
+    actual_type = str(organisation.get("type") or "").strip().lower()
+    if actual_type != expected_type:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Organization ID {organisation_id} belongs to a {actual_type or 'different'} organisation, "
+                f"not a {expected_type} organisation."
+            ),
+        )
+    return organisation
+
+
+def _resolve_linked_record_by_organisation(table_name: str, organisation_id: int, not_found_detail: str) -> dict:
+    linked_rows = (
+        supabase_admin.table(table_name)
+        .select("id, organisation_id")
+        .eq("organisation_id", organisation_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not linked_rows:
+        raise HTTPException(status_code=404, detail=not_found_detail)
+    return linked_rows[0]
+
+
+def _get_login_block_message(user_row: dict) -> str | None:
+    role = str(user_row.get("role") or "").strip().lower()
+    status_value = _normalize_admin_status(user_row.get("status"))
+
+    if role == "pharmacist":
+        if status_value == "approved":
+            return None
+        if status_value == "pending":
+            return "Pending approval from your pharmacy admin. Your pharmacist login will work after approval."
+        if status_value == "suspended":
+            return "Your pharmacist account is suspended. Contact your pharmacy admin."
+        if status_value == "rejected":
+            return "Your pharmacist account was rejected."
+        return "Your pharmacist account is not approved for login yet."
+
+    if role not in _ADMIN_ROLES:
+        return None
+    if status_value == "approved":
+        return None
+    if status_value == "pending":
+        return "Pending approval from the Health Ministry. Your admin login will work after approval."
+    if status_value == "rejected":
+        return "Your admin registration was rejected by the Health Ministry."
+    if status_value == "suspended":
+        return "Your admin account is suspended. Contact the Health Ministry."
+    return "Your admin account is not approved for login yet."
+
+    nic_match = bool(verification.get("matches_expected_nic"))
+    name_match = bool(verification.get("matches_expected_name"))
+    dob_match = bool(verification.get("matches_expected_dob"))
+    gender_match = bool(verification.get("matches_expected_gender"))
+    document_ok = bool(verification.get("is_identity_document"))
+    extracted_nic = _normalize_for_match(str(verification.get("nic_number") or ""))
+    expected_nic_normalized = _normalize_for_match(expected_nic)
+    extracted_gender = _normalize_gender(str(verification.get("gender") or ""))
+    expected_gender_normalized = _normalize_gender(expected_gender)
+    extracted_dob = str(verification.get("date_of_birth") or "").strip()
+
+    if extracted_nic and extracted_nic == expected_nic_normalized:
+        nic_match = True
+    if expected_dob and extracted_dob and extracted_dob == expected_dob:
+        dob_match = True
+    if expected_gender_normalized and extracted_gender and extracted_gender == expected_gender_normalized:
+        gender_match = True
+
+    if (
+        not document_ok
+        or not nic_match
+        or (require_name_match and not name_match)
+        or (require_dob_match and not dob_match)
+        or (require_gender_match and not gender_match)
+    ):
+        reason = str(verification.get("reason") or "").strip()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                reason
+                or "NIC image verification failed. Upload a clear NIC image that matches the registration details."
+            ),
+        )
+
 
 @router.post("/register")
-def register(user: RegisterRequest):
+async def register(
+    email: str = Form(...),
+    password: str = Form(...),
+    role: str = Form(...),
+    fullName: Optional[str] = Form(None),
+    preferredName: Optional[str] = Form(None),
+    nic: Optional[str] = Form(None),
+    dob: Optional[str] = Form(None),
+    gender: Optional[str] = Form(None),
+    address: Optional[str] = Form(None),
+    specialization: Optional[str] = Form(None),
+    licenseNumber: Optional[str] = Form(None),
+    parentNic: Optional[str] = Form(None),
+    organisationId: Optional[str] = Form(None),
+    nicImage: UploadFile = File(...),
+):
+    file_bytes = await validate_upload_file(nicImage)
+    if (nicImage.content_type or "").strip().lower() not in {"image/jpeg", "image/png"}:
+        raise HTTPException(status_code=400, detail="NIC image must be a JPG or PNG file")
+
+    user = RegisterRequest(
+        email=email,
+        password=password,
+        role=role,
+        fullName=fullName,
+        preferredName=preferredName,
+        nic=nic,
+        dob=dob,
+        gender=gender,
+        address=address,
+        specialization=specialization,
+        licenseNumber=licenseNumber,
+        parentNic=parentNic,
+        organisationId=organisationId,
+        nicImageFileName=nicImage.filename,
+        nicImageFileSize=len(file_bytes),
+        nicImageFileType=nicImage.content_type,
+    )
+
+    expected_nic = user.nic or user.parentNic
+    if not expected_nic:
+        raise HTTPException(status_code=400, detail="NIC is required for verification")
+
+    _verify_registration_nic_document(
+        file_bytes=file_bytes,
+        file=nicImage,
+        expected_nic=expected_nic,
+        expected_full_name=user.fullName or "",
+        expected_dob=user.dob or "",
+        expected_gender=user.gender or "",
+        require_name_match=bool(user.nic),
+        require_dob_match=bool(user.nic),
+        require_gender_match=bool(user.nic),
+    )
 
     # ── Password Complexity Validation (Bihanga B-1.1.3) ──────────
     if not is_valid_password(user.password):
@@ -43,9 +282,13 @@ def register(user: RegisterRequest):
     try:
         user_metadata = {
             "full_name": user.fullName,
+            "preferred_name": user.preferredName,
             "dob": user.dob,
             "gender": user.gender,
+            "address": user.address,
             "role": role,
+            "license_number": user.licenseNumber,
+            "nic_verification_status": "verified",
         }
         if role == "patient" and user.parentNic:
             user_metadata["guardian_nic_hash"] = hash_nic(user.parentNic)
@@ -56,12 +299,18 @@ def register(user: RegisterRequest):
         )
 
         # users table
-        supabase_admin.table("users").insert({
-            "id": user_id,
-            "email": user.email,
-            "role": role,
-            "name": user.fullName,
-        }).execute()
+        user_status = "pending" if role in (_ADMIN_ROLES | {"pharmacist"}) else "active"
+        supabase_admin.table("users").insert(
+            {
+                "id": user_id,
+                "email": user.email,
+                "role": role,
+                "name": user.fullName,
+                "pref_name": user.preferredName,
+                "address": user.address,
+                "status": user_status,
+            }
+        ).execute()
 
         # ROLE LOGIC
         if role == "patient":
@@ -88,18 +337,26 @@ def register(user: RegisterRequest):
             }).execute()
 
         elif role == "pharmacist":
-                supabase_admin.table("pharmacists").insert({
-                    "user_id": user_id,
-                    "pharmacy_id": int(user.pharmacyId),
-                    "license_no": user.licenseNumber or f"PENDING-{user_id[:8].upper()}",
-                }).execute()
+            organisation_id = _parse_organisation_id(user.organisationId)
+            _require_organisation_by_type(organisation_id, "pharmacy")
+            pharmacy = _resolve_linked_record_by_organisation(
+                "pharmacies",
+                organisation_id,
+                "No pharmacy record exists for that organization ID",
+            )
+            supabase_admin.table("pharmacists").insert({
+                "user_id": user_id,
+                "pharmacy_id": pharmacy["id"],
+                "license_no": user.licenseNumber,
+                "status": user_status,
+            }).execute()
 
         elif role in ["hospital_admin", "pharmacy_admin", "health_ministry_admin"]:
-            organisation_id = (
-                int(user.organisationId)
-                if user.organisationId and user.organisationId.isdigit()
-                else None
-            )
+            organisation_id = _parse_organisation_id(user.organisationId)
+            if role == "hospital_admin":
+                _require_organisation_by_type(organisation_id, "hospital")
+            elif role == "pharmacy_admin":
+                _require_organisation_by_type(organisation_id, "pharmacy")
             supabase_admin.table("admin_profiles").insert({
                 "user_id": user_id,
                 "admin_role": role,
@@ -136,6 +393,14 @@ def login(data: LoginRequest):
 
     if not res.session:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    user_row = _get_user_row(res.user.id)
+    if not user_row:
+        raise HTTPException(status_code=404, detail="User profile not found")
+
+    login_block_message = _get_login_block_message(user_row)
+    if login_block_message:
+        raise HTTPException(status_code=403, detail=login_block_message)
 
     return {
         "success": True,

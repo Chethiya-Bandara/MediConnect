@@ -1,11 +1,4 @@
-import {
-  BarChart3,
-  ClipboardCheck,
-  Landmark,
-  Pill,
-  Settings,
-  Shield,
-} from "lucide-react";
+import { BarChart3, ClipboardCheck, Landmark, Pill, Settings, Shield } from "lucide-react";
 import type { ComponentType } from "react";
 import type { HealthMinistryAdminSection } from "./types";
 

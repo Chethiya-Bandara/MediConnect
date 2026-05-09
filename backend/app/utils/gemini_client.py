@@ -1,5 +1,6 @@
 import json
 import os
+import base64
 from typing import Optional
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -147,6 +148,7 @@ def _build_direct_prompt(message: str, history: list[dict], snapshot: dict, cont
         "You may also give general health education, practical next steps, and clarifying questions when the user's message asks for broader guidance.\n"
         "Clearly say when something is general information instead of data from MediConnect records.\n"
         "Do not invent diagnoses, appointments, availability, medicines, prescriptions, test results, or records.\n"
+        "For medicine-alternative questions, only mention exact generic equivalents when the ingredient, strength, and dosage form all match the provided data, and do not suggest therapeutic alternatives.\n"
         "Do not give a definitive diagnosis or emergency reassurance; mention urgent care when symptoms sound severe.\n"
         "Keep replies short: usually 2-4 sentences, or a few compact bullets only when that is clearer.\n"
         "Keep the reply useful and human, not robotic.\n\n"
@@ -161,10 +163,13 @@ def _call_direct_gemini(payload: dict) -> tuple[Optional[str], Optional[str]]:
     if not api_keys:
         return None, "Gemini API key is not configured on the server"
 
-    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
     context_key = "patient_context"
     snapshot = payload.get(context_key) or {}
-    if "doctor_context" in payload:
+    if "moh_admin_context" in payload:
+        context_key = "moh_admin_context"
+        snapshot = payload.get("moh_admin_context") or {}
+    elif "doctor_context" in payload:
         context_key = "doctor_context"
         snapshot = payload.get("doctor_context") or {}
 
@@ -247,3 +252,126 @@ def call_gemini_assistant(payload: dict) -> tuple[Optional[str], Optional[str]]:
         return direct_answer, None
 
     return None, direct_issue or issue or "Gemini AI is unavailable right now"
+
+
+def verify_identity_document(
+    *,
+    image_bytes: bytes,
+    mime_type: str,
+    expected_nic: str,
+    expected_full_name: str,
+    expected_dob: str = "",
+    expected_gender: str = "",
+) -> tuple[Optional[dict], Optional[str]]:
+    api_keys = _configured_api_keys()
+    if not api_keys:
+        return None, "Gemini API key is not configured on the server"
+
+    model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+    prompt = (
+        "You are verifying a Sri Lankan NIC image for registration.\n"
+        "Return JSON only with these keys:\n"
+        "is_identity_document: boolean,\n"
+        "document_type: string,\n"
+        "nic_number: string,\n"
+        "full_name: string,\n"
+        "date_of_birth: string,\n"
+        "gender: string,\n"
+        "matches_expected_nic: boolean,\n"
+        "matches_expected_name: boolean,\n"
+        "matches_expected_dob: boolean,\n"
+        "matches_expected_gender: boolean,\n"
+        "confidence: number,\n"
+        "reason: string.\n"
+        "If the image is unreadable, say so in reason and set confidence low.\n"
+        f"Expected NIC: {expected_nic}\n"
+        f"Expected full name: {expected_full_name}\n"
+        f"Expected date of birth: {expected_dob}\n"
+        f"Expected gender: {expected_gender}\n"
+        "Treat minor OCR spacing and case differences as acceptable for matches_expected_name and matches_expected_nic.\n"
+        "For gender, normalize to male or female.\n"
+        "For date_of_birth, prefer YYYY-MM-DD. If you cannot read a value clearly, return an empty string and set the corresponding match flag to false."
+    )
+
+    request_payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": base64.b64encode(image_bytes).decode("ascii"),
+                        }
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.1,
+            "topP": 0.8,
+        },
+    }
+
+    last_issue = "Gemini verification is unavailable right now"
+    quota_failures = 0
+    for api_key in api_keys:
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            f"?key={api_key}"
+        )
+        request = urllib_request.Request(
+            url,
+            data=json.dumps(request_payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urllib_request.urlopen(request, timeout=45) as response:
+                raw = response.read().decode("utf-8")
+        except urllib_error.HTTPError as exc:
+            issue = _summarize_http_error(exc)
+            last_issue = issue
+            if exc.code == 429:
+                quota_failures += 1
+                continue
+            return None, issue
+        except urllib_error.URLError:
+            return None, "Gemini API is unreachable from the server"
+
+        if not raw.strip():
+            last_issue = "Gemini verification returned an empty response"
+            continue
+
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return None, "Gemini verification returned invalid JSON"
+
+        answer = _extract_answer(parsed)
+        if not answer:
+            last_issue = "Gemini verification returned no usable answer"
+            continue
+
+        try:
+            verification = json.loads(answer)
+        except json.JSONDecodeError:
+            cleaned = answer.strip().strip("`")
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+            try:
+                verification = json.loads(cleaned)
+            except json.JSONDecodeError:
+                return None, "Gemini verification returned malformed JSON"
+
+        if isinstance(verification, dict):
+            return verification, None
+
+        last_issue = "Gemini verification returned an unexpected payload"
+
+    if quota_failures == len(api_keys) and api_keys:
+        return None, "all configured Gemini API keys are temporarily out of quota"
+
+    return None, last_issue

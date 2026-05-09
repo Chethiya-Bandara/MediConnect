@@ -38,7 +38,7 @@ export function LoginPage() {
       return;
     }
 
-    navigate(getRoleLandingPath());
+    navigate(getRoleLandingPath(result.role));
   };
 
   return (
@@ -48,12 +48,10 @@ export function LoginPage() {
       <main className="auth-main login-layout">
         <section className="login-hero">
           <p className="hero-kicker">Clinical Portal Access</p>
-          <h1>
-            Securing National Health Data with Clinical Precision.
-          </h1>
+          <h1>Securing National Health Data with Clinical Precision.</h1>
           <p>
-            Access your unified health record, manage clinical appointments,
-            and connect with healthcare providers across the nation.
+            Access your unified health record, manage clinical appointments, and connect with
+            healthcare providers across the nation.
           </p>
         </section>
 
@@ -119,11 +117,7 @@ export function LoginPage() {
               <span>Remember this device</span>
             </label>
 
-            <Button
-              type="submit"
-              className="primary-button"
-              isLoading={isSubmitting}
-            >
+            <Button type="submit" className="primary-button" isLoading={isSubmitting}>
               Login to Portal
             </Button>
 

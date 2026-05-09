@@ -53,8 +53,8 @@ MediConnect aims to reduce delays, duplicate tests, and incomplete patient histo
 - Privacy controls (NIC masking, restricted diagnosis visibility)
 - Audit logs for sensitive actions
 - Transaction consistency for critical operations
-- FastAPI modular architecture + SQLAlchemy/Alembic migrations
-- Docker-friendly local deployment
+- FastAPI modular architecture + Alembic migration support
+- Docker Compose local startup support
 
 ## Tech Stack
 - Frontend: React.js / Next.js
@@ -90,6 +90,10 @@ Excluded (for now):
 
 ## How to Run Locally
 
+Detailed guides:
+- `docs/LOCAL_SETUP.md`
+- `docs/API_USAGE.md`
+
 ### Prerequisites
 Make sure you have the following installed:
 - Python 3.12 or higher
@@ -114,13 +118,13 @@ cp .env.example .env
 # Open .env and fill in your Supabase and JWT secret values
 
 # Run the backend server
-python -m uvicorn main:app --reload
+python -m uvicorn main:app --reload --port 8001
 
-# Or use the helper runner that is pinned to port 8000
+# Or use the helper runner
 python run_dev.py
 ```
-Backend runs at: `http://127.0.0.1:8000`
-API docs available at: `http://127.0.0.1:8000/docs`
+Backend runs at: `http://127.0.0.1:8001`
+API docs available at: `http://127.0.0.1:8001/docs`
 
 ### 3. Frontend Setup
 ```bash
@@ -141,6 +145,35 @@ pip install pre-commit
 python -m pre_commit install
 ```
 This automatically checks every commit for hardcoded secrets.
+
+### 5. Shared Linting And Formatting
+Frontend:
+```bash
+cd frontend
+npm run lint
+npm run format:check
+```
+
+Backend config:
+- Root `pyproject.toml` defines shared `black` and `ruff` settings.
+
+### 6. Alembic Migrations
+```bash
+cd ..
+alembic upgrade head
+```
+
+Set `DATABASE_URL` or `SUPABASE_DB_URL` first if you want Alembic to target a live PostgreSQL database.
+
+### 7. Docker Compose
+```bash
+docker compose up --build
+```
+
+Optional local PostgreSQL profile:
+```bash
+docker compose --profile local-db up --build
+```
 
 ---
 

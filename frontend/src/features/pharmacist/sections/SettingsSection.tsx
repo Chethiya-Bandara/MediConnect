@@ -26,9 +26,7 @@ export function SettingsSection({ user, onLogout }: SettingsSectionProps) {
 
         <div className="mt-6 space-y-4">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
-              Name
-            </p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Name</p>
             <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
               {user?.name ?? "Unknown pharmacist"}
             </p>
@@ -42,9 +40,7 @@ export function SettingsSection({ user, onLogout }: SettingsSectionProps) {
             </p>
           </div>
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
-              Role
-            </p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Role</p>
             <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
               {user?.role ?? "Unknown"}
             </p>

@@ -15,8 +15,7 @@ const toneStyles: Record<AlertTone, string> = {
     "border-red-200 bg-red-50 text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300",
   success:
     "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300",
-  info:
-    "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300",
+  info: "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300",
 };
 
 const toneIcons = {
@@ -25,12 +24,7 @@ const toneIcons = {
   info: Info,
 } satisfies Record<AlertTone, typeof AlertTriangle>;
 
-export function AlertBanner({
-  tone = "info",
-  title,
-  message,
-  className,
-}: AlertBannerProps) {
+export function AlertBanner({ tone = "info", title, message, className }: AlertBannerProps) {
   const Icon = toneIcons[tone];
 
   return (

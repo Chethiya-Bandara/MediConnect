@@ -13,11 +13,7 @@ interface UsersSectionProps {
   ) => Promise<boolean>;
 }
 
-export function UsersSection({
-  message,
-  isSubmitting,
-  onSubmit,
-}: UsersSectionProps) {
+export function UsersSection({ message, isSubmitting, onSubmit }: UsersSectionProps) {
   const [targetId, setTargetId] = useState("");
   const [targetType, setTargetType] = useState<GovernanceTargetType>("USER");
   const [action, setAction] = useState<GovernanceAction>("SUSPEND");
@@ -104,20 +100,24 @@ export function UsersSection({
               Audit Expectations
             </h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Proposal-side expectations the governance console should eventually enforce end to end.
+              Proposal-side expectations the governance console should eventually enforce end to
+              end.
             </p>
           </div>
         </div>
 
         <div className="mt-5 space-y-3">
           <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-            Every sensitive governance action should map to a user, role, organisation, timestamp, and action type.
+            Every sensitive governance action should map to a user, role, organisation, timestamp,
+            and action type.
           </div>
           <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-            Export and scoped audit views are in the proposal, but the current backend still needs more plumbing before that becomes trustworthy.
+            Export and scoped audit views are in the proposal, but the current backend still needs
+            more plumbing before that becomes trustworthy.
           </div>
           <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-            This screen focuses on safe account governance actions without inventing fantasy moderation features.
+            This screen focuses on safe account governance actions without inventing fantasy
+            moderation features.
           </div>
         </div>
       </article>

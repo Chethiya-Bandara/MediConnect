@@ -7,8 +7,6 @@ interface TopbarProps extends PropsWithChildren {
 
 export function Topbar({ className, children }: TopbarProps) {
   return (
-    <header className={cn("flex items-center justify-between gap-4", className)}>
-      {children}
-    </header>
+    <header className={cn("flex items-center justify-between gap-4", className)}>{children}</header>
   );
 }

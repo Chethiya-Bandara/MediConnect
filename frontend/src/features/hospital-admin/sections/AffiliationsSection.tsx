@@ -20,8 +20,7 @@ export function AffiliationsSection({
   onRevokeAffiliation,
 }: AffiliationsSectionProps) {
   const [decisionAffiliationId, setDecisionAffiliationId] = useState("");
-  const [decisionStatus, setDecisionStatus] =
-    useState<AffiliationDecisionStatus>("APPROVED");
+  const [decisionStatus, setDecisionStatus] = useState<AffiliationDecisionStatus>("APPROVED");
   const [revokeAffiliationId, setRevokeAffiliationId] = useState("");
 
   return (
@@ -34,7 +33,8 @@ export function AffiliationsSection({
               Affiliation Decision
             </h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Approve or reject doctor-hospital affiliation requests using the current backend contract.
+              Approve or reject doctor-hospital affiliation requests using the current backend
+              contract.
             </p>
           </div>
         </div>
@@ -58,7 +58,9 @@ export function AffiliationsSection({
             </span>
             <select
               value={decisionStatus}
-              onChange={(event) => setDecisionStatus(event.target.value as AffiliationDecisionStatus)}
+              onChange={(event) =>
+                setDecisionStatus(event.target.value as AffiliationDecisionStatus)
+              }
               className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
             >
               <option value="APPROVED">Approve</option>
@@ -86,7 +88,8 @@ export function AffiliationsSection({
               Revoke Affiliation
             </h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Revoke an existing doctor affiliation when the hospital relationship needs to be cut cleanly.
+              Revoke an existing doctor affiliation when the hospital relationship needs to be cut
+              cleanly.
             </p>
           </div>
         </div>

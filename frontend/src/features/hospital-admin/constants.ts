@@ -1,9 +1,4 @@
-import {
-  Building2,
-  CalendarDays,
-  Link2,
-  Settings,
-} from "lucide-react";
+import { Building2, CalendarDays, Link2, Settings } from "lucide-react";
 import type { ComponentType } from "react";
 import type { HospitalAdminSection } from "./types";
 

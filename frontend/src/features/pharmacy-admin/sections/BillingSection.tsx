@@ -30,8 +30,7 @@ export function BillingSection({ inventory, stats }: BillingSectionProps) {
     setEstimateItemId(inventory[0]?.id ?? "");
   }, [inventory]);
 
-  const selectedEstimateItem =
-    inventory.find((item) => item.id === estimateItemId) ?? null;
+  const selectedEstimateItem = inventory.find((item) => item.id === estimateItemId) ?? null;
 
   const missingPrices = inventory.filter((item) => item.unitPrice === null).length;
   const estimateTotal = useMemo(() => {
@@ -77,7 +76,8 @@ export function BillingSection({ inventory, stats }: BillingSectionProps) {
                 Pricing Oversight
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Pharmacy admin owns the price list. Final billing still belongs server-side once dispensing is processed.
+                Pharmacy admin owns the price list. Final billing still belongs server-side once
+                dispensing is processed.
               </p>
             </div>
           </div>
@@ -130,7 +130,8 @@ export function BillingSection({ inventory, stats }: BillingSectionProps) {
                 Local Estimate
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Quick admin-side estimate only. The real itemised bill must come from backend dispensing logic.
+                Quick admin-side estimate only. The real itemised bill must come from backend
+                dispensing logic.
               </p>
             </div>
           </div>
@@ -182,7 +183,8 @@ export function BillingSection({ inventory, stats }: BillingSectionProps) {
                   {formatLkr(estimateTotal)}
                 </p>
                 <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                  Based on the current catalog unit price for {selectedEstimateItem?.medicineName ?? "the selected item"}.
+                  Based on the current catalog unit price for{" "}
+                  {selectedEstimateItem?.medicineName ?? "the selected item"}.
                 </p>
               </div>
             </div>

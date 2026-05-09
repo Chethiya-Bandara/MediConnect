@@ -27,7 +27,7 @@ export async function getAppointments() {
 }
 
 export function updatePatientProfile(payload: {
-  name?: string;
+  preferred_name?: string;
   medical_record_consent_default?: boolean;
 }) {
   return apiRequest<DashboardOverview["user"]>(endpoints.patient.profile, {
@@ -54,9 +54,7 @@ export async function getAvailableSlots(doctorId: number) {
   return Array.isArray(response.slots) ? response.slots : [];
 }
 
-export function createAppointment(payload: {
-  slot_id: number;
-}) {
+export function createAppointment(payload: { slot_id: number }) {
   return apiRequest<DashboardAppointment>(endpoints.patient.appointments, {
     method: "POST",
     body: JSON.stringify(payload),
@@ -71,19 +69,13 @@ export function updateAppointment(
     status?: string;
   },
 ) {
-  return apiRequest<DashboardAppointment>(
-    `${endpoints.patient.appointments}/${appointmentId}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    },
-  );
+  return apiRequest<DashboardAppointment>(`${endpoints.patient.appointments}/${appointmentId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
-export function updateAppointmentConsent(
-  appointmentId: number,
-  granted: boolean,
-) {
+export function updateAppointmentConsent(appointmentId: number, granted: boolean) {
   return apiRequest<ConsentUpdateResult>(
     `${endpoints.patient.appointments}/${appointmentId}/consent`,
     {
@@ -94,9 +86,7 @@ export function updateAppointmentConsent(
 }
 
 export async function getMedicalRecords() {
-  const response = await apiRequest<ApiListResponse<DashboardRecord>>(
-    endpoints.patient.records,
-  );
+  const response = await apiRequest<ApiListResponse<DashboardRecord>>(endpoints.patient.records);
   return response.items;
 }
 
@@ -119,18 +109,13 @@ export async function getPatientPharmacies() {
   return response.items;
 }
 
-export function getPharmacyEstimate(
-  prescriptionId: number,
-  pharmacyId: number,
-) {
+export function getPharmacyEstimate(prescriptionId: number, pharmacyId: number) {
   const search = new URLSearchParams({
     prescription_id: String(prescriptionId),
     pharmacy_id: String(pharmacyId),
   });
 
-  return apiRequest<PharmacyEstimate>(
-    `${endpoints.patient.pharmacyEstimate}?${search.toString()}`,
-  );
+  return apiRequest<PharmacyEstimate>(`${endpoints.patient.pharmacyEstimate}?${search.toString()}`);
 }
 
 export function getDispensingSummary() {

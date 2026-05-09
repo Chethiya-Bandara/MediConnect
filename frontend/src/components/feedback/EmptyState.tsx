@@ -7,11 +7,7 @@ interface EmptyStateProps {
   className?: string;
 }
 
-export function EmptyState({
-  title,
-  description,
-  className,
-}: EmptyStateProps) {
+export function EmptyState({ title, description, className }: EmptyStateProps) {
   return (
     <div
       className={cn(
@@ -22,12 +18,8 @@ export function EmptyState({
       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
         <Inbox size={20} />
       </div>
-      <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-        {title}
-      </h2>
-      <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-        {description}
-      </p>
+      <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">{title}</h2>
+      <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{description}</p>
     </div>
   );
 }

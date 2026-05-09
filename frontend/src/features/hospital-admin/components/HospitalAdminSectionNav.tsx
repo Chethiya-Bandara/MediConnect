@@ -7,10 +7,7 @@ interface HospitalAdminSectionNavProps {
   onChange: (section: HospitalAdminSection) => void;
 }
 
-export function HospitalAdminSectionNav({
-  value,
-  onChange,
-}: HospitalAdminSectionNavProps) {
+export function HospitalAdminSectionNav({ value, onChange }: HospitalAdminSectionNavProps) {
   return (
     <div className="flex flex-wrap gap-2">
       {hospitalAdminSectionTabs.map((item) => {

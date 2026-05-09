@@ -55,7 +55,7 @@ type DashboardView =
   | "performance"
   | "investigation";
 type ThemeMode = "light" | "dark";
-type ApprovalEntityFilter = "all" | "organisations" | "doctors";
+type ApprovalEntityFilter = "organisations" | "doctors" | "admins";
 
 const views = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -175,9 +175,7 @@ function StatCard({
         <div className={`rounded-xl p-2 ${tone}`}>
           <Icon size={18} />
         </div>
-        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
-          {note}
-        </span>
+        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{note}</span>
       </div>
       <div>
         <p className="text-3xl font-extrabold">{value}</p>
@@ -191,11 +189,7 @@ function StatCard({
 
 function downloadCsv(filename: string, rows: string[][]) {
   const csv = rows
-    .map((row) =>
-      row
-        .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
-        .join(","),
-    )
+    .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
     .join("\n");
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -211,8 +205,12 @@ type DashboardHook = ReturnType<typeof useHealthMinistryAdminDashboard>;
 
 function statusBadge(status: string | null) {
   const s = (status ?? "").toLowerCase();
-  if (s === "pending") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
-  if (s === "approved") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (s === "pending")
+    return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
+  if (s === "approved")
+    return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (s === "rejected") return "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300";
+  if (s === "suspended") return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
   if (s === "expired") return "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400";
   if (s === "deactivated") return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
   return "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300";
@@ -226,6 +224,15 @@ function timeRemaining(expiresAt: string | null): string {
   const mins = Math.floor((diff % 3_600_000) / 60_000);
   return `${hours}h ${mins}m remaining`;
 }
+
+const approvalEntityOptions: Array<{
+  value: ApprovalEntityFilter;
+  label: string;
+}> = [
+  { value: "organisations", label: "Organisations" },
+  { value: "doctors", label: "Doctors" },
+  { value: "admins", label: "Admin Roles" },
+];
 
 type PersonTab = "patients" | "doctors" | "pharmacists" | "hospital_admins";
 
@@ -259,7 +266,14 @@ function DeletionsView({
   const filtered = personList.filter((p) => {
     const q = personSearch.trim().toLowerCase();
     if (!q) return true;
-    return [p.name, p.email, p.id, (p as RegistryPersonItem).dhid, (p as RegistryPersonItem).slmcNumber, (p as RegistryPersonItem).licenseNo]
+    return [
+      p.name,
+      p.email,
+      p.id,
+      (p as RegistryPersonItem).dhid,
+      (p as RegistryPersonItem).slmcNumber,
+      (p as RegistryPersonItem).licenseNo,
+    ]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
@@ -286,7 +300,8 @@ function DeletionsView({
             Deletion Requests
           </h1>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            All deactivations require a second Ministry admin to approve within 48 hours. Records are never removed — only access is revoked.
+            All deactivations require a second Ministry admin to approve within 48 hours. Records
+            are never removed — only access is revoked.
           </p>
         </div>
         <button
@@ -306,17 +321,24 @@ function DeletionsView({
         <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 dark:border-amber-800/40 dark:bg-amber-900/20 dark:text-amber-300">
           <Clock size={16} className="shrink-0" />
           <span>
-            <span className="font-bold">{pendingCount} pending deletion request{pendingCount !== 1 ? "s" : ""}</span> awaiting a second admin's approval.
+            <span className="font-bold">
+              {pendingCount} pending deletion request{pendingCount !== 1 ? "s" : ""}
+            </span>{" "}
+            awaiting a second admin's approval.
           </span>
         </div>
       ) : null}
 
       {dashboard.deletionMessage ? (
-        <div className={`rounded-2xl border px-5 py-4 text-sm ${
-          dashboard.deletionMessage.toLowerCase().includes("fail") || dashboard.deletionMessage.toLowerCase().includes("error") || dashboard.deletionMessage.toLowerCase().includes("cannot")
-            ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300"
-            : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-300"
-        }`}>
+        <div
+          className={`rounded-2xl border px-5 py-4 text-sm ${
+            dashboard.deletionMessage.toLowerCase().includes("fail") ||
+            dashboard.deletionMessage.toLowerCase().includes("error") ||
+            dashboard.deletionMessage.toLowerCase().includes("cannot")
+              ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300"
+              : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-300"
+          }`}
+        >
           {dashboard.deletionMessage}
         </div>
       ) : null}
@@ -327,7 +349,9 @@ function DeletionsView({
           <div>
             <h2 className="font-headline text-lg font-bold">All Deletion Requests</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Pending requests can only be approved by a <span className="font-semibold">different</span> Ministry admin from the one who submitted them.
+              Pending requests can only be approved by a{" "}
+              <span className="font-semibold">different</span> Ministry admin from the one who
+              submitted them.
             </p>
           </div>
           <div className="relative w-full max-w-xs">
@@ -380,20 +404,29 @@ function DeletionsView({
                     </td>
                     <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
                       {req.status === "pending" ? (
-                        <span className="text-amber-700 dark:text-amber-400">{timeRemaining(req.expiresAt)}</span>
+                        <span className="text-amber-700 dark:text-amber-400">
+                          {timeRemaining(req.expiresAt)}
+                        </span>
                       ) : (
                         <span className="text-slate-400 dark:text-slate-500">—</span>
                       )}
                     </td>
                     <td className="px-5 py-4">
-                      <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(req.status)}`}>
+                      <span
+                        className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(req.status)}`}
+                      >
                         {req.status}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
-                      {req.approvedByName
-                        ? <>{req.approvedByName}<div className="text-xs">{formatDisplayDate(req.approvedAt)}</div></>
-                        : "—"}
+                      {req.approvedByName ? (
+                        <>
+                          {req.approvedByName}
+                          <div className="text-xs">{formatDisplayDate(req.approvedAt)}</div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-5 py-4">
                       {req.status === "pending" ? (
@@ -425,7 +458,9 @@ function DeletionsView({
                         </div>
                       ) : (
                         <div className="flex justify-end">
-                          <span className="text-xs text-slate-400 dark:text-slate-500">No action</span>
+                          <span className="text-xs text-slate-400 dark:text-slate-500">
+                            No action
+                          </span>
                         </div>
                       )}
                     </td>
@@ -433,7 +468,10 @@ function DeletionsView({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="px-5 py-10 text-center text-slate-500 dark:text-slate-400">
+                  <td
+                    colSpan={7}
+                    className="px-5 py-10 text-center text-slate-500 dark:text-slate-400"
+                  >
                     {dashboard.isLoadingDeletions
                       ? "Loading deletion requests…"
                       : requestSearch
@@ -452,7 +490,8 @@ function DeletionsView({
         <div className="border-b border-slate-200 px-6 py-5 dark:border-slate-700">
           <h2 className="font-headline text-lg font-bold">Request Deactivation — People</h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Select a person and click the trash icon to initiate a deletion request. Deactivated users cannot log in but all their records remain intact.
+            Select a person and click the trash icon to initiate a deletion request. Deactivated
+            users cannot log in but all their records remain intact.
           </p>
         </div>
 
@@ -461,7 +500,10 @@ function DeletionsView({
             <button
               key={tab}
               type="button"
-              onClick={() => { setPersonTab(tab); setPersonSearch(""); }}
+              onClick={() => {
+                setPersonTab(tab);
+                setPersonSearch("");
+              }}
               className={`rounded-t-lg px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${
                 personTab === tab
                   ? "bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200"
@@ -513,10 +555,15 @@ function DeletionsView({
                 filtered.map((person) => {
                   const isDeactivated = (person.status ?? "").toLowerCase() === "deactivated";
                   return (
-                    <tr key={person.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isDeactivated ? "opacity-60" : ""}`}>
+                    <tr
+                      key={person.id}
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isDeactivated ? "opacity-60" : ""}`}
+                    >
                       <td className="px-5 py-4">
                         <div className="font-semibold">{person.name ?? "No name"}</div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">{person.email ?? "—"}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                          {person.email ?? "—"}
+                        </div>
                       </td>
                       <td className="px-5 py-4 font-mono text-xs text-slate-500 dark:text-slate-400">
                         {person.id}
@@ -524,13 +571,22 @@ function DeletionsView({
                       <td className="px-5 py-4 text-xs text-slate-500 dark:text-slate-400">
                         {personTab === "patients" && person.dhid ? `DHID: ${person.dhid}` : null}
                         {personTab === "doctors" ? (
-                          <>{person.specialization ?? "—"}{person.slmcNumber ? ` · SLMC: ${person.slmcNumber}` : ""}</>
+                          <>
+                            {person.specialization ?? "—"}
+                            {person.slmcNumber ? ` · SLMC: ${person.slmcNumber}` : ""}
+                          </>
                         ) : null}
-                        {personTab === "pharmacists" && person.licenseNo ? `Lic: ${person.licenseNo}` : null}
-                        {personTab === "hospital_admins" ? `Role: ${person.adminRole ?? "—"}` : null}
+                        {personTab === "pharmacists" && person.licenseNo
+                          ? `Lic: ${person.licenseNo}`
+                          : null}
+                        {personTab === "hospital_admins"
+                          ? `Role: ${person.adminRole ?? "—"}`
+                          : null}
                       </td>
                       <td className="px-5 py-4">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(person.status)}`}>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(person.status)}`}
+                        >
                           {person.status ?? "active"}
                         </span>
                       </td>
@@ -554,7 +610,10 @@ function DeletionsView({
                 })
               ) : (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-500 dark:text-slate-400">
+                  <td
+                    colSpan={6}
+                    className="px-5 py-10 text-center text-slate-500 dark:text-slate-400"
+                  >
                     {dashboard.isLoadingRegistry
                       ? "Loading registry…"
                       : personSearch
@@ -577,9 +636,7 @@ export function HealthMinistryAdminDashboardPage() {
   const dashboard = useHealthMinistryAdminDashboard();
 
   const [view, setView] = useState<DashboardView>("overview");
-  const [theme, setTheme] = useState<ThemeMode>("dark");
-  const [organizationId, setOrganizationId] = useState("");
-  const [doctorId, setDoctorId] = useState("");
+  const [theme, setTheme] = useState<ThemeMode>("light");
   const [organisationSearch, setOrganisationSearch] = useState("");
   const [newOrganisationName, setNewOrganisationName] = useState("");
   const [newOrganisationType, setNewOrganisationType] = useState("hospital");
@@ -587,12 +644,11 @@ export function HealthMinistryAdminDashboardPage() {
   const [governanceTargetId, setGovernanceTargetId] = useState("");
   const [governanceTargetType, setGovernanceTargetType] =
     useState<GovernanceTargetType>("ORGANIZATION");
-  const [governanceAction, setGovernanceAction] =
-    useState<GovernanceAction>("SUSPEND");
+  const [governanceAction, setGovernanceAction] = useState<GovernanceAction>("SUSPEND");
   const [auditSearch, setAuditSearch] = useState("");
   const [approvalsSearch, setApprovalsSearch] = useState("");
   const [approvalEntityFilter, setApprovalEntityFilter] =
-    useState<ApprovalEntityFilter>("all");
+    useState<ApprovalEntityFilter>("organisations");
   const [analyticsExportMessage, setAnalyticsExportMessage] = useState<string | null>(null);
   const [auditRoleFilter, setAuditRoleFilter] = useState("ALL");
   const [auditActionFilter, setAuditActionFilter] = useState("ALL");
@@ -617,9 +673,7 @@ export function HealthMinistryAdminDashboardPage() {
 
   const deferredAuditSearch = useDeferredValue(auditSearch.trim().toLowerCase());
   const deferredApprovalSearch = useDeferredValue(approvalsSearch.trim().toLowerCase());
-  const deferredOrganisationSearch = useDeferredValue(
-    organisationSearch.trim().toLowerCase(),
-  );
+  const deferredOrganisationSearch = useDeferredValue(organisationSearch.trim().toLowerCase());
   const deferredMedicineSearch = useDeferredValue(medicineSearch.trim().toLowerCase());
 
   useEffect(() => {
@@ -627,7 +681,7 @@ export function HealthMinistryAdminDashboardPage() {
     if (storedTheme === "light" || storedTheme === "dark") {
       setTheme(storedTheme);
     } else {
-      setTheme("dark");
+      setTheme("light");
     }
   }, []);
 
@@ -654,7 +708,8 @@ export function HealthMinistryAdminDashboardPage() {
   const topDiagnosis = dashboard.topDiagnoses[0]?.code ?? "No diagnosis feed yet";
   const totalPendingApprovals =
     dashboard.dashboardStats.pendingDoctors +
-    dashboard.dashboardStats.pendingOrganisations;
+    dashboard.dashboardStats.pendingOrganisations +
+    dashboard.dashboardStats.pendingAdmins;
 
   const stats = useMemo(
     () => [
@@ -677,8 +732,7 @@ export function HealthMinistryAdminDashboardPage() {
         value: dashboard.dashboardStats.totalOrganisations.toLocaleString("en-LK"),
         note: `${dashboard.dashboardStats.pendingOrganisations} pending`,
         icon: Building2,
-        tone:
-          "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+        tone: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
       },
       {
         label: "Pending Approvals",
@@ -693,27 +747,22 @@ export function HealthMinistryAdminDashboardPage() {
 
   const filteredAuditLogs = useMemo(() => {
     return dashboard.auditLogs.filter((row) => {
-      const matchesSearch = !deferredAuditSearch
-        || [
-          row.actorName,
-          row.actorRole,
-          row.organisationName,
-          row.action,
-          row.details,
-        ]
+      const matchesSearch =
+        !deferredAuditSearch ||
+        [row.actorName, row.actorRole, row.organisationName, row.action, row.details]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
           .includes(deferredAuditSearch);
-      const matchesRole = auditRoleFilter === "ALL" || (row.actorRole ?? "Unknown") === auditRoleFilter;
-      const matchesAction = auditActionFilter === "ALL" || (row.action ?? "UNKNOWN") === auditActionFilter;
+      const matchesRole =
+        auditRoleFilter === "ALL" || (row.actorRole ?? "Unknown") === auditRoleFilter;
+      const matchesAction =
+        auditActionFilter === "ALL" || (row.action ?? "UNKNOWN") === auditActionFilter;
       return matchesSearch && matchesRole && matchesAction;
     });
   }, [auditActionFilter, auditRoleFilter, dashboard.auditLogs, deferredAuditSearch]);
 
   const filteredPendingOrganisations = useMemo(() => {
-    if (approvalEntityFilter === "doctors") return [];
-
     return dashboard.pendingOrganisations.filter((row) => {
       const haystack = [row.name, row.id, row.type, row.status]
         .filter(Boolean)
@@ -724,10 +773,9 @@ export function HealthMinistryAdminDashboardPage() {
   }, [approvalEntityFilter, dashboard.pendingOrganisations, deferredApprovalSearch]);
 
   const filteredPendingDoctors = useMemo(() => {
-    if (approvalEntityFilter === "organisations") return [];
-
     return dashboard.pendingDoctors.filter((row) => {
       const haystack = [
+        row.preferredName,
         row.name,
         row.email,
         row.doctorId,
@@ -742,15 +790,29 @@ export function HealthMinistryAdminDashboardPage() {
     });
   }, [approvalEntityFilter, dashboard.pendingDoctors, deferredApprovalSearch]);
 
+  const filteredPendingAdmins = useMemo(() => {
+    return dashboard.pendingAdmins.filter((row) => {
+      const haystack = [
+        row.preferredName,
+        row.name,
+        row.email,
+        row.userId,
+        row.adminRole,
+        row.role,
+        row.organisationId,
+        row.organisationName,
+        row.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return !deferredApprovalSearch || haystack.includes(deferredApprovalSearch);
+    });
+  }, [approvalEntityFilter, dashboard.pendingAdmins, deferredApprovalSearch]);
+
   const filteredManagedOrganisations = useMemo(() => {
     return dashboard.managedOrganisations.filter((row) => {
-      const haystack = [
-        row.name,
-        row.id,
-        row.type,
-        row.status,
-        row.linkedTable,
-      ]
+      const haystack = [row.name, row.id, row.type, row.status, row.linkedTable]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -760,13 +822,7 @@ export function HealthMinistryAdminDashboardPage() {
 
   const filteredManagedMedicines = useMemo(() => {
     return dashboard.managedMedicines.filter((row) => {
-      const haystack = [
-        row.id,
-        row.name,
-        row.unit,
-        row.wholesalePrice,
-        row.retailPrice,
-      ]
+      const haystack = [row.id, row.name, row.unit, row.wholesalePrice, row.retailPrice]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -847,9 +903,9 @@ export function HealthMinistryAdminDashboardPage() {
     navigate("/login");
   };
 
-  const handleOrganizationDecision = async (status: ApprovalStatus, targetId?: string) => {
-    const resolvedId = targetId ?? organizationId;
-    if (!resolvedId.trim()) return;
+  const handleOrganizationDecision = async (status: ApprovalStatus, targetId: string) => {
+    const resolvedId = targetId.trim();
+    if (!resolvedId) return;
     const confirmed = window.confirm(
       `${status === "approved" ? "Approve" : "Reject"} organisation ${resolvedId}?`,
     );
@@ -857,14 +913,34 @@ export function HealthMinistryAdminDashboardPage() {
     await dashboard.submitOrganizationApproval(resolvedId, status);
   };
 
-  const handleDoctorDecision = async (status: ApprovalStatus, targetId?: string) => {
-    const resolvedId = targetId ?? doctorId;
-    if (!resolvedId.trim()) return;
+  const handleDoctorDecision = async (status: ApprovalStatus, targetId: string) => {
+    const resolvedId = targetId.trim();
+    if (!resolvedId) return;
     const confirmed = window.confirm(
       `${status === "approved" ? "Approve" : "Reject"} doctor ${resolvedId}?`,
     );
     if (!confirmed) return;
     await dashboard.submitDoctorApproval(resolvedId, status);
+  };
+
+  const handleAdminDecision = async (
+    status: ApprovalStatus,
+    targetId: string,
+    label?: string | null,
+  ) => {
+    if (!targetId.trim()) return;
+
+    const actionLabel =
+      status === "approved"
+        ? "Approve"
+        : status === "rejected"
+          ? "Reject"
+          : status === "pending"
+            ? "Move back to pending"
+            : "Suspend";
+    const confirmed = window.confirm(`${actionLabel} admin account ${label ?? targetId}?`);
+    if (!confirmed) return;
+    await dashboard.submitAdminApproval(targetId, status);
   };
 
   const handleGovernanceAction = async () => {
@@ -874,11 +950,7 @@ export function HealthMinistryAdminDashboardPage() {
       `${governanceAction === "SUSPEND" ? "Suspend" : "Reactivate"} ${governanceTargetType.toLowerCase()} ${trimmedTarget}?`,
     );
     if (!confirmed) return;
-    await dashboard.submitUserAction(
-      trimmedTarget,
-      governanceTargetType,
-      governanceAction,
-    );
+    await dashboard.submitUserAction(trimmedTarget, governanceTargetType, governanceAction);
   };
 
   const handleOrganisationCreate = async () => {
@@ -902,9 +974,7 @@ export function HealthMinistryAdminDashboardPage() {
     const nextAction: GovernanceAction =
       (row.status ?? "").toLowerCase() === "suspended" ? "ACTIVATE" : "SUSPEND";
     const label = nextAction === "ACTIVATE" ? "set active" : "suspend";
-    const confirmed = window.confirm(
-      `${label} ${row.name ?? `organisation ${row.id}`}?`,
-    );
+    const confirmed = window.confirm(`${label} ${row.name ?? `organisation ${row.id}`}?`);
     if (!confirmed) return;
     await dashboard.submitUserAction(row.id, "ORGANIZATION", nextAction);
   };
@@ -917,14 +987,11 @@ export function HealthMinistryAdminDashboardPage() {
     setMedicineDrafts((current) => ({
       ...current,
       [medicineId]: {
-        name: field === "name" ? value : current[medicineId]?.name ?? "",
-        unit: field === "unit" ? value : current[medicineId]?.unit ?? "",
+        name: field === "name" ? value : (current[medicineId]?.name ?? ""),
+        unit: field === "unit" ? value : (current[medicineId]?.unit ?? ""),
         wholesalePrice:
-          field === "wholesalePrice"
-            ? value
-            : current[medicineId]?.wholesalePrice ?? "0",
-        retailPrice:
-          field === "retailPrice" ? value : current[medicineId]?.retailPrice ?? "0",
+          field === "wholesalePrice" ? value : (current[medicineId]?.wholesalePrice ?? "0"),
+        retailPrice: field === "retailPrice" ? value : (current[medicineId]?.retailPrice ?? "0"),
       },
     }));
   };
@@ -981,10 +1048,17 @@ export function HealthMinistryAdminDashboardPage() {
   };
 
   const handleOrganisationDeleteRequest = async (row: ManagedOrganisationItem) => {
-    const orgType = (row.linkedTable === "hospitals" ? "hospital" : row.linkedTable === "pharmacies" ? "pharmacy" : "organisation") as DeletionEntityType;
-    const entityId = orgType !== "organisation" && row.linkedRecordId != null
-      ? String(row.linkedRecordId)
-      : row.id;
+    const orgType = (
+      row.linkedTable === "hospitals"
+        ? "hospital"
+        : row.linkedTable === "pharmacies"
+          ? "pharmacy"
+          : "organisation"
+    ) as DeletionEntityType;
+    const entityId =
+      orgType !== "organisation" && row.linkedRecordId != null
+        ? String(row.linkedRecordId)
+        : row.id;
     const confirmed = window.confirm(
       `Request deactivation of ${row.name ?? `organisation ${row.id}`}?\n\nThis will create a pending deletion request that requires a second Ministry admin to approve within 48 hours. All records are preserved.`,
     );
@@ -1018,46 +1092,46 @@ export function HealthMinistryAdminDashboardPage() {
 
   const exportAuditLogs = () => {
     if (filteredAuditLogs.length === 0) {
-      setAuditExportMessage("Nothing matched the current audit filters, so there is nothing useful to export.");
+      setAuditExportMessage(
+        "Nothing matched the current audit filters, so there is nothing useful to export.",
+      );
       return;
     }
 
-    downloadCsv(
-      "health-ministry-audit-logs.csv",
-      [
-        ["Timestamp", "Actor", "Role", "Organisation", "Action", "Details"],
-        ...filteredAuditLogs.map((row) => [
-          row.timestamp ?? "",
-          row.actorName ?? row.actorId ?? "",
-          row.actorRole ?? "",
-          row.organisationName ?? "",
-          row.action ?? "",
-          row.details ?? "",
-        ]),
-      ],
-    );
+    downloadCsv("health-ministry-audit-logs.csv", [
+      ["Timestamp", "Actor", "Role", "Organisation", "Action", "Details"],
+      ...filteredAuditLogs.map((row) => [
+        row.timestamp ?? "",
+        row.actorName ?? row.actorId ?? "",
+        row.actorRole ?? "",
+        row.organisationName ?? "",
+        row.action ?? "",
+        row.details ?? "",
+      ]),
+    ]);
     setAuditExportMessage(`Exported ${filteredAuditLogs.length} audit row(s) to CSV.`);
   };
 
   const exportIncidenceCsv = () => {
     if (dashboard.incidence.length === 0) {
-      setAnalyticsExportMessage("No incidence rows are available for the current filter range, so there is nothing useful to export.");
+      setAnalyticsExportMessage(
+        "No incidence rows are available for the current filter range, so there is nothing useful to export.",
+      );
       return;
     }
 
-    downloadCsv(
-      "health-ministry-incidence.csv",
-      [
-        ["Diagnosis", "Count"],
-        ...dashboard.incidence.map((row) => [row.code, row.count.toString()]),
-      ],
-    );
+    downloadCsv("health-ministry-incidence.csv", [
+      ["Diagnosis", "Count"],
+      ...dashboard.incidence.map((row) => [row.code, row.count.toString()]),
+    ]);
     setAnalyticsExportMessage(`Exported ${dashboard.incidence.length} analytics row(s) to CSV.`);
   };
 
   const downloadReport = () => {
     if (!dashboard.report) {
-      setReportDownloadMessage("Generate the monthly report first. No backend report means nothing real to download.");
+      setReportDownloadMessage(
+        "Generate the monthly report first. No backend report means nothing real to download.",
+      );
       return;
     }
 
@@ -1155,8 +1229,8 @@ export function HealthMinistryAdminDashboardPage() {
                     National Admin Dashboard
                   </h1>
                   <p className="mt-2 max-w-3xl text-sm text-slate-500 dark:text-slate-400">
-                    Strategic oversight and ecosystem management for the
-                    MediConnect national digital health ministry workspace.
+                    Strategic oversight and ecosystem management for the MediConnect national
+                    digital health ministry workspace.
                   </p>
                 </div>
                 <div className="flex max-w-md gap-4 rounded-3xl border-l-4 border-cyan-600 bg-cyan-50 p-5 dark:border-blue-500 dark:bg-blue-900/20">
@@ -1167,9 +1241,8 @@ export function HealthMinistryAdminDashboardPage() {
                     </p>
                     <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">
                       Leading diagnosis feed says{" "}
-                      <span className="font-semibold">{topDiagnosis}</span>. If
-                      that looks empty, diagnosis telemetry is not available
-                      yet.
+                      <span className="font-semibold">{topDiagnosis}</span>. If that looks empty,
+                      diagnosis telemetry is not available yet.
                     </p>
                   </div>
                 </div>
@@ -1222,9 +1295,7 @@ export function HealthMinistryAdminDashboardPage() {
                 </section>
 
                 <aside className="space-y-6">
-                  <h2 className="px-2 font-headline text-xl font-bold">
-                    Account Management
-                  </h2>
+                  <h2 className="px-2 font-headline text-xl font-bold">Account Management</h2>
                   <div className="space-y-6 rounded-[2rem] border border-slate-200 bg-slate-100/70 p-8 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                     <div className="space-y-4">
                       <label className="block text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
@@ -1238,13 +1309,18 @@ export function HealthMinistryAdminDashboardPage() {
                           placeholder="UID or organisation id"
                           type="text"
                         />
-                        <Search className="absolute right-4 top-4 text-slate-400 dark:text-slate-500" size={18} />
+                        <Search
+                          className="absolute right-4 top-4 text-slate-400 dark:text-slate-500"
+                          size={18}
+                        />
                       </div>
                     </div>
 
                     <select
                       value={governanceTargetType}
-                      onChange={(event) => setGovernanceTargetType(event.target.value as GovernanceTargetType)}
+                      onChange={(event) =>
+                        setGovernanceTargetType(event.target.value as GovernanceTargetType)
+                      }
                       className="w-full rounded-xl border-0 bg-white px-4 py-4 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                     >
                       <option value="ORGANIZATION">Organization</option>
@@ -1253,7 +1329,9 @@ export function HealthMinistryAdminDashboardPage() {
 
                     <select
                       value={governanceAction}
-                      onChange={(event) => setGovernanceAction(event.target.value as GovernanceAction)}
+                      onChange={(event) =>
+                        setGovernanceAction(event.target.value as GovernanceAction)
+                      }
                       className="w-full rounded-xl border-0 bg-white px-4 py-4 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                     >
                       <option value="SUSPEND">Suspend</option>
@@ -1263,16 +1341,16 @@ export function HealthMinistryAdminDashboardPage() {
                     <button
                       type="button"
                       onClick={() => void handleGovernanceAction()}
-                      disabled={
-                        dashboard.isSubmittingUserAction || !governanceTargetId.trim()
-                      }
+                      disabled={dashboard.isSubmittingUserAction || !governanceTargetId.trim()}
                       className="w-full rounded-2xl bg-red-600 px-5 py-4 text-sm font-bold text-white shadow-lg shadow-red-900/10 transition-opacity hover:opacity-90 disabled:opacity-60"
                     >
-                    {dashboard.isSubmittingUserAction ? "Applying..." : "Apply Action"}
+                      {dashboard.isSubmittingUserAction ? "Applying..." : "Apply Action"}
                     </button>
 
                     {dashboard.usersMessage ? (
-                      <div className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.usersMessage)}`}>
+                      <div
+                        className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.usersMessage)}`}
+                      >
                         {dashboard.usersMessage}
                       </div>
                     ) : null}
@@ -1303,7 +1381,7 @@ export function HealthMinistryAdminDashboardPage() {
                 </button>
               </header>
 
-              <section className="grid gap-4 rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 lg:grid-cols-[1.4fr,0.8fr,0.8fr,0.8fr]">
+              <section className="grid gap-4 rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.7fr)]">
                 <label className="space-y-2">
                   <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
                     <Search size={14} />
@@ -1313,41 +1391,59 @@ export function HealthMinistryAdminDashboardPage() {
                     type="text"
                     value={approvalsSearch}
                     onChange={(event) => setApprovalsSearch(event.target.value)}
-                    placeholder="Name, email, doctor ID, org ID, specialty"
+                    placeholder="Name, email, user ID, doctor ID, org ID, specialty"
                     className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                   />
                 </label>
-                <label className="space-y-2">
+                <div className="space-y-2">
                   <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
                     <Users size={14} />
                     Entity type
                   </span>
-                  <select
-                    value={approvalEntityFilter}
-                    onChange={(event) => setApprovalEntityFilter(event.target.value as ApprovalEntityFilter)}
-                    className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                  >
-                    <option value="all">All pending entities</option>
-                    <option value="organisations">Hospitals & pharmacies</option>
-                    <option value="doctors">Doctors only</option>
-                  </select>
-                </label>
-                <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-900">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                    Organisations visible
-                  </p>
-                  <p className="mt-2 text-2xl font-extrabold">{filteredPendingOrganisations.length}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {approvalEntityOptions.map((option) => {
+                      const isActive = approvalEntityFilter === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setApprovalEntityFilter(option.value)}
+                          className={`rounded-full px-4 py-2 text-sm font-bold transition-colors ${
+                            isActive
+                              ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20"
+                              : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-900">
                   <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                    Doctors visible
+                    Visible results
                   </p>
-                  <p className="mt-2 text-2xl font-extrabold">{filteredPendingDoctors.length}</p>
+                  <p className="mt-2 text-2xl font-extrabold">
+                    {approvalEntityFilter === "organisations"
+                      ? filteredPendingOrganisations.length
+                      : approvalEntityFilter === "doctors"
+                        ? filteredPendingDoctors.length
+                        : filteredPendingAdmins.length}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {approvalEntityFilter === "organisations"
+                      ? "Hospitals and pharmacies in the queue"
+                      : approvalEntityFilter === "doctors"
+                        ? "Doctor registrations awaiting review"
+                        : "Admin-role accounts under ministry control"}
+                  </p>
                 </div>
               </section>
 
-              <div className="grid gap-8 xl:grid-cols-2">
-                <div className="rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <div className="space-y-8">
+                {approvalEntityFilter === "organisations" ? (
+                  <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                   <div className="flex flex-col gap-2 border-b border-slate-200 px-6 py-5 dark:border-slate-700">
                     <h2 className="font-headline text-lg font-bold">
                       Organisations ({filteredPendingOrganisations.length})
@@ -1394,7 +1490,9 @@ export function HealthMinistryAdminDashboardPage() {
                                 <div className="flex justify-end gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => void handleOrganizationDecision("approved", row.id)}
+                                    onClick={() =>
+                                      void handleOrganizationDecision("approved", row.id)
+                                    }
                                     disabled={dashboard.isSubmittingApproval}
                                     className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                                   >
@@ -1402,7 +1500,9 @@ export function HealthMinistryAdminDashboardPage() {
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => void handleOrganizationDecision("rejected", row.id)}
+                                    onClick={() =>
+                                      void handleOrganizationDecision("rejected", row.id)
+                                    }
                                     disabled={dashboard.isSubmittingApproval}
                                     className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
                                   >
@@ -1414,10 +1514,11 @@ export function HealthMinistryAdminDashboardPage() {
                           ))
                         ) : (
                           <tr>
-                            <td colSpan={5} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
-                              {approvalEntityFilter === "doctors"
-                                ? "Organisation approvals are hidden by the current entity filter."
-                                : deferredApprovalSearch
+                            <td
+                              colSpan={5}
+                              className="px-6 py-8 text-center text-slate-500 dark:text-slate-400"
+                            >
+                              {deferredApprovalSearch
                                   ? "No organisation approvals matched your current search."
                                   : "No pending organisation approvals right now."}
                             </td>
@@ -1426,9 +1527,11 @@ export function HealthMinistryAdminDashboardPage() {
                       </tbody>
                     </table>
                   </div>
-                </div>
+                  </div>
+                ) : null}
 
-                <div className="rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                {approvalEntityFilter === "doctors" ? (
+                  <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                   <div className="flex flex-col gap-2 border-b border-slate-200 px-6 py-5 dark:border-slate-700">
                     <h2 className="font-headline text-lg font-bold">
                       Doctors ({filteredPendingDoctors.length})
@@ -1454,7 +1557,7 @@ export function HealthMinistryAdminDashboardPage() {
                             <tr key={row.doctorId}>
                               <td className="px-6 py-4">
                                 <div className="font-semibold">
-                                  {row.name ?? `Doctor ${row.doctorId}`}
+                                  {row.preferredName ?? row.name ?? `Doctor ${row.doctorId}`}
                                 </div>
                                 <div className="text-xs text-slate-500 dark:text-slate-400">
                                   {row.email ?? "No email"}
@@ -1473,7 +1576,9 @@ export function HealthMinistryAdminDashboardPage() {
                                 <div className="flex justify-end gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => void handleDoctorDecision("approved", row.doctorId)}
+                                    onClick={() =>
+                                      void handleDoctorDecision("approved", row.doctorId)
+                                    }
                                     disabled={dashboard.isSubmittingApproval}
                                     className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                                   >
@@ -1481,7 +1586,9 @@ export function HealthMinistryAdminDashboardPage() {
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => void handleDoctorDecision("rejected", row.doctorId)}
+                                    onClick={() =>
+                                      void handleDoctorDecision("rejected", row.doctorId)
+                                    }
                                     disabled={dashboard.isSubmittingApproval}
                                     className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
                                   >
@@ -1493,10 +1600,11 @@ export function HealthMinistryAdminDashboardPage() {
                           ))
                         ) : (
                           <tr>
-                            <td colSpan={5} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
-                              {approvalEntityFilter === "organisations"
-                                ? "Doctor approvals are hidden by the current entity filter."
-                                : deferredApprovalSearch
+                            <td
+                              colSpan={5}
+                              className="px-6 py-8 text-center text-slate-500 dark:text-slate-400"
+                            >
+                              {deferredApprovalSearch
                                   ? "No doctor approvals matched your current search."
                                   : "No pending doctor approvals right now."}
                             </td>
@@ -1505,73 +1613,149 @@ export function HealthMinistryAdminDashboardPage() {
                       </tbody>
                     </table>
                   </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <div className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <h2 className="font-headline text-lg font-bold">Manual Organisation Review</h2>
-                  <div className="mt-5 space-y-4">
-                    <input
-                      value={organizationId}
-                      onChange={(event) => setOrganizationId(event.target.value)}
-                      className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                      placeholder="Organisation ID"
-                    />
-                    <div className="flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() => void handleOrganizationDecision("approved")}
-                        disabled={dashboard.isSubmittingApproval || !organizationId.trim()}
-                        className="flex-1 rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleOrganizationDecision("rejected")}
-                        disabled={dashboard.isSubmittingApproval || !organizationId.trim()}
-                        className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60"
-                      >
-                        Reject
-                      </button>
-                    </div>
                   </div>
-                </div>
+                ) : null}
 
-                <div className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <h2 className="font-headline text-lg font-bold">Manual Doctor Review</h2>
-                  <div className="mt-5 space-y-4">
-                    <input
-                      value={doctorId}
-                      onChange={(event) => setDoctorId(event.target.value)}
-                      className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                      placeholder="Doctor ID"
-                    />
-                    <div className="flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() => void handleDoctorDecision("approved")}
-                        disabled={dashboard.isSubmittingApproval || !doctorId.trim()}
-                        className="flex-1 rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleDoctorDecision("rejected")}
-                        disabled={dashboard.isSubmittingApproval || !doctorId.trim()}
-                        className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60"
-                      >
-                        Reject
-                      </button>
-                    </div>
+                {approvalEntityFilter === "admins" ? (
+                  <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <div className="flex flex-col gap-2 border-b border-slate-200 px-6 py-5 dark:border-slate-700">
+                    <h2 className="font-headline text-lg font-bold">
+                      Admin Roles ({filteredPendingAdmins.length})
+                    </h2>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Ministry-controlled approval queue for hospital, pharmacy, and ministry admin accounts.
+                    </p>
                   </div>
-                </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <tr>
+                          <th className="px-6 py-4">Admin</th>
+                          <th className="px-6 py-4">Role</th>
+                          <th className="px-6 py-4">Organisation</th>
+                          <th className="px-6 py-4">Status</th>
+                          <th className="px-6 py-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {filteredPendingAdmins.length > 0 ? (
+                          filteredPendingAdmins.map((row) => (
+                            <tr key={row.userId}>
+                              <td className="px-6 py-4">
+                                <div className="font-semibold">
+                                  {row.preferredName ?? row.name ?? row.email ?? `Admin ${row.userId}`}
+                                </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                  {row.email ?? "No email"}
+                                </div>
+                                <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                                  User ID: {row.userId}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
+                                <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                                  {formatStatusLabel(row.adminRole ?? row.role ?? "admin")}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
+                                {row.organisationName ?? row.organisationId ?? "National scope"}
+                              </td>
+                              <td className="px-6 py-4">
+                                <span
+                                  className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(row.status)}`}
+                                >
+                                  {formatStatusLabel(row.status ?? "pending")}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleAdminDecision(
+                                        "approved",
+                                        row.userId,
+                                        row.preferredName ?? row.name ?? row.email,
+                                      )
+                                    }
+                                    disabled={dashboard.isSubmittingApproval}
+                                    className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                                    title="Approve"
+                                  >
+                                    <CheckCircle2 size={18} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleAdminDecision(
+                                        "rejected",
+                                        row.userId,
+                                        row.preferredName ?? row.name ?? row.email,
+                                      )
+                                    }
+                                    disabled={dashboard.isSubmittingApproval}
+                                    className="rounded-lg p-2 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/20"
+                                    title="Reject"
+                                  >
+                                    <XCircle size={18} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleAdminDecision(
+                                        "pending",
+                                        row.userId,
+                                        row.preferredName ?? row.name ?? row.email,
+                                      )
+                                    }
+                                    disabled={dashboard.isSubmittingApproval}
+                                    className="rounded-lg p-2 text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-900/20"
+                                    title="Set pending"
+                                  >
+                                    <Clock size={18} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleAdminDecision(
+                                        "suspended",
+                                        row.userId,
+                                        row.preferredName ?? row.name ?? row.email,
+                                      )
+                                    }
+                                    disabled={dashboard.isSubmittingApproval}
+                                    className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                                    title="Suspend"
+                                  >
+                                    <ShieldAlert size={18} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td
+                              colSpan={5}
+                              className="px-6 py-8 text-center text-slate-500 dark:text-slate-400"
+                            >
+                              {deferredApprovalSearch
+                                    ? "No admin approvals matched your current search."
+                                    : "No pending admin approvals right now."}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  </div>
+                ) : null}
               </div>
 
               {dashboard.approvalsMessage ? (
-                <div className={`rounded-2xl border px-5 py-4 text-sm ${noticeClassName(dashboard.approvalsMessage)}`}>
+                <div
+                  className={`rounded-2xl border px-5 py-4 text-sm ${noticeClassName(dashboard.approvalsMessage)}`}
+                >
                   {dashboard.approvalsMessage}
                 </div>
               ) : null}
@@ -1586,7 +1770,8 @@ export function HealthMinistryAdminDashboardPage() {
                     Organisation Registry
                   </h1>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    Create organisations centrally and flip them between active and suspended states.
+                    Create organisations centrally and flip them between active and suspended
+                    states.
                   </p>
                 </div>
                 <button
@@ -1640,7 +1825,8 @@ export function HealthMinistryAdminDashboardPage() {
                     <div>
                       <h2 className="font-headline text-lg font-bold">Create Organisation</h2>
                       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                        Hospitals and pharmacies get their linked facility rows automatically. Everything else stays as a clean organisation record.
+                        Hospitals and pharmacies get their linked facility rows automatically.
+                        Everything else stays as a clean organisation record.
                       </p>
                     </div>
                     <Building2 className="text-blue-700 dark:text-blue-400" size={20} />
@@ -1702,7 +1888,9 @@ export function HealthMinistryAdminDashboardPage() {
                   </div>
 
                   {dashboard.organisationMessage ? (
-                    <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.organisationMessage)}`}>
+                    <div
+                      className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.organisationMessage)}`}
+                    >
                       {dashboard.organisationMessage}
                     </div>
                   ) : null}
@@ -1711,9 +1899,12 @@ export function HealthMinistryAdminDashboardPage() {
                 <section className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <h2 className="font-headline text-lg font-bold">Live Organisation Registry</h2>
+                      <h2 className="font-headline text-lg font-bold">
+                        Live Organisation Registry
+                      </h2>
                       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                        Search the current organisation records and toggle active or suspended state per row.
+                        Search the current organisation records and toggle active or suspended state
+                        per row.
                       </p>
                     </div>
                     <div className="relative w-full max-w-sm">
@@ -1724,7 +1915,10 @@ export function HealthMinistryAdminDashboardPage() {
                         placeholder="Search name, type, id, status"
                         className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 pr-11 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                       />
-                      <Search className="absolute right-4 top-3.5 text-slate-400 dark:text-slate-500" size={18} />
+                      <Search
+                        className="absolute right-4 top-3.5 text-slate-400 dark:text-slate-500"
+                        size={18}
+                      />
                     </div>
                   </div>
 
@@ -1803,7 +1997,10 @@ export function HealthMinistryAdminDashboardPage() {
                           })
                         ) : (
                           <tr>
-                            <td colSpan={6} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+                            <td
+                              colSpan={6}
+                              className="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
+                            >
                               {dashboard.isLoadingDashboard
                                 ? "Refreshing organisation registry..."
                                 : "No organisations matched the current search."}
@@ -1826,7 +2023,8 @@ export function HealthMinistryAdminDashboardPage() {
                     National Medicine Registry
                   </h1>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    Central catalog control for medicine names, pack units, and national wholesale and retail pricing.
+                    Central catalog control for medicine names, pack units, and national wholesale
+                    and retail pricing.
                   </p>
                 </div>
                 <button
@@ -1956,7 +2154,9 @@ export function HealthMinistryAdminDashboardPage() {
                   </div>
 
                   {dashboard.medicineMessage ? (
-                    <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.medicineMessage)}`}>
+                    <div
+                      className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.medicineMessage)}`}
+                    >
                       {dashboard.medicineMessage}
                     </div>
                   ) : null}
@@ -1967,7 +2167,8 @@ export function HealthMinistryAdminDashboardPage() {
                     <div>
                       <h2 className="font-headline text-lg font-bold">Live Medicine Registry</h2>
                       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                        Search, adjust pricing, and remove catalog rows that are not tied to pharmacy stock yet.
+                        Search, adjust pricing, and remove catalog rows that are not tied to
+                        pharmacy stock yet.
                       </p>
                     </div>
                     <div className="relative w-full max-w-sm">
@@ -1978,7 +2179,10 @@ export function HealthMinistryAdminDashboardPage() {
                         placeholder="Search name, unit, id, or price"
                         className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 pr-11 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                       />
-                      <Search className="absolute right-4 top-3.5 text-slate-400 dark:text-slate-500" size={18} />
+                      <Search
+                        className="absolute right-4 top-3.5 text-slate-400 dark:text-slate-500"
+                        size={18}
+                      />
                     </div>
                   </div>
 
@@ -2056,11 +2260,7 @@ export function HealthMinistryAdminDashboardPage() {
                                     step="0.01"
                                     value={draft.retailPrice}
                                     onChange={(event) =>
-                                      updateMedicineDraft(
-                                        row.id,
-                                        "retailPrice",
-                                        event.target.value,
-                                      )
+                                      updateMedicineDraft(row.id, "retailPrice", event.target.value)
                                     }
                                     className="w-full rounded-lg border-0 bg-slate-100 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                                   />
@@ -2100,7 +2300,10 @@ export function HealthMinistryAdminDashboardPage() {
                           })
                         ) : (
                           <tr>
-                            <td colSpan={7} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+                            <td
+                              colSpan={7}
+                              className="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
+                            >
                               {dashboard.isLoadingMedicines
                                 ? "Refreshing medicine registry..."
                                 : "No medicine rows matched the current search."}
@@ -2141,7 +2344,10 @@ export function HealthMinistryAdminDashboardPage() {
                 <select
                   value={dashboard.filters.district}
                   onChange={(event) =>
-                    dashboard.setFilters((current) => ({ ...current, district: event.target.value }))
+                    dashboard.setFilters((current) => ({
+                      ...current,
+                      district: event.target.value,
+                    }))
                   }
                   className="rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                 >
@@ -2154,7 +2360,10 @@ export function HealthMinistryAdminDashboardPage() {
                   type="date"
                   value={dashboard.filters.startDate}
                   onChange={(event) =>
-                    dashboard.setFilters((current) => ({ ...current, startDate: event.target.value }))
+                    dashboard.setFilters((current) => ({
+                      ...current,
+                      startDate: event.target.value,
+                    }))
                   }
                   className="rounded-lg border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
                 />
@@ -2247,7 +2456,10 @@ export function HealthMinistryAdminDashboardPage() {
                               </span>
                             </div>
                             <div className="h-2.5 w-full rounded-full bg-slate-100 dark:bg-slate-700">
-                              <div className={`h-2.5 rounded-full ${tones[index % tones.length]}`} style={{ width }} />
+                              <div
+                                className={`h-2.5 rounded-full ${tones[index % tones.length]}`}
+                                style={{ width }}
+                              />
                             </div>
                           </div>
                         );
@@ -2255,7 +2467,8 @@ export function HealthMinistryAdminDashboardPage() {
                     </div>
                   ) : (
                     <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-                      No diagnosis records are available from the current backend yet, so this chart stays empty instead of making things up.
+                      No diagnosis records are available from the current backend yet, so this chart
+                      stays empty instead of making things up.
                     </div>
                   )}
                 </div>
@@ -2272,13 +2485,16 @@ export function HealthMinistryAdminDashboardPage() {
                   </div>
                   <div className="mt-6 space-y-4 text-sm text-slate-600 dark:text-slate-300">
                     <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-900">
-                      Registered patients: {dashboard.dashboardStats.totalPatients.toLocaleString("en-LK")}
+                      Registered patients:{" "}
+                      {dashboard.dashboardStats.totalPatients.toLocaleString("en-LK")}
                     </div>
                     <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-900">
-                      Registered organisations: {dashboard.dashboardStats.totalOrganisations.toLocaleString("en-LK")}
+                      Registered organisations:{" "}
+                      {dashboard.dashboardStats.totalOrganisations.toLocaleString("en-LK")}
                     </div>
                     <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-900">
-                      Audit activity in last 24h: {dashboard.dashboardStats.auditEvents24h.toLocaleString("en-LK")}
+                      Audit activity in last 24h:{" "}
+                      {dashboard.dashboardStats.auditEvents24h.toLocaleString("en-LK")}
                     </div>
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 dark:border-slate-700 dark:bg-slate-900">
                       {incidencePeak
@@ -2314,15 +2530,20 @@ export function HealthMinistryAdminDashboardPage() {
                   </div>
                 </div>
                 <div className="mt-5 rounded-2xl bg-slate-50 p-5 text-sm leading-relaxed text-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                  {dashboard.report ?? "No report generated yet. Hit the button to generate a summary of the live registry data."}
+                  {dashboard.report ??
+                    "No report generated yet. Hit the button to generate a summary of the live registry data."}
                 </div>
                 {analyticsExportMessage ? (
-                  <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(analyticsExportMessage)}`}>
+                  <div
+                    className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(analyticsExportMessage)}`}
+                  >
                     {analyticsExportMessage}
                   </div>
                 ) : null}
                 {reportDownloadMessage ? (
-                  <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(reportDownloadMessage)}`}>
+                  <div
+                    className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(reportDownloadMessage)}`}
+                  >
                     {reportDownloadMessage}
                   </div>
                 ) : null}
@@ -2341,7 +2562,8 @@ export function HealthMinistryAdminDashboardPage() {
                     </span>
                   </h1>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    Search and export the live audit records currently available to the ministry admin.
+                    Search and export the live audit records currently available to the ministry
+                    admin.
                   </p>
                 </div>
                 <button
@@ -2428,22 +2650,27 @@ export function HealthMinistryAdminDashboardPage() {
                   <table className="w-full text-left text-sm">
                     <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                       <tr>
-                        {["Timestamp", "Actor (Role)", "Target Org", "Action", "Details"].map((heading) => (
-                          <th key={heading} className="px-4 py-3 font-semibold">
-                            {heading}
-                          </th>
-                        ))}
+                        {["Timestamp", "Actor (Role)", "Target Org", "Action", "Details"].map(
+                          (heading) => (
+                            <th key={heading} className="px-4 py-3 font-semibold">
+                              {heading}
+                            </th>
+                          ),
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                       {filteredAuditLogs.length > 0 ? (
                         filteredAuditLogs.map((row) => (
-                          <tr key={`${row.id}-${row.timestamp}`} className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <tr
+                            key={`${row.id}-${row.timestamp}`}
+                            className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                          >
                             <td className="px-4 py-3 font-mono text-xs">
                               {formatDisplayDate(row.timestamp)}
                             </td>
                             <td className="px-4 py-3">
-                              {(row.actorName ?? row.actorId ?? "Unknown actor")}{" "}
+                              {row.actorName ?? row.actorId ?? "Unknown actor"}{" "}
                               <span className="rounded bg-slate-200 px-2 py-0.5 text-[10px] dark:bg-slate-700">
                                 {row.actorRole ?? "Unknown"}
                               </span>
@@ -2461,7 +2688,10 @@ export function HealthMinistryAdminDashboardPage() {
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={5} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+                          <td
+                            colSpan={5}
+                            className="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
+                          >
                             {dashboard.isLoadingDashboard
                               ? "Refreshing live audit rows..."
                               : "No audit rows matched the current investigation filters."}
@@ -2473,11 +2703,17 @@ export function HealthMinistryAdminDashboardPage() {
                 </div>
 
                 <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                  Logged in as <span className="font-semibold">{user?.name || user?.email || "Health Ministry Admin"}</span>.
+                  Logged in as{" "}
+                  <span className="font-semibold">
+                    {user?.name || user?.email || "Health Ministry Admin"}
+                  </span>
+                  .
                 </div>
 
                 {auditExportMessage ? (
-                  <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(auditExportMessage)}`}>
+                  <div
+                    className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(auditExportMessage)}`}
+                  >
                     {auditExportMessage}
                   </div>
                 ) : null}

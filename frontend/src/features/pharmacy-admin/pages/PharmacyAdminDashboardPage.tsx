@@ -66,11 +66,11 @@ function noticeClassName(message: string | null | undefined) {
 
   const lowered = message.toLowerCase();
   if (
-    lowered.includes("fail")
-    || lowered.includes("error")
-    || lowered.includes("missing")
-    || lowered.includes("blocked")
-    || lowered.includes("not exposed")
+    lowered.includes("fail") ||
+    lowered.includes("error") ||
+    lowered.includes("missing") ||
+    lowered.includes("blocked") ||
+    lowered.includes("not exposed")
   ) {
     return "border-red-200 bg-red-50 text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300";
   }
@@ -111,16 +111,19 @@ export function PharmacyAdminDashboardPage() {
     licenseNo: "",
   });
   const [catalogSuggestions, setCatalogSuggestions] = useState<PharmacyMedicineCatalogItem[]>([]);
-  const [selectedCatalogMedicine, setSelectedCatalogMedicine] = useState<PharmacyMedicineCatalogItem | null>(null);
+  const [selectedCatalogMedicine, setSelectedCatalogMedicine] =
+    useState<PharmacyMedicineCatalogItem | null>(null);
   const [isCatalogSearchLoading, setIsCatalogSearchLoading] = useState(false);
-  const [drafts, setDrafts] = useState<Record<string, { stockQuantity: string; unitPrice: string }>>({});
+  const [drafts, setDrafts] = useState<
+    Record<string, { stockQuantity: string; unitPrice: string }>
+  >({});
   const dashboard = usePharmacyAdminDashboard(user?.organisationId ?? null);
   const deferredStaffFilter = useDeferredValue(staffStatusFilter);
   const deferredCatalogQuery = useDeferredValue(createForm.medicineName.trim());
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("theme");
-    const dark = storedTheme !== "light";
+    const dark = storedTheme === "dark";
     document.documentElement.classList.toggle("dark", dark);
     setIsDark(dark);
   }, []);
@@ -161,20 +164,20 @@ export function PharmacyAdminDashboardPage() {
         if (!active) return;
         setCatalogSuggestions(items);
         const normalizedQuery = normalizeMedicineKey(createForm.medicineName);
-        const matchedSuggestion = items.find(
-          (item) => normalizeMedicineKey(item.name) === normalizedQuery,
-        ) ?? (
-          items.length === 1
+        const matchedSuggestion =
+          items.find((item) => normalizeMedicineKey(item.name) === normalizedQuery) ??
+          (items.length === 1
             ? items[0]
-            : items.find((item) => normalizeMedicineKey(item.name).startsWith(normalizedQuery))
-        ) ?? null;
+            : items.find((item) => normalizeMedicineKey(item.name).startsWith(normalizedQuery))) ??
+          null;
 
         if (matchedSuggestion) {
           setSelectedCatalogMedicine(matchedSuggestion);
           setCreateForm((current) => ({
             ...current,
             medicineName: matchedSuggestion.name,
-            unitPrice: matchedSuggestion.retailPrice !== null ? String(matchedSuggestion.retailPrice) : "",
+            unitPrice:
+              matchedSuggestion.retailPrice !== null ? String(matchedSuggestion.retailPrice) : "",
           }));
         } else {
           setSelectedCatalogMedicine(null);
@@ -212,7 +215,7 @@ export function PharmacyAdminDashboardPage() {
 
   const activeSummary = dashboard.summary;
   const userInitials = getInitials(user?.name);
-  const activePharmacyId =
+  const activeOrganizationId =
     dashboard.summary?.pharmacyId ?? dashboard.activePharmacyId ?? dashboard.pharmacyIdInput;
 
   const topMovingItems = activeSummary?.reportSummary.fastMovingItems ?? [];
@@ -238,13 +241,16 @@ export function PharmacyAdminDashboardPage() {
   }, [deferredStaffFilter, staff]);
   const maxDispensedUnits = topMovingItems[0]?.unitsDispensed ?? 0;
 
-  const updateDraftField = (itemId: string, field: "stockQuantity" | "unitPrice", value: string) => {
+  const updateDraftField = (
+    itemId: string,
+    field: "stockQuantity" | "unitPrice",
+    value: string,
+  ) => {
     setDrafts((current) => ({
       ...current,
       [itemId]: {
-        stockQuantity:
-          field === "stockQuantity" ? value : current[itemId]?.stockQuantity ?? "0",
-        unitPrice: field === "unitPrice" ? value : current[itemId]?.unitPrice ?? "0",
+        stockQuantity: field === "stockQuantity" ? value : (current[itemId]?.stockQuantity ?? "0"),
+        unitPrice: field === "unitPrice" ? value : (current[itemId]?.unitPrice ?? "0"),
       },
     }));
   };
@@ -264,23 +270,23 @@ export function PharmacyAdminDashboardPage() {
     setInventoryFeedback(
       success
         ? `${item.medicineName} updated successfully.`
-        : dashboard.actionMessage ?? `Failed to update ${item.medicineName}.`,
+        : (dashboard.actionMessage ?? `Failed to update ${item.medicineName}.`),
     );
   };
 
   const handleCreateMedicine = async () => {
-    if (!activePharmacyId) {
+    if (!activeOrganizationId) {
       dashboard.setActionMessage("Pharmacy organisation is missing for this admin.");
       return;
     }
 
     const matchedMedicine =
-      selectedCatalogMedicine
-      ?? catalogSuggestions.find(
+      selectedCatalogMedicine ??
+      catalogSuggestions.find(
         (item) => normalizeMedicineKey(item.name) === normalizeMedicineKey(createForm.medicineName),
-      )
-      ?? (catalogSuggestions.length === 1 ? catalogSuggestions[0] : null)
-      ?? null;
+      ) ??
+      (catalogSuggestions.length === 1 ? catalogSuggestions[0] : null) ??
+      null;
 
     if (!matchedMedicine) {
       setInventoryFeedback("Pick a medicine from the central catalog before saving stock.");
@@ -288,7 +294,7 @@ export function PharmacyAdminDashboardPage() {
     }
 
     const success = await dashboard.createMedicine({
-      pharmacyId: activePharmacyId,
+      pharmacyId: activeOrganizationId,
       medicineId: matchedMedicine.id,
       medicineName: matchedMedicine.name,
       stockQuantity: normalizeNumberInput(createForm.stockQuantity),
@@ -309,20 +315,22 @@ export function PharmacyAdminDashboardPage() {
   const handleCreateMedicineNameChange = (value: string) => {
     setCreateForm((current) => ({ ...current, medicineName: value }));
     const normalizedValue = normalizeMedicineKey(value);
-    const matchedSuggestion = catalogSuggestions.find(
-      (item) => normalizeMedicineKey(item.name) === normalizedValue,
-    ) ?? (
-      catalogSuggestions.length === 1
+    const matchedSuggestion =
+      catalogSuggestions.find((item) => normalizeMedicineKey(item.name) === normalizedValue) ??
+      (catalogSuggestions.length === 1
         ? catalogSuggestions[0]
-        : catalogSuggestions.find((item) => normalizeMedicineKey(item.name).startsWith(normalizedValue))
-    ) ?? null;
+        : catalogSuggestions.find((item) =>
+            normalizeMedicineKey(item.name).startsWith(normalizedValue),
+          )) ??
+      null;
 
     setSelectedCatalogMedicine(matchedSuggestion ?? null);
     if (matchedSuggestion) {
       setCreateForm((current) => ({
         ...current,
         medicineName: matchedSuggestion.name,
-        unitPrice: matchedSuggestion.retailPrice !== null ? String(matchedSuggestion.retailPrice) : "",
+        unitPrice:
+          matchedSuggestion.retailPrice !== null ? String(matchedSuggestion.retailPrice) : "",
       }));
     } else {
       setCreateForm((current) => ({
@@ -333,7 +341,9 @@ export function PharmacyAdminDashboardPage() {
   };
 
   const actionBanner = dashboard.actionMessage ? (
-    <div className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.actionMessage)}`}>
+    <div
+      className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.actionMessage)}`}
+    >
       {dashboard.actionMessage}
     </div>
   ) : null;
@@ -431,17 +441,23 @@ export function PharmacyAdminDashboardPage() {
           {errorBanner}
           {actionBanner}
           {inventoryFeedback ? (
-            <div className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(inventoryFeedback)}`}>
+            <div
+              className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(inventoryFeedback)}`}
+            >
               {inventoryFeedback}
             </div>
           ) : null}
           {reportFeedback ? (
-            <div className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(reportFeedback)}`}>
+            <div
+              className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(reportFeedback)}`}
+            >
               {reportFeedback}
             </div>
           ) : null}
           {staffFeedback ? (
-            <div className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(staffFeedback)}`}>
+            <div
+              className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(staffFeedback)}`}
+            >
               {staffFeedback}
             </div>
           ) : null}
@@ -452,16 +468,22 @@ export function PharmacyAdminDashboardPage() {
             <header>
               <h1 className="text-3xl font-extrabold tracking-tight">Pharmacy Operations</h1>
               <p className="mt-2 text-slate-500 dark:text-slate-400">
-                Inventory oversight and commercial performance metrics for pharmacy {activePharmacyId || "not assigned"}.
+                Inventory oversight and commercial performance metrics for organization{" "}
+                {activeOrganizationId || "not assigned"}.
               </p>
             </header>
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
               {/* Inventory Value Card */}
               <div className="relative overflow-hidden rounded-[1.75rem] border border-slate-200/90 bg-[linear-gradient(135deg,_rgba(255,255,255,0.95)_0%,_rgba(241,245,249,0.9)_100%)] p-6 shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-[linear-gradient(135deg,_rgba(15,23,42,0.98)_0%,_rgba(30,41,59,0.94)_100%)]">
-                <p className="relative z-10 mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Inventory Value</p>
+                <p className="relative z-10 mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                  Inventory Value
+                </p>
                 <h3 className="relative z-10 text-3xl font-extrabold text-blue-900 dark:text-blue-300">
-                  {formatLkr(activeSummary?.inventorySummary.totalInventoryValue ?? dashboard.stats.totalStockValue)}
+                  {formatLkr(
+                    activeSummary?.inventorySummary.totalInventoryValue ??
+                      dashboard.stats.totalStockValue,
+                  )}
                 </h3>
                 <p className="relative z-10 mt-2 text-[10px] font-bold text-green-600 dark:text-green-400">
                   Last refreshed {formatDate(new Date())}
@@ -471,38 +493,56 @@ export function PharmacyAdminDashboardPage() {
               {/* Stock Alerts Card */}
               <div className="relative overflow-hidden rounded-[1.75rem] border border-red-200/50 bg-[linear-gradient(135deg,_rgba(255,241,241,0.9)_0%,_rgba(255,255,255,0.8)_100%)] p-6 shadow-sm backdrop-blur-md dark:border-red-500/20 dark:bg-[linear-gradient(135deg,_rgba(69,10,10,0.4)_0%,_rgba(15,23,42,0.9)_100%)]">
                 <div className="absolute top-0 left-0 h-full w-1.5 bg-red-500" />
-                <p className="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Stock Alerts</p>
+                <p className="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                  Stock Alerts
+                </p>
                 <h3 className="text-3xl font-extrabold text-red-600 dark:text-red-400">
-                  {activeSummary?.inventorySummary.lowStockItems ?? dashboard.stats.lowStockItems} Items
+                  {activeSummary?.inventorySummary.lowStockItems ?? dashboard.stats.lowStockItems}{" "}
+                  Items
                 </h3>
-                <p className="mt-2 text-[10px] font-bold text-red-600 dark:text-red-500">Critical restock required</p>
+                <p className="mt-2 text-[10px] font-bold text-red-600 dark:text-red-500">
+                  Critical restock required
+                </p>
               </div>
 
               {/* Staff Active Card */}
               <div className="relative overflow-hidden rounded-[1.75rem] border border-slate-200/90 bg-[linear-gradient(135deg,_rgba(255,255,255,0.95)_0%,_rgba(241,245,249,0.9)_100%)] p-6 shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-[linear-gradient(135deg,_rgba(15,23,42,0.98)_0%,_rgba(30,41,59,0.94)_100%)]">
-                <p className="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Staff Active</p>
-                <h3 className="text-3xl font-extrabold text-slate-900 dark:text-slate-200">{staff.length}</h3>
+                <p className="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                  Staff Active
+                </p>
+                <h3 className="text-3xl font-extrabold text-slate-900 dark:text-slate-200">
+                  {staff.length}
+                </h3>
                 <p className="mt-2 text-[10px] text-slate-400">Registered pharmacists</p>
               </div>
 
               {/* Today's Revenue Card */}
               <div className="relative overflow-hidden rounded-[1.75rem] border border-blue-400/30 bg-[linear-gradient(135deg,_rgba(37,99,235,0.1)_0%,_rgba(37,99,235,0.2)_100%)] p-6 shadow-xl backdrop-blur-xl dark:border-blue-400/20 dark:bg-[linear-gradient(135deg,_rgba(37,99,235,0.2)_0%,_rgba(30,41,59,0.8)_100%)]">
                 <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-blue-500/20 blur-2xl" />
-                <p className="mb-4 text-xs font-bold uppercase tracking-widest text-blue-700 dark:text-blue-300">Today's Revenue</p>
+                <p className="mb-4 text-xs font-bold uppercase tracking-widest text-blue-700 dark:text-blue-300">
+                  Today's Revenue
+                </p>
                 <h3 className="text-3xl font-extrabold text-slate-900 dark:text-white">
                   {formatLkr(activeSummary?.reportSummary.todayRevenue ?? null)}
                 </h3>
-                <p className="mt-2 text-[10px] font-bold text-blue-600/80 dark:text-blue-300/80">Tracked from dispense events</p>
+                <p className="mt-2 text-[10px] font-bold text-blue-600/80 dark:text-blue-300/80">
+                  Tracked from dispense events
+                </p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
               <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <h4 className="mb-6 text-sm font-bold uppercase tracking-widest text-slate-500">Fast-Moving Items</h4>
+                <h4 className="mb-6 text-sm font-bold uppercase tracking-widest text-slate-500">
+                  Fast-Moving Items
+                </h4>
                 <div className="space-y-4">
                   {topMovingItems.length > 0 ? (
                     topMovingItems.map((item) => (
-                      <div key={item.medicineName} className="flex items-center justify-between rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50">
+                      <div
+                        key={item.medicineName}
+                        className="flex items-center justify-between rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"
+                      >
                         <span className="text-sm font-bold">{item.medicineName}</span>
                         <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-bold text-green-700 dark:bg-green-900 dark:text-green-300">
                           {item.unitsDispensed} Units Sold
@@ -518,13 +558,15 @@ export function PharmacyAdminDashboardPage() {
               </div>
 
               <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <h4 className="mb-6 text-sm font-bold uppercase tracking-widest text-slate-500">Inventory Audit Snippet</h4>
+                <h4 className="mb-6 text-sm font-bold uppercase tracking-widest text-slate-500">
+                  Inventory Audit Snippet
+                </h4>
                 <div className="space-y-4 font-mono text-[11px] text-slate-500">
                   {recentAdjustments.length > 0 ? (
                     recentAdjustments.map((item) => (
                       <p key={item.id} className="border-b pb-2 dark:border-slate-800">
-                        {formatDateTime(item.timestamp)}: {item.adjustmentType} {item.medicineName} (
-                        {item.unitPrice !== null ? `LKR ${item.unitPrice.toFixed(2)}` : "No price"}
+                        {formatDateTime(item.timestamp)}: {item.adjustmentType} {item.medicineName}{" "}
+                        ({item.unitPrice !== null ? `LKR ${item.unitPrice.toFixed(2)}` : "No price"}
                         {item.stockQuantity !== null ? `, stock ${item.stockQuantity}` : ""})
                       </p>
                     ))
@@ -548,16 +590,24 @@ export function PharmacyAdminDashboardPage() {
                 </div>
                 <div className="mt-6 grid gap-4 md:grid-cols-3">
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Tracked items</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                      Tracked items
+                    </p>
                     <p className="mt-2 text-2xl font-extrabold">{dashboard.stats.totalItems}</p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Priced items</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                      Priced items
+                    </p>
                     <p className="mt-2 text-2xl font-extrabold">{dashboard.stats.pricedItems}</p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Average price</p>
-                    <p className="mt-2 text-2xl font-extrabold">{formatLkr(dashboard.stats.averageUnitPrice)}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                      Average price
+                    </p>
+                    <p className="mt-2 text-2xl font-extrabold">
+                      {formatLkr(dashboard.stats.averageUnitPrice)}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -566,13 +616,18 @@ export function PharmacyAdminDashboardPage() {
                 <h3 className="text-lg font-bold">Operational Notes</h3>
                 <div className="mt-5 space-y-3 text-sm text-slate-600 dark:text-slate-300">
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    Pharmacy ID in scope: <span className="font-bold">{activePharmacyId || "Not assigned"}</span>
+                    Organization ID in scope:{" "}
+                    <span className="font-bold">{activeOrganizationId || "Not assigned"}</span>
                   </div>
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    Dashboard summary source: <span className="font-bold">{activeSummary ? "Live summary" : "Inventory-only"}</span>
+                    Dashboard summary source:{" "}
+                    <span className="font-bold">
+                      {activeSummary ? "Live summary" : "Inventory-only"}
+                    </span>
                   </div>
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    Staff action module: <span className="font-bold">Currently unavailable</span>, so permission updates remain disabled until support is available.
+                    Staff action module: <span className="font-bold">Currently unavailable</span>,
+                    so permission updates remain disabled until support is available.
                   </div>
                 </div>
               </div>
@@ -586,7 +641,8 @@ export function PharmacyAdminDashboardPage() {
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight">Inventory Management</h1>
                 <p className="mt-2 text-slate-500 dark:text-slate-400">
-                  Admin-only stock and price control for pharmacy {activePharmacyId || "not assigned"}.
+                  Admin-only stock and price control for organization{" "}
+                  {activeOrganizationId || "not assigned"}.
                 </p>
               </div>
               <button
@@ -626,7 +682,12 @@ export function PharmacyAdminDashboardPage() {
                   </span>
                   <input
                     value={createForm.stockQuantity}
-                    onChange={(event) => setCreateForm((current) => ({ ...current, stockQuantity: event.target.value }))}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        stockQuantity: event.target.value,
+                      }))
+                    }
                     placeholder="Enter stock quantity"
                     type="number"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
@@ -646,10 +707,22 @@ export function PharmacyAdminDashboardPage() {
                   />
                 </label>
                 <div className="flex gap-3">
-                  <button type="button" onClick={() => void handleCreateMedicine()} className="flex-1 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-slate-100 dark:text-slate-900">
+                  <button
+                    type="button"
+                    onClick={() => void handleCreateMedicine()}
+                    className="flex-1 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-slate-100 dark:text-slate-900"
+                  >
                     Save
                   </button>
-                  <button type="button" onClick={() => { setShowCreateForm(false); setSelectedCatalogMedicine(null); setCatalogSuggestions([]); }} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCreateForm(false);
+                      setSelectedCatalogMedicine(null);
+                      setCatalogSuggestions([]);
+                    }}
+                    className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold dark:border-slate-700"
+                  >
                     Cancel
                   </button>
                 </div>
@@ -658,13 +731,23 @@ export function PharmacyAdminDashboardPage() {
                     <span>Loading central medicine catalog...</span>
                   ) : selectedCatalogMedicine ? (
                     <span>
-                      Locked to <span className="font-bold text-primary dark:text-blue-400">{selectedCatalogMedicine.name}</span>
-                      {" "}• {selectedCatalogMedicine.unit ?? "Unit not set"} • Retail {formatLkr(selectedCatalogMedicine.retailPrice)}
+                      Locked to{" "}
+                      <span className="font-bold text-primary dark:text-blue-400">
+                        {selectedCatalogMedicine.name}
+                      </span>{" "}
+                      • {selectedCatalogMedicine.unit ?? "Unit not set"} • Retail{" "}
+                      {formatLkr(selectedCatalogMedicine.retailPrice)}
                     </span>
                   ) : createForm.medicineName.trim().length >= 2 ? (
-                    <span>Pick the catalog hit from the browser suggestion list. If one result only exists, the form now auto-locks it.</span>
+                    <span>
+                      Pick the catalog hit from the browser suggestion list. If one result only
+                      exists, the form now auto-locks it.
+                    </span>
                   ) : (
-                    <span>Start typing a medicine name and the central catalog suggestions will show up here.</span>
+                    <span>
+                      Start typing a medicine name and the central catalog suggestions will show up
+                      here.
+                    </span>
                   )}
                 </div>
               </div>
@@ -673,7 +756,10 @@ export function PharmacyAdminDashboardPage() {
             <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row">
                 <div className="relative w-full md:w-96">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <Search
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    size={16}
+                  />
                   <input
                     value={dashboard.searchQuery}
                     onChange={(event) => dashboard.setSearchQuery(event.target.value)}
@@ -697,13 +783,19 @@ export function PharmacyAdminDashboardPage() {
                     type="button"
                     onClick={() => {
                       dashboard.exportInventoryCsv();
-                      setReportFeedback(`Exported ${inventoryRows.length} inventory row(s) to CSV.`);
+                      setReportFeedback(
+                        `Exported ${inventoryRows.length} inventory row(s) to CSV.`,
+                      );
                     }}
                     className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800"
                   >
                     Export CSV
                   </button>
-                  <button type="button" onClick={() => void dashboard.loadInventory()} className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => void dashboard.loadInventory()}
+                    className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800"
+                  >
                     Refresh
                   </button>
                 </div>
@@ -711,15 +803,23 @@ export function PharmacyAdminDashboardPage() {
 
               <div className="mb-6 grid gap-4 md:grid-cols-3">
                 <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Visible rows</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Visible rows
+                  </p>
                   <p className="mt-2 text-2xl font-extrabold">{inventoryRows.length}</p>
                 </div>
                 <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Low stock</p>
-                  <p className="mt-2 text-2xl font-extrabold text-red-600 dark:text-red-400">{dashboard.stats.lowStockItems}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Low stock
+                  </p>
+                  <p className="mt-2 text-2xl font-extrabold text-red-600 dark:text-red-400">
+                    {dashboard.stats.lowStockItems}
+                  </p>
                 </div>
                 <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Out of stock</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    Out of stock
+                  </p>
                   <p className="mt-2 text-2xl font-extrabold">{dashboard.stats.outOfStockItems}</p>
                 </div>
               </div>
@@ -737,108 +837,142 @@ export function PharmacyAdminDashboardPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {inventoryRows.length > 0 ? inventoryRows.map((item) => {
-                      const draft = drafts[item.id] ?? {
-                        stockQuantity: String(item.stockQuantity ?? 0),
-                        unitPrice: String(item.unitPrice ?? 0),
-                      };
-                      const lowStock = (item.stockQuantity ?? 0) > 0 && (item.stockQuantity ?? 0) <= 25;
-                      const outOfStock = (item.stockQuantity ?? 0) <= 0;
-                      const dirty =
-                        draft.stockQuantity !== String(item.stockQuantity ?? 0)
-                        || draft.unitPrice !== String(item.unitPrice ?? 0);
-                      const rowClass = lowStock
-                        ? "bg-error-container/5 hover:bg-error-container/10"
-                        : "hover:bg-slate-50 dark:hover:bg-slate-800/40";
+                    {inventoryRows.length > 0 ? (
+                      inventoryRows.map((item) => {
+                        const draft = drafts[item.id] ?? {
+                          stockQuantity: String(item.stockQuantity ?? 0),
+                          unitPrice: String(item.unitPrice ?? 0),
+                        };
+                        const lowStock =
+                          (item.stockQuantity ?? 0) > 0 && (item.stockQuantity ?? 0) <= 25;
+                        const outOfStock = (item.stockQuantity ?? 0) <= 0;
+                        const dirty =
+                          draft.stockQuantity !== String(item.stockQuantity ?? 0) ||
+                          draft.unitPrice !== String(item.unitPrice ?? 0);
+                        const rowClass = lowStock
+                          ? "bg-error-container/5 hover:bg-error-container/10"
+                          : "hover:bg-slate-50 dark:hover:bg-slate-800/40";
 
-                      return (
-                        <tr key={item.id} className={cn("transition-colors", rowClass)}>
-                          <td className="px-6 py-4">
-                              <p className={cn("font-bold", lowStock ? "text-error" : "text-blue-900 dark:text-blue-300")}>
+                        return (
+                          <tr key={item.id} className={cn("transition-colors", rowClass)}>
+                            <td className="px-6 py-4">
+                              <p
+                                className={cn(
+                                  "font-bold",
+                                  lowStock ? "text-error" : "text-blue-900 dark:text-blue-300",
+                                )}
+                              >
                                 {item.medicineName}
                               </p>
                               <p className="text-[10px] text-slate-400">{item.id}</p>
                             </td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <input
+                                  value={draft.stockQuantity}
+                                  onChange={(event) =>
+                                    updateDraftField(item.id, "stockQuantity", event.target.value)
+                                  }
+                                  className={cn(
+                                    "w-20 rounded-lg border px-2 py-1 text-center text-sm font-bold",
+                                    lowStock
+                                      ? "border-error/50 bg-white text-error dark:bg-slate-800"
+                                      : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800",
+                                  )}
+                                  type="number"
+                                />
+                                <span
+                                  className={cn(
+                                    "text-[10px] font-bold",
+                                    lowStock ? "text-error" : "text-green-600 dark:text-green-400",
+                                  )}
+                                >
+                                  {lowStock ? "REORDER" : "Safe"}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
                               <input
-                                value={draft.stockQuantity}
-                                onChange={(event) => updateDraftField(item.id, "stockQuantity", event.target.value)}
-                                className={cn(
-                                  "w-20 rounded-lg border px-2 py-1 text-center text-sm font-bold",
-                                  lowStock
-                                    ? "border-error/50 bg-white text-error dark:bg-slate-800"
-                                    : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800",
-                                )}
+                                value={draft.unitPrice}
+                                onChange={(event) =>
+                                  updateDraftField(item.id, "unitPrice", event.target.value)
+                                }
+                                className="w-24 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center text-sm font-bold text-primary dark:border-slate-700 dark:bg-slate-800 dark:text-blue-400"
                                 type="number"
+                                step="0.01"
                               />
-                              <span className={cn("text-[10px] font-bold", lowStock ? "text-error" : "text-green-600 dark:text-green-400")}>
-                                {lowStock ? "REORDER" : "Safe"}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <input
-                              value={draft.unitPrice}
-                              onChange={(event) => updateDraftField(item.id, "unitPrice", event.target.value)}
-                              className="w-24 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center text-sm font-bold text-primary dark:border-slate-700 dark:bg-slate-800 dark:text-blue-400"
-                              type="number"
-                              step="0.01"
-                            />
-                          </td>
-                          <td className="px-6 py-4 text-xs font-medium">{formatDateTime(item.updatedAt ?? item.createdAt)}</td>
-                          <td className="px-6 py-4">
-                            <div className="space-y-2 text-xs">
-                              <span
-                                className={cn(
-                                  "inline-flex rounded-full px-3 py-1 font-bold uppercase tracking-[0.18em]",
-                                  outOfStock
-                                    ? "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
-                                    : lowStock
-                                      ? "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-300"
-                                      : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300",
+                            </td>
+                            <td className="px-6 py-4 text-xs font-medium">
+                              {formatDateTime(item.updatedAt ?? item.createdAt)}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="space-y-2 text-xs">
+                                <span
+                                  className={cn(
+                                    "inline-flex rounded-full px-3 py-1 font-bold uppercase tracking-[0.18em]",
+                                    outOfStock
+                                      ? "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                                      : lowStock
+                                        ? "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-300"
+                                        : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300",
+                                  )}
+                                >
+                                  {outOfStock ? "Out" : lowStock ? "Low" : "Healthy"}
+                                </span>
+                                {dirty ? (
+                                  <p className="text-amber-700 dark:text-amber-300">
+                                    Unsaved inline changes
+                                  </p>
+                                ) : (
+                                  <p className="text-slate-500 dark:text-slate-400">
+                                    Synced with latest loaded row
+                                  </p>
                                 )}
-                              >
-                                {outOfStock ? "Out" : lowStock ? "Low" : "Healthy"}
-                              </span>
-                              {dirty ? (
-                                <p className="text-amber-700 dark:text-amber-300">Unsaved inline changes</p>
-                              ) : (
-                                <p className="text-slate-500 dark:text-slate-400">Synced with latest loaded row</p>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex justify-end gap-3">
-                              <button type="button" onClick={() => void handleSaveItem(item)} disabled={dashboard.isMutatingInventory} className="text-xs font-bold text-primary hover:underline dark:text-blue-400">
-                                Save Changes
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const confirmed = window.confirm(`Delete ${item.medicineName} from inventory?`);
-                                  if (!confirmed) return;
-                                  void dashboard.removeMedicine(item.id).then((success) => {
-                                    setInventoryFeedback(
-                                      success
-                                        ? `${item.medicineName} removed from inventory.`
-                                        : dashboard.actionMessage ?? `Failed to remove ${item.medicineName}.`,
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex justify-end gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSaveItem(item)}
+                                  disabled={dashboard.isMutatingInventory}
+                                  className="text-xs font-bold text-primary hover:underline dark:text-blue-400"
+                                >
+                                  Save Changes
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const confirmed = window.confirm(
+                                      `Delete ${item.medicineName} from inventory?`,
                                     );
-                                  });
-                                }}
-                                disabled={dashboard.isMutatingInventory}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-error hover:underline"
-                              >
-                                <Trash2 size={12} />
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    }) : (
+                                    if (!confirmed) return;
+                                    void dashboard.removeMedicine(item.id).then((success) => {
+                                      setInventoryFeedback(
+                                        success
+                                          ? `${item.medicineName} removed from inventory.`
+                                          : (dashboard.actionMessage ??
+                                              `Failed to remove ${item.medicineName}.`),
+                                      );
+                                    });
+                                  }}
+                                  disabled={dashboard.isMutatingInventory}
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-error hover:underline"
+                                >
+                                  <Trash2 size={12} />
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
                       <tr>
-                        <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+                        <td
+                          colSpan={6}
+                          className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400"
+                        >
                           {dashboard.isLoadingInventory
                             ? "Refreshing inventory rows..."
                             : "No inventory items matched the current search and stock filters."}
@@ -858,7 +992,8 @@ export function PharmacyAdminDashboardPage() {
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight">Pharmacist Management</h1>
                 <p className="mt-2 text-slate-500 dark:text-slate-400">
-                  Live pharmacist accounts under this pharmacy organisation, with permission control.
+                  Live pharmacist accounts under this pharmacy organisation, with permission
+                  control.
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -907,7 +1042,12 @@ export function PharmacyAdminDashboardPage() {
                       </span>
                       <input
                         value={staffCreateForm.fullName}
-                        onChange={(event) => setStaffCreateForm((current) => ({ ...current, fullName: event.target.value }))}
+                        onChange={(event) =>
+                          setStaffCreateForm((current) => ({
+                            ...current,
+                            fullName: event.target.value,
+                          }))
+                        }
                         placeholder="Pharmacist full name"
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       />
@@ -918,7 +1058,12 @@ export function PharmacyAdminDashboardPage() {
                       </span>
                       <input
                         value={staffCreateForm.email}
-                        onChange={(event) => setStaffCreateForm((current) => ({ ...current, email: event.target.value }))}
+                        onChange={(event) =>
+                          setStaffCreateForm((current) => ({
+                            ...current,
+                            email: event.target.value,
+                          }))
+                        }
                         placeholder="pharmacist@email.com"
                         type="email"
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
@@ -930,7 +1075,12 @@ export function PharmacyAdminDashboardPage() {
                       </span>
                       <input
                         value={staffCreateForm.password}
-                        onChange={(event) => setStaffCreateForm((current) => ({ ...current, password: event.target.value }))}
+                        onChange={(event) =>
+                          setStaffCreateForm((current) => ({
+                            ...current,
+                            password: event.target.value,
+                          }))
+                        }
                         placeholder="At least 8 characters"
                         type="password"
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
@@ -942,8 +1092,13 @@ export function PharmacyAdminDashboardPage() {
                       </span>
                       <input
                         value={staffCreateForm.licenseNo}
-                        onChange={(event) => setStaffCreateForm((current) => ({ ...current, licenseNo: event.target.value }))}
-                        placeholder="License / registration number"
+                        onChange={(event) =>
+                          setStaffCreateForm((current) => ({
+                            ...current,
+                            licenseNo: event.target.value.toUpperCase(),
+                          }))
+                        }
+                        placeholder="PH-12345"
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       />
                     </label>
@@ -951,34 +1106,36 @@ export function PharmacyAdminDashboardPage() {
                   <div className="mt-5 flex flex-wrap gap-3">
                     <button
                       type="button"
-                      disabled={dashboard.isMutatingStaff || !activePharmacyId}
+                      disabled={dashboard.isMutatingStaff || !activeOrganizationId}
                       onClick={() => {
-                        if (!activePharmacyId) {
+                        if (!activeOrganizationId) {
                           setStaffFeedback("This admin is not linked to a pharmacy yet.");
                           return;
                         }
-                        void dashboard.registerStaff({
-                          pharmacyId: activePharmacyId,
-                          fullName: staffCreateForm.fullName,
-                          email: staffCreateForm.email,
-                          password: staffCreateForm.password,
-                          licenseNo: staffCreateForm.licenseNo,
-                          status: "active",
-                        }).then((success) => {
-                          setStaffFeedback(
-                            success
-                              ? `${staffCreateForm.fullName} registered under this pharmacy.`
-                              : dashboard.actionMessage ?? "Pharmacist registration failed.",
-                          );
-                          if (!success) return;
-                          setStaffCreateForm({
-                            fullName: "",
-                            email: "",
-                            password: "",
-                            licenseNo: "",
+                        void dashboard
+                          .registerStaff({
+                            pharmacyId: activeOrganizationId,
+                            fullName: staffCreateForm.fullName,
+                            email: staffCreateForm.email,
+                            password: staffCreateForm.password,
+                            licenseNo: staffCreateForm.licenseNo,
+                            status: "pending",
+                          })
+                          .then((success) => {
+                            setStaffFeedback(
+                              success
+                                ? `${staffCreateForm.fullName} registered under organization ${activeOrganizationId} with pending approval.`
+                                : (dashboard.actionMessage ?? "Pharmacist registration failed."),
+                            );
+                            if (!success) return;
+                            setStaffCreateForm({
+                              fullName: "",
+                              email: "",
+                              password: "",
+                              licenseNo: "",
+                            });
+                            setShowStaffCreateForm(false);
                           });
-                          setShowStaffCreateForm(false);
-                        });
                       }}
                       className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900"
                     >
@@ -1003,68 +1160,98 @@ export function PharmacyAdminDashboardPage() {
                 </div>
               ) : null}
 
-              {filteredStaff.length > 0 ? filteredStaff.map((member) => (
-                <div key={member.id} className="group relative overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <div className="mb-6 flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-200 font-bold text-slate-500 dark:bg-slate-800">
-                      {getInitials(member.name)}
+              {filteredStaff.length > 0 ? (
+                filteredStaff.map((member) => (
+                  <div
+                    key={member.id}
+                    className="group relative overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+                  >
+                    <div className="mb-6 flex items-center gap-4">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-200 font-bold text-slate-500 dark:bg-slate-800">
+                        {getInitials(member.name)}
+                      </div>
+                      <div>
+                        <h4 className="font-bold">{member.name}</h4>
+                        <p className="text-[10px] font-bold uppercase text-primary dark:text-blue-400">
+                          {member.licenseNo ?? "Licensed pharmacist"}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-bold">{member.name}</h4>
-                      <p className="text-[10px] font-bold uppercase text-primary dark:text-blue-400">
-                        {member.licenseNo ?? "Licensed pharmacist"}
+                    <div className="mb-6 space-y-2">
+                      <p className="flex justify-between text-[11px]">
+                        <span>Status:</span>
+                        <span
+                          className={cn(
+                            "font-bold",
+                            (member.status ?? "").toLowerCase() === "suspended"
+                              ? "text-red-600 dark:text-red-400"
+                              : (member.status ?? "").toLowerCase() === "pending"
+                                ? "text-amber-600 dark:text-amber-400"
+                              : "text-green-600 dark:text-green-400",
+                          )}
+                        >
+                          {formatStatusLabel(member.status)}
+                        </span>
+                      </p>
+                      <p className="flex justify-between text-[11px]">
+                        <span>Email:</span>
+                        <span>{member.email ?? "Not supplied"}</span>
+                      </p>
+                      <p className="flex justify-between text-[11px]">
+                        <span>Dispense events:</span>
+                        <span>{member.dispenseEventsCount}</span>
+                      </p>
+                      <p className="flex justify-between text-[11px]">
+                        <span>Last activity:</span>
+                        <span>{formatDateTime(member.lastDispensedAt)}</span>
                       </p>
                     </div>
-                  </div>
-                  <div className="mb-6 space-y-2">
-                    <p className="flex justify-between text-[11px]">
-                      <span>Status:</span>
-                      <span className={cn(
-                        "font-bold",
+                    <button
+                      type="button"
+                      disabled={dashboard.isMutatingStaff || !activeOrganizationId}
+                      onClick={() => {
+                        if (!activeOrganizationId) {
+                          setStaffFeedback("This admin is not linked to a pharmacy yet.");
+                          return;
+                        }
+                        const nextStatus =
+                          (member.status ?? "").toLowerCase() === "suspended"
+                            ? "approved"
+                            : (member.status ?? "").toLowerCase() === "pending"
+                              ? "approved"
+                            : "suspended";
+                        void dashboard
+                          .updateStaffStatus({
+                            pharmacyId: activeOrganizationId,
+                            staffId: member.id,
+                            status: nextStatus,
+                          })
+                          .then((success) => {
+                            setStaffFeedback(
+                              success
+                                ? `${member.name} marked as ${nextStatus}.`
+                                : (dashboard.actionMessage ?? `Failed to update ${member.name}.`),
+                            );
+                          });
+                      }}
+                      className={cn(
+                        "w-full rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest transition-colors disabled:cursor-not-allowed disabled:opacity-60",
                         (member.status ?? "").toLowerCase() === "suspended"
-                          ? "text-red-600 dark:text-red-400"
-                          : "text-green-600 dark:text-green-400",
+                          ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300"
+                          : (member.status ?? "").toLowerCase() === "pending"
+                            ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300"
+                            : "bg-slate-100 hover:bg-error/10 hover:text-error dark:bg-slate-800",
                       )}
-                      >
-                        {formatStatusLabel(member.status)}
-                      </span>
-                    </p>
-                    <p className="flex justify-between text-[11px]"><span>Email:</span><span>{member.email ?? "Not supplied"}</span></p>
-                    <p className="flex justify-between text-[11px]"><span>Dispense events:</span><span>{member.dispenseEventsCount}</span></p>
-                    <p className="flex justify-between text-[11px]"><span>Last activity:</span><span>{formatDateTime(member.lastDispensedAt)}</span></p>
+                    >
+                      {(member.status ?? "").toLowerCase() === "suspended"
+                        ? "Approve Access"
+                        : (member.status ?? "").toLowerCase() === "pending"
+                          ? "Approve Access"
+                          : "Suspend Access"}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    disabled={dashboard.isMutatingStaff || !activePharmacyId}
-                    onClick={() => {
-                      if (!activePharmacyId) {
-                        setStaffFeedback("This admin is not linked to a pharmacy yet.");
-                        return;
-                      }
-                      const nextStatus = (member.status ?? "").toLowerCase() === "suspended" ? "active" : "suspended";
-                      void dashboard.updateStaffStatus({
-                        pharmacyId: activePharmacyId,
-                        staffId: member.id,
-                        status: nextStatus,
-                      }).then((success) => {
-                        setStaffFeedback(
-                          success
-                            ? `${member.name} marked as ${nextStatus}.`
-                            : dashboard.actionMessage ?? `Failed to update ${member.name}.`,
-                        );
-                      });
-                    }}
-                    className={cn(
-                      "w-full rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                      (member.status ?? "").toLowerCase() === "suspended"
-                        ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300"
-                        : "bg-slate-100 hover:bg-error/10 hover:text-error dark:bg-slate-800",
-                    )}
-                  >
-                    {(member.status ?? "").toLowerCase() === "suspended" ? "Reactivate Access" : "Suspend Access"}
-                  </button>
-                </div>
-              )) : (
+                ))
+              ) : (
                 <div className="md:col-span-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                   No staff rows matched the current status filter.
                 </div>
@@ -1077,7 +1264,9 @@ export function PharmacyAdminDashboardPage() {
                   className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 p-6 text-slate-400 transition-all hover:border-primary hover:text-primary dark:border-slate-800"
                 >
                   <UserCog className="mb-2" size={36} />
-                  <p className="text-xs font-bold uppercase tracking-widest">Register New Pharmacist</p>
+                  <p className="text-xs font-bold uppercase tracking-widest">
+                    Register New Pharmacist
+                  </p>
                 </button>
               ) : null}
             </div>
@@ -1098,7 +1287,9 @@ export function PharmacyAdminDashboardPage() {
                   type="button"
                   onClick={() => {
                     dashboard.exportRevenueCsv();
-                    setReportFeedback("Revenue CSV exported from the currently loaded backend summary.");
+                    setReportFeedback(
+                      "Revenue CSV exported from the currently loaded backend summary.",
+                    );
                   }}
                   className="rounded-xl bg-slate-800 px-6 py-2 text-xs font-bold text-white dark:bg-slate-700"
                 >
@@ -1110,15 +1301,25 @@ export function PharmacyAdminDashboardPage() {
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
               <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Today</p>
-                <p className="mt-3 text-3xl font-extrabold">{formatLkr(activeSummary?.reportSummary.todayRevenue ?? null)}</p>
+                <p className="mt-3 text-3xl font-extrabold">
+                  {formatLkr(activeSummary?.reportSummary.todayRevenue ?? null)}
+                </p>
               </div>
               <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-500">This Month</p>
-                <p className="mt-3 text-3xl font-extrabold">{formatLkr(activeSummary?.reportSummary.currentMonthRevenue ?? null)}</p>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                  This Month
+                </p>
+                <p className="mt-3 text-3xl font-extrabold">
+                  {formatLkr(activeSummary?.reportSummary.currentMonthRevenue ?? null)}
+                </p>
               </div>
               <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Tracked Revenue</p>
-                <p className="mt-3 text-3xl font-extrabold">{formatLkr(activeSummary?.reportSummary.totalTrackedRevenue ?? null)}</p>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                  Tracked Revenue
+                </p>
+                <p className="mt-3 text-3xl font-extrabold">
+                  {formatLkr(activeSummary?.reportSummary.totalTrackedRevenue ?? null)}
+                </p>
               </div>
             </div>
 
@@ -1127,29 +1328,59 @@ export function PharmacyAdminDashboardPage() {
                 <div className="rounded-2xl bg-slate-50 p-6 dark:bg-slate-800/50">
                   <h3 className="text-lg font-bold">Summary</h3>
                   <div className="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
-                    <p className="flex justify-between"><span>Dispense Events</span><span className="font-bold">{activeSummary?.reportSummary.dispenseEvents ?? 0}</span></p>
-                    <p className="flex justify-between"><span>Low Stock Items</span><span className="font-bold">{activeSummary?.inventorySummary.lowStockItems ?? dashboard.stats.lowStockItems}</span></p>
-                    <p className="flex justify-between"><span>Out of Stock</span><span className="font-bold">{activeSummary?.inventorySummary.outOfStockItems ?? dashboard.stats.outOfStockItems}</span></p>
-                    <p className="flex justify-between"><span>Fast Movers Listed</span><span className="font-bold">{topMovingItems.length}</span></p>
+                    <p className="flex justify-between">
+                      <span>Dispense Events</span>
+                      <span className="font-bold">
+                        {activeSummary?.reportSummary.dispenseEvents ?? 0}
+                      </span>
+                    </p>
+                    <p className="flex justify-between">
+                      <span>Low Stock Items</span>
+                      <span className="font-bold">
+                        {activeSummary?.inventorySummary.lowStockItems ??
+                          dashboard.stats.lowStockItems}
+                      </span>
+                    </p>
+                    <p className="flex justify-between">
+                      <span>Out of Stock</span>
+                      <span className="font-bold">
+                        {activeSummary?.inventorySummary.outOfStockItems ??
+                          dashboard.stats.outOfStockItems}
+                      </span>
+                    </p>
+                    <p className="flex justify-between">
+                      <span>Fast Movers Listed</span>
+                      <span className="font-bold">{topMovingItems.length}</span>
+                    </p>
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-200 p-6 dark:border-slate-700">
                   <h3 className="text-lg font-bold">Fast-Moving Items</h3>
                   <div className="mt-5 space-y-4">
-                    {topMovingItems.length > 0 ? topMovingItems.map((item) => {
-                      const width = maxDispensedUnits > 0 ? `${Math.max(16, Math.round((item.unitsDispensed / maxDispensedUnits) * 100))}%` : "16%";
-                      return (
-                        <div key={item.medicineName}>
-                          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                            <span className="font-semibold">{item.medicineName}</span>
-                            <span className="text-slate-500 dark:text-slate-400">{item.unitsDispensed} units</span>
+                    {topMovingItems.length > 0 ? (
+                      topMovingItems.map((item) => {
+                        const width =
+                          maxDispensedUnits > 0
+                            ? `${Math.max(16, Math.round((item.unitsDispensed / maxDispensedUnits) * 100))}%`
+                            : "16%";
+                        return (
+                          <div key={item.medicineName}>
+                            <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                              <span className="font-semibold">{item.medicineName}</span>
+                              <span className="text-slate-500 dark:text-slate-400">
+                                {item.unitsDispensed} units
+                              </span>
+                            </div>
+                            <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800">
+                              <div
+                                className="h-2.5 rounded-full bg-blue-600 dark:bg-blue-500"
+                                style={{ width }}
+                              />
+                            </div>
                           </div>
-                          <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800">
-                            <div className="h-2.5 rounded-full bg-blue-600 dark:bg-blue-500" style={{ width }} />
-                          </div>
-                        </div>
-                      );
-                    }) : (
+                        );
+                      })
+                    ) : (
                       <p className="text-sm text-slate-500 dark:text-slate-400">
                         No fast-moving item data came back from the current backend summary.
                       </p>
@@ -1163,7 +1394,10 @@ export function PharmacyAdminDashboardPage() {
                 <div className="space-y-3">
                   {recentAdjustments.length > 0 ? (
                     recentAdjustments.map((item) => (
-                      <div key={item.id} className="rounded-2xl bg-slate-50 px-4 py-4 text-sm dark:bg-slate-800/50">
+                      <div
+                        key={item.id}
+                        className="rounded-2xl bg-slate-50 px-4 py-4 text-sm dark:bg-slate-800/50"
+                      >
                         <div className="flex flex-col justify-between gap-2 md:flex-row md:items-center">
                           <div>
                             <p className="font-bold">{item.medicineName}</p>
@@ -1186,7 +1420,8 @@ export function PharmacyAdminDashboardPage() {
               </div>
 
               <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300">
-                Export actions use the live summary already loaded on this page. If charts look sparse, the source data itself is limited.
+                Export actions use the live summary already loaded on this page. If charts look
+                sparse, the source data itself is limited.
               </div>
             </div>
           </div>

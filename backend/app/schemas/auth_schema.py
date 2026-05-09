@@ -5,6 +5,8 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 NIC_PATTERN = re.compile(r"^(?:\d{9}[VvXx]|\d{12})$")
+SLMC_LICENSE_PATTERN = re.compile(r"^SLMC-\d{5}$")
+PHARMACY_LICENSE_PATTERN = re.compile(r"^PH-\d{5}$")
 SUPPORTED_GENDERS = {"male", "female"}
 SUPPORTED_ROLES = {
     "patient",
@@ -50,19 +52,19 @@ class RegisterRequest(BaseModel):
     dhid: Optional[str] = None
 
     fullName: Optional[str] = None
+    preferredName: Optional[str] = None
     nic: Optional[str] = None
     dob: Optional[str] = None
     gender: Optional[str] = None
+    address: Optional[str] = None
 
     specialization: Optional[str] = None
     licenseNumber: Optional[str] = None
-    pharmacyId: Optional[str] = None
-    hospitalId: Optional[str] = None
     parentNic: Optional[str] = None
     organisationId: Optional[str] = None
-    credentialFileName: Optional[str] = Field(default=None, max_length=255)
-    credentialFileSize: Optional[int] = None
-    credentialFileType: Optional[str] = None
+    nicImageFileName: Optional[str] = Field(default=None, max_length=255)
+    nicImageFileSize: Optional[int] = None
+    nicImageFileType: Optional[str] = None
 
     @field_validator("role")
     @classmethod
@@ -114,29 +116,53 @@ class RegisterRequest(BaseModel):
             raise ValueError("Gender is invalid")
         return normalized
 
-    @field_validator("credentialFileSize")
+    @field_validator("address")
     @classmethod
-    def validate_credential_file_size(cls, value: Optional[int]):
+    def validate_address(cls, value: Optional[str]):
+        if value is None or not value.strip():
+            return None
+        cleaned = " ".join(value.strip().split())
+        if len(cleaned) < 8:
+            raise ValueError("Address must be at least 8 characters")
+        return cleaned
+
+    @field_validator("preferredName")
+    @classmethod
+    def validate_preferred_name(cls, value: Optional[str]):
+        if value is None or not value.strip():
+            return None
+        cleaned = " ".join(value.strip().split())
+        if len(cleaned) < 2:
+            raise ValueError("Preferred name must be at least 2 characters")
+        return cleaned
+
+    @field_validator("nicImageFileSize")
+    @classmethod
+    def validate_nic_image_file_size(cls, value: Optional[int]):
         if value is None:
             return None
         if value > 5 * 1024 * 1024:
-            raise ValueError("Credential file exceeds 5MB")
+            raise ValueError("NIC image exceeds 5MB")
         return value
 
-    @field_validator("credentialFileType")
+    @field_validator("nicImageFileType")
     @classmethod
-    def validate_credential_file_type(cls, value: Optional[str]):
+    def validate_nic_image_file_type(cls, value: Optional[str]):
         if value is None or not value.strip():
             return None
-        allowed = {"application/pdf", "image/jpeg", "image/png"}
+        allowed = {"image/jpeg", "image/png"}
         if value not in allowed:
-            raise ValueError("Credential file type is not supported")
+            raise ValueError("NIC image type is not supported")
         return value
 
     @model_validator(mode="after")
     def validate_role_requirements(self):
         if self.fullName is None or len(self.fullName.strip()) < 3:
             raise ValueError("Full name must be at least 3 characters")
+        if self.preferredName is None:
+            raise ValueError("Preferred name is required")
+        if self.address is None:
+            raise ValueError("Address is required")
 
         role = self.role
         dob_value = (
@@ -186,19 +212,39 @@ class RegisterRequest(BaseModel):
                 raise ValueError("Specialization is required for doctors")
             if not self.licenseNumber or not self.licenseNumber.strip():
                 raise ValueError("License number is required for doctors")
+            normalized_license = self.licenseNumber.strip().upper()
+            if not SLMC_LICENSE_PATTERN.match(normalized_license):
+                raise ValueError("Doctor license number must match SLMC-12345 format")
+            self.licenseNumber = normalized_license
 
         if role == "pharmacist":
-            if not self.pharmacyId or not self.pharmacyId.strip():
-                raise ValueError("Pharmacy ID is required for pharmacists")
+            if not self.organisationId or not self.organisationId.strip():
+                raise ValueError("Organisation ID is required for pharmacists")
+            if not self.licenseNumber or not self.licenseNumber.strip():
+                raise ValueError("Pharmacy license number is required for pharmacists")
+            normalized_license = self.licenseNumber.strip().upper()
+            if not PHARMACY_LICENSE_PATTERN.match(normalized_license):
+                raise ValueError("Pharmacy license number must match PH-12345 format")
+            self.licenseNumber = normalized_license
 
         if role in {"hospital_admin", "pharmacy_admin"} and not (
             self.organisationId and self.organisationId.strip()
         ):
             raise ValueError("Organisation ID is required for this role")
 
-        if role != "patient" and self.credentialFileName:
-            if self.credentialFileSize is None or self.credentialFileType is None:
-                raise ValueError("Credential file metadata is incomplete")
+        if role == "pharmacy_admin":
+            if not self.licenseNumber or not self.licenseNumber.strip():
+                raise ValueError("Pharmacy license number is required for pharmacy admins")
+            normalized_license = self.licenseNumber.strip().upper()
+            if not PHARMACY_LICENSE_PATTERN.match(normalized_license):
+                raise ValueError("Pharmacy license number must match PH-12345 format")
+            self.licenseNumber = normalized_license
+
+        if not self.nicImageFileName:
+            raise ValueError("NIC image is required for registration")
+
+        if self.nicImageFileSize is None or self.nicImageFileType is None:
+            raise ValueError("NIC image metadata is incomplete")
 
         return self
 

@@ -7,10 +7,7 @@ interface PharmacistSectionNavProps {
   onChange: (section: PharmacistSection) => void;
 }
 
-export function PharmacistSectionNav({
-  value,
-  onChange,
-}: PharmacistSectionNavProps) {
+export function PharmacistSectionNav({ value, onChange }: PharmacistSectionNavProps) {
   return (
     <div className="flex flex-wrap gap-2">
       {pharmacistSectionTabs.map((item) => {

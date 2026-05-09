@@ -18,9 +18,7 @@ function getStringList(value: unknown) {
     return [];
   }
 
-  return value.filter(
-    (item): item is string => typeof item === "string" && item.trim().length > 0,
-  );
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
 function formatValidationIssue(issue: unknown) {
@@ -43,8 +41,7 @@ function formatValidationIssue(issue: unknown) {
   const location = Array.isArray(record.loc)
     ? record.loc
         .filter(
-          (part): part is string | number =>
-            typeof part === "string" || typeof part === "number",
+          (part): part is string | number => typeof part === "string" || typeof part === "number",
         )
         .join(" -> ")
     : "";
@@ -83,8 +80,7 @@ function normalizeErrorMessage(payload: ApiErrorPayload | null) {
 
   if (candidate && typeof candidate === "object") {
     const record = candidate as Record<string, unknown>;
-    const nestedMessage =
-      typeof record.message === "string" ? record.message.trim() : "";
+    const nestedMessage = typeof record.message === "string" ? record.message.trim() : "";
     const nestedErrors = getStringList(record.errors);
 
     if (nestedMessage && nestedErrors.length > 0) {
@@ -100,8 +96,7 @@ function normalizeErrorMessage(payload: ApiErrorPayload | null) {
     }
   }
 
-  const topLevelMessage =
-    typeof payload.message === "string" ? payload.message.trim() : "";
+  const topLevelMessage = typeof payload.message === "string" ? payload.message.trim() : "";
   const topLevelErrors = getStringList(payload.errors);
 
   if (topLevelMessage && topLevelErrors.length > 0) {
@@ -125,7 +120,11 @@ export async function apiRequest<T>(
   options: ApiRequestOptions = {},
 ): Promise<T> {
   const { auth = true } = options;
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const headers = buildHeaders(init?.headers);
+  if (isFormData) {
+    headers.delete("Content-Type");
+  }
 
   if (auth) {
     const token = getStoredToken();

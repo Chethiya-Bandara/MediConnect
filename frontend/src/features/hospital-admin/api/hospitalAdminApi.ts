@@ -103,7 +103,9 @@ function normalizeAvailabilitySlot(raw: RawAvailabilitySlot): HospitalAvailabili
   };
 }
 
-function normalizeDashboardStats(payload: HospitalDashboardResponse["stats"]): HospitalDashboardStats {
+function normalizeDashboardStats(
+  payload: HospitalDashboardResponse["stats"],
+): HospitalDashboardStats {
   return {
     activeDoctors: Number(payload?.active_doctors ?? 0),
     pendingAffiliations: Number(payload?.pending_affiliations ?? 0),
@@ -149,7 +151,9 @@ function normalizePendingInvitations(
   }));
 }
 
-function normalizeActiveStaff(payload: HospitalDashboardResponse["active_staff"]): ActiveStaffMember[] {
+function normalizeActiveStaff(
+  payload: HospitalDashboardResponse["active_staff"],
+): ActiveStaffMember[] {
   if (!Array.isArray(payload)) {
     return [];
   }
@@ -183,9 +187,7 @@ function normalizeAuditLogs(payload: HospitalDashboardResponse["audit_logs"]): H
 }
 
 export async function getHospitalAdminDashboard() {
-  const response = await apiRequest<HospitalDashboardResponse>(
-    endpoints.hospitalAdmin.dashboard,
-  );
+  const response = await apiRequest<HospitalDashboardResponse>(endpoints.hospitalAdmin.dashboard);
 
   return {
     hospital: {
@@ -260,10 +262,7 @@ export async function inviteDoctor(payload: InviteDoctorPayload) {
   });
 }
 
-export async function decideAffiliation(
-  affiliationId: string,
-  status: AffiliationDecisionStatus,
-) {
+export async function decideAffiliation(affiliationId: string, status: AffiliationDecisionStatus) {
   return apiRequest<{ message?: string }>(endpoints.hospitalAdmin.affiliationDecision, {
     method: "PUT",
     body: JSON.stringify({

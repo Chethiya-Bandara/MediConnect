@@ -1,9 +1,6 @@
 import { AlertTriangle, Building2, ShieldCheck } from "lucide-react";
 import { HospitalMetricCard } from "../components/HospitalMetricCard";
-import {
-  hospitalAdminGovernanceNotes,
-  hospitalAdminOperationalNotes,
-} from "../constants";
+import { hospitalAdminGovernanceNotes, hospitalAdminOperationalNotes } from "../constants";
 import type { HospitalOverviewStats } from "../types";
 
 interface OverviewSectionProps {
@@ -11,10 +8,7 @@ interface OverviewSectionProps {
   activeDoctorId: string | null;
 }
 
-export function OverviewSection({
-  stats,
-  activeDoctorId,
-}: OverviewSectionProps) {
+export function OverviewSection({ stats, activeDoctorId }: OverviewSectionProps) {
   return (
     <section className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -49,7 +43,8 @@ export function OverviewSection({
                 Governance Guardrails
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Hospital admins coordinate affiliations and slots inside the hospital boundary, not random patient data fishing trips.
+                Hospital admins coordinate affiliations and slots inside the hospital boundary, not
+                random patient data fishing trips.
               </p>
             </div>
           </div>
@@ -70,9 +65,7 @@ export function OverviewSection({
           <div className="flex items-start gap-3">
             <Building2 className="mt-1 text-primary dark:text-blue-400" size={20} />
             <div>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                Active Scope
-              </h2>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Active Scope</h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                 Current doctor context and honest operational caveats.
               </p>

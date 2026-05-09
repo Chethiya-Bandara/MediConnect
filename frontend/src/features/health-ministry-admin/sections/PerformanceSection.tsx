@@ -20,14 +20,17 @@ function formatDate(value: string): string {
 function durationBadge(ms: number, slaMs: number) {
   const ratio = ms / slaMs;
   if (ratio >= 2) return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
-  if (ratio >= 1.5) return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
+  if (ratio >= 1.5)
+    return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
   return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
 }
 
 function methodBadge(method: string) {
   if (method === "GET") return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
-  if (method === "POST") return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
-  if (method === "PUT" || method === "PATCH") return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300";
+  if (method === "POST")
+    return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+  if (method === "PUT" || method === "PATCH")
+    return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300";
   return "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300";
 }
 
@@ -44,7 +47,9 @@ interface RawSlowRequestsResponse {
 }
 
 async function fetchSlowRequests(): Promise<SlowRequestsReport> {
-  const data = await apiRequest<RawSlowRequestsResponse>(endpoints.healthMinistryAdmin.slowRequests);
+  const data = await apiRequest<RawSlowRequestsResponse>(
+    endpoints.healthMinistryAdmin.slowRequests,
+  );
   return {
     slaMs: data.sla_ms ?? 2000,
     totalSlow: data.total_slow ?? 0,
@@ -76,7 +81,9 @@ export function PerformanceSection() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const slaMs = report?.slaMs ?? 2000;
 
@@ -89,7 +96,9 @@ export function PerformanceSection() {
           </h1>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
             Requests that exceeded the {slaMs}ms SLA (NFR-4.1). The server adds an{" "}
-            <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">X-Response-Time</code>{" "}
+            <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">
+              X-Response-Time
+            </code>{" "}
             header to every response — check DevTools Network tab to verify individual requests.
           </p>
         </div>
@@ -115,7 +124,9 @@ export function PerformanceSection() {
           </p>
         </article>
         <article className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-          <div className={`rounded-xl p-2 w-fit ${(report?.totalSlow ?? 0) > 0 ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"}`}>
+          <div
+            className={`rounded-xl p-2 w-fit ${(report?.totalSlow ?? 0) > 0 ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"}`}
+          >
             <Activity size={18} />
           </div>
           <p className="text-3xl font-extrabold">{report?.totalSlow ?? "—"}</p>
@@ -178,12 +189,17 @@ export function PerformanceSection() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                 {report.requests.map((req: SlowRequest, i: number) => (
-                  <tr key={`${req.timestamp}-${i}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <tr
+                    key={`${req.timestamp}-${i}`}
+                    className="hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                  >
                     <td className="px-5 py-4 text-xs text-slate-500 dark:text-slate-400">
                       {formatDate(req.timestamp)}
                     </td>
                     <td className="px-5 py-4">
-                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${methodBadge(req.method)}`}>
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${methodBadge(req.method)}`}
+                      >
                         {req.method}
                       </span>
                     </td>
@@ -194,7 +210,9 @@ export function PerformanceSection() {
                       {req.statusCode}
                     </td>
                     <td className="px-5 py-4">
-                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${durationBadge(req.durationMs, slaMs)}`}>
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${durationBadge(req.durationMs, slaMs)}`}
+                      >
                         {req.durationMs.toLocaleString()}ms
                       </span>
                     </td>

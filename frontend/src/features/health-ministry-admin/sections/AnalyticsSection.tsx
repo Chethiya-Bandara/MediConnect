@@ -69,9 +69,7 @@ export function AnalyticsSection({
               <input
                 type="date"
                 value={filters.startDate}
-                onChange={(event) =>
-                  onFiltersChange({ ...filters, startDate: event.target.value })
-                }
+                onChange={(event) => onFiltersChange({ ...filters, startDate: event.target.value })}
                 className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />
             </label>
@@ -83,9 +81,7 @@ export function AnalyticsSection({
               <input
                 type="date"
                 value={filters.endDate}
-                onChange={(event) =>
-                  onFiltersChange({ ...filters, endDate: event.target.value })
-                }
+                onChange={(event) => onFiltersChange({ ...filters, endDate: event.target.value })}
                 className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />
             </label>
@@ -96,9 +92,7 @@ export function AnalyticsSection({
               </span>
               <input
                 value={filters.district}
-                onChange={(event) =>
-                  onFiltersChange({ ...filters, district: event.target.value })
-                }
+                onChange={(event) => onFiltersChange({ ...filters, district: event.target.value })}
                 placeholder="Optional district"
                 className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />

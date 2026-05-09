@@ -67,7 +67,12 @@ function actionBadge(action: string | null) {
   const up = action.toUpperCase();
   if (up.includes("APPROVED") || up.includes("GRANTED") || up.includes("ACTIVATED"))
     return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
-  if (up.includes("REJECTED") || up.includes("REVOKED") || up.includes("SUSPENDED") || up.includes("DELETED"))
+  if (
+    up.includes("REJECTED") ||
+    up.includes("REVOKED") ||
+    up.includes("SUSPENDED") ||
+    up.includes("DELETED")
+  )
     return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
   if (up.includes("ACCESSED") || up.includes("EXPORTED"))
     return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
@@ -75,17 +80,30 @@ function actionBadge(action: string | null) {
 }
 
 function downloadCsv(rows: AuditLogRow[]) {
-  const header = ["ID", "Timestamp", "Action", "Entity", "Entity ID", "User ID", "Organisation ID", "Notes"];
-  const lines = rows.map((r) => [
-    String(r.id ?? ""),
-    r.timestamp ?? "",
-    r.action ?? "",
-    r.entity ?? "",
-    String(r.entity_id ?? ""),
-    r.user_id ?? "",
-    String(r.organisation_id ?? ""),
-    r.notes ?? "",
-  ].map((c) => `"${c.replace(/"/g, '""')}"`).join(","));
+  const header = [
+    "ID",
+    "Timestamp",
+    "Action",
+    "Entity",
+    "Entity ID",
+    "User ID",
+    "Organisation ID",
+    "Notes",
+  ];
+  const lines = rows.map((r) =>
+    [
+      String(r.id ?? ""),
+      r.timestamp ?? "",
+      r.action ?? "",
+      r.entity ?? "",
+      String(r.entity_id ?? ""),
+      r.user_id ?? "",
+      String(r.organisation_id ?? ""),
+      r.notes ?? "",
+    ]
+      .map((c) => `"${c.replace(/"/g, '""')}"`)
+      .join(","),
+  );
   const csv = [header.join(","), ...lines].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -112,39 +130,44 @@ export function InvestigationSection() {
 
   const abortRef = useRef<AbortController | null>(null);
 
-  const runQuery = useCallback(async (newOffset: number) => {
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
+  const runQuery = useCallback(
+    async (newOffset: number) => {
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
 
-    setIsLoading(true);
-    setError(null);
+      setIsLoading(true);
+      setError(null);
 
-    const params = new URLSearchParams();
-    if (userId.trim()) params.set("user_id", userId.trim());
-    if (orgId.trim()) params.set("organisation_id", orgId.trim());
-    if (action) params.set("action", action);
-    if (fromDate) params.set("from_date", fromDate);
-    if (toDate) params.set("to_date", toDate + "T23:59:59");
-    params.set("limit", String(PAGE_SIZE));
-    params.set("offset", String(newOffset));
+      const params = new URLSearchParams();
+      if (userId.trim()) params.set("user_id", userId.trim());
+      if (orgId.trim()) params.set("organisation_id", orgId.trim());
+      if (action) params.set("action", action);
+      if (fromDate) params.set("from_date", fromDate);
+      if (toDate) params.set("to_date", toDate + "T23:59:59");
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(newOffset));
 
-    try {
-      const url = `${endpoints.healthMinistryAdmin.investigationLogs}?${params.toString()}`;
-      const data = await apiRequest<AuditLogsResponse>(url);
-      setRows(data.logs ?? []);
-      setTotal(data.count ?? 0);
-      setOffset(newOffset);
-      setHasSearched(true);
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return;
-      setError(err instanceof Error ? err.message : "Failed to load audit logs.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [userId, orgId, action, fromDate, toDate]);
+      try {
+        const url = `${endpoints.healthMinistryAdmin.investigationLogs}?${params.toString()}`;
+        const data = await apiRequest<AuditLogsResponse>(url);
+        setRows(data.logs ?? []);
+        setTotal(data.count ?? 0);
+        setOffset(newOffset);
+        setHasSearched(true);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+        setError(err instanceof Error ? err.message : "Failed to load audit logs.");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [userId, orgId, action, fromDate, toDate],
+  );
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { return () => abortRef.current?.abort(); }, []);
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
   function handleSearch() {
     void runQuery(0);
@@ -165,8 +188,8 @@ export function InvestigationSection() {
             Investigation Mode
           </h1>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            Server-side filtered search across all audit logs (NFR-7.5). Filter by user, organisation,
-            time range, and action type.
+            Server-side filtered search across all audit logs (NFR-7.5). Filter by user,
+            organisation, time range, and action type.
           </p>
         </div>
         <div className="flex gap-3">
@@ -231,7 +254,9 @@ export function InvestigationSection() {
             >
               <option value="">All actions</option>
               {COMMON_ACTIONS.map((a) => (
-                <option key={a} value={a}>{a.replace(/_/g, " ")}</option>
+                <option key={a} value={a}>
+                  {a.replace(/_/g, " ")}
+                </option>
               ))}
             </select>
           </div>
@@ -347,7 +372,9 @@ export function InvestigationSection() {
                       {formatDate(row.timestamp)}
                     </td>
                     <td className="px-5 py-4">
-                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${actionBadge(row.action)}`}>
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${actionBadge(row.action)}`}
+                      >
                         {row.action ?? "UNKNOWN"}
                       </span>
                     </td>

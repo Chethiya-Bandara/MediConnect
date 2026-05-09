@@ -1,8 +1,4 @@
-import {
-  Badge,
-  BarChart3,
-  Boxes,
-} from "lucide-react";
+import { Badge, BarChart3, Boxes } from "lucide-react";
 import type { ComponentType } from "react";
 import type { PharmacyAdminSection } from "./types";
 

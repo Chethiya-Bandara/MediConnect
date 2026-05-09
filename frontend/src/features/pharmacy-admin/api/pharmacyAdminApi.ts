@@ -54,7 +54,7 @@ interface RawStaffMember {
   name?: string | null;
   email?: string | null;
   license_no?: string | null;
-  organisation_id?: string | number | null;
+  pharmacy_id?: string | number | null;
   status?: string | null;
   dispense_events_count?: number | string | null;
   last_dispensed_at?: string | null;
@@ -143,7 +143,7 @@ function normalizeStaffMember(raw: RawStaffMember): PharmacyAdminStaffMember {
     name: raw.name ?? "Unnamed pharmacist",
     email: raw.email ?? null,
     licenseNo: raw.license_no ?? null,
-    organisationId: asString(raw.organisation_id),
+    pharmacyId: asString(raw.pharmacy_id),
     status: raw.status ?? "ACTIVE",
     dispenseEventsCount: asNumber(raw.dispense_events_count) ?? 0,
     lastDispensedAt: raw.last_dispensed_at ?? null,
@@ -235,7 +235,7 @@ export async function registerPharmacyStaff(payload: PharmacyAdminStaffRegistrat
       email: payload.email,
       password: payload.password,
       license_no: payload.licenseNo,
-      status: payload.status ?? "active",
+      status: payload.status ?? "pending",
     }),
   });
 }

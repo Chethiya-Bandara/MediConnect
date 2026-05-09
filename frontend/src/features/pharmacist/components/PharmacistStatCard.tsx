@@ -7,12 +7,7 @@ interface PharmacistStatCardProps {
   className?: string;
 }
 
-export function PharmacistStatCard({
-  label,
-  value,
-  hint,
-  className,
-}: PharmacistStatCardProps) {
+export function PharmacistStatCard({ label, value, hint, className }: PharmacistStatCardProps) {
   return (
     <article
       className={cn(
@@ -20,15 +15,11 @@ export function PharmacistStatCard({
         className,
       )}
     >
-      <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
-        {label}
-      </p>
+      <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">{label}</p>
       <p className="mt-3 font-headline text-3xl font-extrabold text-slate-900 dark:text-slate-100">
         {value}
       </p>
-      {hint ? (
-        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{hint}</p>
-      ) : null}
+      {hint ? <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{hint}</p> : null}
     </article>
   );
 }

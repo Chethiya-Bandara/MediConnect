@@ -8,10 +8,7 @@ export function calculateAge(dob: string): number | null {
   let age = today.getFullYear() - birthDate.getFullYear();
   const monthDelta = today.getMonth() - birthDate.getMonth();
 
-  if (
-    monthDelta < 0 ||
-    (monthDelta === 0 && today.getDate() < birthDate.getDate())
-  ) {
+  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < birthDate.getDate())) {
     age -= 1;
   }
 
