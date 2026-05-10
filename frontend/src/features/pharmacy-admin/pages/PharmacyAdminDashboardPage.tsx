@@ -1256,19 +1256,6 @@ export function PharmacyAdminDashboardPage() {
                   No staff rows matched the current status filter.
                 </div>
               )}
-
-              {!showStaffCreateForm ? (
-                <button
-                  type="button"
-                  onClick={() => setShowStaffCreateForm(true)}
-                  className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 p-6 text-slate-400 transition-all hover:border-primary hover:text-primary dark:border-slate-800"
-                >
-                  <UserCog className="mb-2" size={36} />
-                  <p className="text-xs font-bold uppercase tracking-widest">
-                    Register New Pharmacist
-                  </p>
-                </button>
-              ) : null}
             </div>
           </div>
         ) : null}

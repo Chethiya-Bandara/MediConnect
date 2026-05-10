@@ -1241,7 +1241,7 @@ export function HealthMinistryAdminDashboardPage() {
                     </p>
                     <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">
                       Leading diagnosis feed says{" "}
-                      <span className="font-semibold">{topDiagnosis}</span>. If that looks empty,
+                      <span className="font-semibold">{topDiagnosis}</span>. If this looks empty,
                       diagnosis telemetry is not available yet.
                     </p>
                   </div>

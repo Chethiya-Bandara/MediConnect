@@ -625,7 +625,7 @@ export function RegisterPage() {
                 {showPharmacyLicenseNumber && (
                   <InputField
                     id="licenseNumber"
-                    label="Pharmacy License Number"
+                    label="Pharmacist License Number"
                     placeholder="PH-12345"
                     {...register("licenseNumber")}
                     error={errors.licenseNumber?.message}
