@@ -1125,14 +1125,14 @@ export function PatientDashboardPage() {
                 {/* Content Layer */}
                 <div className="relative z-10 max-w-4xl px-6 text-center text-white">
                   <span className="mb-4 inline-block rounded-full bg-blue-500/20 px-4 py-1.5 text-sm font-bold tracking-wide text-Blue-300 backdrop-blur-md border border-emerald-400/30">
-                    State Healthcare Portal
+                    National Patient Care Portal
                   </span>
                   <h1 className="font-headline text-5xl font-extrabold tracking-tight sm:text-7xl drop-shadow-xl">
                     Welcome, <span className="text-blue-600">{displayName}</span>
                   </h1>
                   <p className="mx-auto mt-6 max-w-xl text-lg text-slate-100/90 drop-shadow-md sm:text-xl">
-                    Your unified health ecosystem. Access medical records, manage clinical
-                    appointments, and connect with providers nationwide.
+                    Experience smarter healthcare management with seamless access to records,
+                     providers, pharmacy services, and real-time patient support.
                   </p>
 
                   <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
@@ -1159,14 +1159,14 @@ export function PatientDashboardPage() {
                 <div className="mb-6 flex flex-col items-start gap-4">
                   <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300">
                     <Sparkles size={14} />
-                    The MediConnect Advantage
+                    MediConnect LK
                   </span>
                   <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
                     Your Health, <span className="text-blue-600 dark:text-blue-400">Unified.</span>
                   </h2>
                   <p className="max-w-2xl text-slate-500 dark:text-slate-400">
                     MediConnect is a national healthcare integration network that bridges the gap
-                    between state hospitals, pharmacies, and patients. We turn fragmented medical
+                    between government hospitals, pharmacies, and patients. We turn fragmented medical
                     data into a single, secure, and accessible ecosystem.
                   </p>
                 </div>
@@ -2361,17 +2361,6 @@ export function PatientDashboardPage() {
               <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">
                 © 2026 Digital Health Ministry SL • Patient Portal v3.1
               </p>
-            </div>
-            <div className="flex gap-8">
-              {["Privacy", "Terms", "Security"].map((item) => (
-                <a
-                  key={item}
-                  href="#"
-                  className="text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:underline"
-                >
-                  {item}
-                </a>
-              ))}
             </div>
           </div>
         </footer>
