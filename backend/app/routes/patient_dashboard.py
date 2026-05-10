@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -1327,6 +1327,22 @@ def _book_slot_for_patient(context: dict, slot_id: int):
 
     if not slot:
         raise HTTPException(status_code=400, detail="Slot not available")
+    
+    now = datetime.now(timezone.utc)
+
+    # Parse the slot start time (ensure it's UTC-aware for comparison)
+    # Most Supabase SDKs return strings, so we parse it
+    from dateutil import parser
+    slot_start_dt = parser.isoparse(slot["start_time"])
+
+    if slot_start_dt.tzinfo is None:
+        slot_start_dt = slot_start_dt.replace(tzinfo=timezone.utc)
+
+    if slot_start_dt < now:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot book a slot that has already passed."
+        )
 
     slot_start = slot["start_time"]
     slot_end = slot["end_time"]
@@ -1802,12 +1818,15 @@ def get_available_slots(
 ):
     _require_patient_context(authorization)
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+
     raw_slots = execute_with_retry(
         lambda: (
             supabase_admin.table("availability_slots")
             .select("*")
             .eq("doctor_id", doctor_id)
             .eq("is_booked", False)
+            .gt("start_time", now_iso)
             .order("start_time")
             .execute()
             .data
