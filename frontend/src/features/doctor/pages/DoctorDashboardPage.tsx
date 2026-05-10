@@ -358,6 +358,9 @@ function getScheduleBadge(item: DoctorScheduleItem) {
   if (status === "cancelled") {
     return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
   }
+  if (status === "missed") {
+    return "bg-green-100 text-green-700 dark:bg-red-900/30 dark:text-red-300";
+  }
   if (item.encounter) {
     return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300";
   }
@@ -2436,13 +2439,21 @@ export function DoctorDashboardPage() {
                                 Consent: {formatStatusLabel(item.consent.status)}
                               </p>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => void openAppointmentEncounter(item.id)}
-                              className="rounded-lg bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white"
-                            >
-                              {item.encounter ? "Review" : "Open"}
-                            </button>
+
+                            <div className="flex items-center gap-3">
+                              <span
+                                className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${getScheduleBadge(item)}`}
+                              >
+                                {item.status}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void openAppointmentEncounter(item.id)}
+                                className="w-20 rounded-lg bg-primary py-2 text-[10px] font-bold uppercase tracking-widest text-white transition-colors hover:opacity-90"
+                              >
+                                {item.encounter ? "Review" : "Open"}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>

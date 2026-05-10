@@ -768,21 +768,6 @@ export function PatientDashboardPage() {
     setModal("appointment");
   };
 
-  const openRescheduleModal = (appointment: DashboardAppointment) => {
-    setEditingAppointment(appointment);
-    setAppointmentForm({
-      organisationId: String(appointment.organisation.id),
-      doctorId: String(appointment.doctor.id),
-      appointmentDate: toDateInputValue(appointment.start_time),
-      slotId: "",
-      startTime: toDateTimeInputValue(appointment.start_time),
-      endTime: toDateTimeInputValue(appointment.end_time),
-    });
-    setAvailableSlots([]);
-    setSlotError(null);
-    setModal("appointment");
-  };
-
   const submitAppointment = async () => {
     if (!editingAppointment && !appointmentForm.organisationId) {
       showToast("Select an organisation first.", "error");
@@ -1760,15 +1745,6 @@ export function PatientDashboardPage() {
                             {item.consent.granted ? "Revoke Consent" : "Grant Consent"}
                           </button>
                         )}
-                        {["cancelled", "completed"].includes(item.status.toLowerCase()) ? null : (
-                          <button
-                            type="button"
-                            onClick={() => openRescheduleModal(item)}
-                            className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white dark:bg-blue-600"
-                          >
-                            Reschedule
-                          </button>
-                        )}
                         <button
                           type="button"
                           onClick={() => void cancelAppointment(item.id)}
@@ -2356,10 +2332,10 @@ export function PatientDashboardPage() {
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
             <div>
               <p className="text-sm font-bold dark:text-slate-300">
-                National Health Identity System
+                National Health Integration System
               </p>
               <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">
-                © 2026 Digital Health Ministry SL • Patient Portal v3.1
+                © 2026 National Health Ministry
               </p>
             </div>
           </div>
@@ -2772,7 +2748,7 @@ export function PatientDashboardPage() {
                     <div className="rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950/30">
                       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
                         <div className="space-y-4">
-                          <div className="grid gap-4 md:grid-cols-3">
+                          <div className="grid gap-4 md:grid-cols-2">
                             <div>
                               <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">
                                 Organisation
@@ -2842,31 +2818,6 @@ export function PatientDashboardPage() {
                                 }
                                 disabled={!appointmentForm.doctorId}
                                 className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <div>
-                              <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">
-                                Selected Start Time
-                              </label>
-                              <input
-                                type="datetime-local"
-                                value={appointmentForm.startTime}
-                                readOnly
-                                className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">
-                                Selected End Time
-                              </label>
-                              <input
-                                type="datetime-local"
-                                value={appointmentForm.endTime}
-                                readOnly
-                                className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                               />
                             </div>
                           </div>
