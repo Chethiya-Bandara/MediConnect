@@ -35,11 +35,11 @@ import { PrescriptionStatusBadge } from "../components/PrescriptionStatusBadge";
 import { usePharmacistDashboard } from "../hooks/usePharmacistDashboard";
 import type { PharmacistSection } from "../types";
 
-import MRI from "../../../assets/welcome/MRI.jpg";
-import Tools from "../../../assets/welcome/Tools.jpg";
-import HealthCamp from "../../../assets/welcome/HealthCamp.jpg";
+import Pharmacist1 from "../../../assets/welcome/Pharmacist1.jpg";
+import Pharmacist2 from "../../../assets/welcome/Pharmacist2.jpg";
+import Pharmacist3 from "../../../assets/welcome/Pharmacist3.jpg";
 
-const WELCOME_IMAGES = [MRI, Tools, HealthCamp];
+const WELCOME_IMAGES = [Pharmacist1, Pharmacist2, Pharmacist3];
 
 function formatLkr(value: number | null) {
   if (value === null) return "N/A";

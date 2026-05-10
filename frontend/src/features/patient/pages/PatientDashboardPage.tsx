@@ -74,11 +74,11 @@ type Theme = "light" | "dark";
 
 const QR_CODE_API_BASE = "https://api.qrserver.com/v1/create-qr-code";
 
-import MRI from "../../../assets/welcome/MRI.jpg";
-import Tools from "../../../assets/welcome/Tools.jpg";
-import HealthCamp from "../../../assets/welcome/HealthCamp.jpg";
+import Patient1 from "../../../assets/welcome/Patient1.jpg";
+import Patient2 from "../../../assets/welcome/Patient2.jpg";
+import Patient3 from "../../../assets/welcome/Patient3.jpg";
 
-const WELCOME_IMAGES = [MRI, Tools, HealthCamp];
+const WELCOME_IMAGES = [Patient1, Patient2, Patient3];
 
 const navItems = [
   { id: "home", label: "Home", icon: Home },
