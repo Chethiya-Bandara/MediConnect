@@ -1,6 +1,7 @@
 import type {
   DoctorAssistantReply,
   DoctorAffiliationHospitalOption,
+  DoctorPatientHistoryResponse,
   DoctorAvailabilitySlot,
   DoctorDashboardData,
   DoctorDiseaseCatalogItem,
@@ -14,6 +15,12 @@ export function getDoctorDashboard(activeAppointmentId?: number | null) {
     ? `${endpoints.doctor.dashboard}?active_appointment_id=${encodeURIComponent(activeAppointmentId)}`
     : endpoints.doctor.dashboard;
   return apiRequest<DoctorDashboardData>(path);
+}
+
+export function getDoctorPatientHistory(patientId: number, appointmentId: number) {
+  return apiRequest<DoctorPatientHistoryResponse>(
+    `${endpoints.doctor.dashboard}/patients/${patientId}/history?appointment_id=${encodeURIComponent(appointmentId)}`,
+  );
 }
 
 export function updateDoctorProfile(payload: {
@@ -34,7 +41,11 @@ export function updateDoctorProfile(payload: {
 export function submitDoctorEncounter(payload: {
   patient_id: number;
   appointment_id?: number;
+  disease_id?: number;
   diagnosis: string;
+  diagnoses?: Array<{
+    disease_id: number;
+  }>;
   encounter_type: string;
   clinical_notes: string;
   health_snapshot?: {
@@ -59,7 +70,9 @@ export function submitDoctorEncounter(payload: {
     JSON.stringify({
       patient_id: payload.patient_id,
       appointment_id: payload.appointment_id,
+      disease_id: payload.disease_id,
       diagnosis: payload.diagnosis,
+      diagnoses: payload.diagnoses,
       encounter_type: payload.encounter_type,
       clinical_notes: payload.clinical_notes,
       health_snapshot: payload.health_snapshot,

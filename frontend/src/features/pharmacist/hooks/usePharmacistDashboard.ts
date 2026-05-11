@@ -98,6 +98,10 @@ function getSearchableValues(item: PharmacistPrescriptionSummary) {
   ].map((value) => value.toLowerCase());
 }
 
+function normalizeLookupQuery(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
 function buildStats(
   prescriptions: PharmacistPrescriptionSummary[],
   history: PharmacistDispenseHistoryEntry[],
@@ -373,8 +377,8 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
     });
   };
 
-  const lookupPrescription = () => {
-    const query = searchQuery.trim().toLowerCase();
+  const lookupPrescription = (queryOverride?: string) => {
+    const query = normalizeLookupQuery(queryOverride ?? searchQuery);
     setActionMessage(null);
 
     if (!query) {

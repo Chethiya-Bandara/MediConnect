@@ -52,20 +52,23 @@ import {
   searchDoctorDiseases,
   getDoctorAvailability,
   getDoctorDashboard,
+  getDoctorPatientHistory,
   requestDoctorAffiliation,
   revokeDoctorAffiliation,
   searchDoctorMedicines,
   submitDoctorEncounter,
-  updateDoctorAvailability,
   updateDoctorProfile,
 } from "../api/doctorApi";
 import type {
   DoctorActivePatient,
   DoctorAffiliationHospitalOption,
+  DoctorArchiveEncounterDetail,
+  DoctorArchivePrescriptionDetail,
   DoctorAvailabilitySlot,
   DoctorDashboardData,
   DoctorDiseaseCatalogItem,
   DoctorMedicineCatalogItem,
+  DoctorPatientHistoryResponse,
   DoctorScheduleItem,
 } from "../types";
 import { doctorSpecializationOptions } from "../../../lib/constants/doctorSpecializations";
@@ -109,8 +112,8 @@ const navItems = [
 ] as const;
 
 const encounterTypeOptions: DashboardSelectOption[] = [
-  { value: "Routine Follow-up", label: "Routine Follow-up" },
   { value: "Acute Consultation", label: "Acute Consultation" },
+  { value: "Routine Follow-up", label: "Routine Follow-up" },
   { value: "Specialist Referral", label: "Specialist Referral" },
 ];
 
@@ -317,6 +320,71 @@ function formatUploadedFileSize(size: number) {
   return `${Math.max(1, Math.round(size / 1024))} KB`;
 }
 
+type SnapshotTone = "neutral" | "good" | "warning" | "danger";
+
+function getSnapshotTone(label: string, value: string | null | undefined): SnapshotTone {
+  const normalizedLabel = label.trim().toLowerCase();
+  const normalizedValue = (value ?? "").trim().toLowerCase();
+
+  if (!normalizedValue || normalizedValue === "not recorded") {
+    return "neutral";
+  }
+
+  if (normalizedLabel === "bmi") {
+    const bmi = Number.parseFloat(normalizedValue);
+    if (!Number.isFinite(bmi)) return "neutral";
+    if (bmi < 18.5) return "warning";
+    if (bmi < 25) return "good";
+    if (bmi < 30) return "warning";
+    return "danger";
+  }
+
+  if (normalizedLabel === "blood sugar") {
+    const sugar = Number.parseFloat(normalizedValue);
+    if (!Number.isFinite(sugar)) return "neutral";
+    if (sugar < 100) return "good";
+    if (sugar < 126) return "warning";
+    return "danger";
+  }
+
+  if (normalizedLabel === "cholesterol") {
+    const cholesterol = Number.parseFloat(normalizedValue);
+    if (!Number.isFinite(cholesterol)) return "neutral";
+    if (cholesterol < 200) return "good";
+    if (cholesterol < 240) return "warning";
+    return "danger";
+  }
+
+  if (normalizedLabel === "blood pressure") {
+    const match = normalizedValue.match(/(\d+)\s*\/\s*(\d+)/);
+    if (!match) return "neutral";
+    const systolic = Number.parseInt(match[1], 10);
+    const diastolic = Number.parseInt(match[2], 10);
+    if (systolic < 120 && diastolic < 80) return "good";
+    if (systolic < 130 && diastolic < 80) return "warning";
+    return "danger";
+  }
+
+  if (normalizedLabel === "allergies") {
+    return ["none", "no", "n/a", "nil"].includes(normalizedValue) ? "good" : "danger";
+  }
+
+  return "neutral";
+}
+
+function snapshotToneClassName(tone: SnapshotTone) {
+  if (tone === "good") {
+    return "border-emerald-200 bg-emerald-50/90 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300";
+  }
+  if (tone === "warning") {
+    return "border-amber-200 bg-amber-50/90 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300";
+  }
+  if (tone === "danger") {
+    return "border-rose-200 bg-rose-50/90 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300";
+  }
+  return "border-slate-100 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-200";
+}
+
 function todayInputDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -334,8 +402,74 @@ function isTodayScheduleItem(startTime: string | null | undefined) {
   );
 }
 
+function isTodayTimestamp(value: string | null | undefined) {
+  if (!value) return false;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+
+  const now = new Date();
+  return (
+    parsed.getFullYear() === now.getFullYear() &&
+    parsed.getMonth() === now.getMonth() &&
+    parsed.getDate() === now.getDate()
+  );
+}
+
+function isCancelledScheduleItem(status: string | null | undefined) {
+  return (status ?? "").trim().toLowerCase().includes("cancel");
+}
+
+function isCompletedScheduleItem(status: string | null | undefined) {
+  return (status ?? "").trim().toLowerCase().includes("complete");
+}
+
+function isUpcomingScheduleItem(startTime: string | null | undefined) {
+  if (!startTime) return false;
+  const parsed = new Date(startTime);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return parsed.getTime() >= Date.now();
+}
+
 function normalizeMedicineSearchValue(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeDiseaseSearchValue(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function matchesDiseaseSuggestion(item: DoctorDiseaseCatalogItem, value: string) {
+  const normalizedValue = normalizeDiseaseSearchValue(value);
+  const code = (item.code ?? "").trim();
+  const name = item.name.trim();
+  const normalizedName = normalizeDiseaseSearchValue(name);
+  const normalizedCode = normalizeDiseaseSearchValue(code);
+  const normalizedCodeAndName = code
+    ? normalizeDiseaseSearchValue(`${code} - ${name}`)
+    : "";
+
+  if (normalizedValue === normalizedName) return true;
+  if (normalizedCode && normalizedValue === normalizedCode) return true;
+  if (normalizedCodeAndName && normalizedValue === normalizedCodeAndName) return true;
+
+  // Allow catalog labels that append clarifiers like "[common cold]" after the base disease name.
+  if (normalizedCodeAndName && normalizedValue.startsWith(`${normalizedCodeAndName} [`)) return true;
+  if (normalizedName && normalizedValue.startsWith(`${normalizedName} [`)) return true;
+
+  return false;
+}
+
+function formatDiseaseLabel(item: DoctorDiseaseCatalogItem) {
+  return item.code ? `${item.code} - ${item.name}` : item.name;
+}
+
+function parseArchiveEntityId(value: string) {
+  const [type, rawId] = value.split("-");
+  const parsedId = Number(rawId);
+  if ((type !== "encounter" && type !== "prescription") || !Number.isFinite(parsedId)) {
+    return null;
+  }
+  return { type, id: parsedId } as const;
 }
 
 function formatStatusLabel(value: string | null | undefined) {
@@ -360,21 +494,6 @@ function formatTimeWindow(start: string | null | undefined, end: string | null |
     hour: "numeric",
     minute: "2-digit",
   })}`;
-}
-
-function formatSlotInputTime(value: string | null | undefined) {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toLocaleTimeString("en-LK", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
-function buildSriLankaIso(slotDate: string, slotTime: string) {
-  return `${slotDate}T${slotTime}:00+05:30`;
 }
 
 function affiliationTone(status: string) {
@@ -469,8 +588,9 @@ export function DoctorDashboardPage() {
   const [diseaseSuggestions, setDiseaseSuggestions] = useState<DoctorDiseaseCatalogItem[]>([]);
   const [selectedDiseaseSuggestion, setSelectedDiseaseSuggestion] =
     useState<DoctorDiseaseCatalogItem | null>(null);
+  const [selectedDiagnoses, setSelectedDiagnoses] = useState<DoctorDiseaseCatalogItem[]>([]);
   const [isDiseaseSearchLoading, setIsDiseaseSearchLoading] = useState(false);
-  const [encounterType, setEncounterType] = useState("Routine Follow-up");
+  const [encounterType, setEncounterType] = useState("Acute Consultation");
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [healthHeightCm, setHealthHeightCm] = useState("");
   const [healthWeightKg, setHealthWeightKg] = useState("");
@@ -489,16 +609,17 @@ export function DoctorDashboardPage() {
   const [isMedicineSearchLoading, setIsMedicineSearchLoading] = useState(false);
   const [prescriptionDraft, setPrescriptionDraft] = useState<DraftPrescriptionItem[]>([]);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [archiveHistory, setArchiveHistory] = useState<DoctorPatientHistoryResponse | null>(null);
+  const [archiveHistoryLoading, setArchiveHistoryLoading] = useState(false);
+  const [archiveHistoryError, setArchiveHistoryError] = useState<string | null>(null);
+  const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null);
   const [submittingEncounter, setSubmittingEncounter] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingAvailability, setSavingAvailability] = useState(false);
   const [deletingAvailabilityId, setDeletingAvailabilityId] = useState<number | null>(null);
-  const [reschedulingAvailabilityId, setReschedulingAvailabilityId] = useState<number | null>(null);
-  const [editingAvailabilityId, setEditingAvailabilityId] = useState<number | null>(null);
-  const [editingAvailabilityStart, setEditingAvailabilityStart] = useState("");
-  const [editingAvailabilityEnd, setEditingAvailabilityEnd] = useState("");
   const [requestingHospitalId, setRequestingHospitalId] = useState<number | null>(null);
   const [revokingAffiliationId, setRevokingAffiliationId] = useState<number | null>(null);
+  const [selectedJoinHospitalId, setSelectedJoinHospitalId] = useState<number | "">("");
   const [profileName, setProfileName] = useState("");
   const [profileAddress, setProfileAddress] = useState("");
   const [profileSpecialization, setProfileSpecialization] = useState("");
@@ -524,12 +645,81 @@ export function DoctorDashboardPage() {
   const deferredMedicineQuery = useDeferredValue(medName.trim());
 
   const activePatient = dashboard?.active_patient ?? null;
+  const archiveEncounterDetails = archiveHistory?.encounters ?? [];
+  const archivePrescriptionDetails = useMemo<DoctorArchivePrescriptionDetail[]>(
+    () =>
+      archiveEncounterDetails.flatMap((encounter) =>
+        (encounter.prescriptions ?? []).map((prescription) => ({
+          ...prescription,
+          encounter_id: prescription.encounter_id ?? encounter.id,
+          items: prescription.items ?? [],
+        })),
+      ),
+    [archiveEncounterDetails],
+  );
+  const selectedArchiveRecord = useMemo(() => {
+    if (!selectedArchiveId) return null;
+    return activePatient?.archives.find((item) => item.id === selectedArchiveId) ?? null;
+  }, [activePatient?.archives, selectedArchiveId]);
+  const selectedArchiveEntity = useMemo(
+    () => (selectedArchiveId ? parseArchiveEntityId(selectedArchiveId) : null),
+    [selectedArchiveId],
+  );
+  const selectedArchiveEncounter = useMemo<DoctorArchiveEncounterDetail | null>(() => {
+    if (!selectedArchiveEntity || selectedArchiveEntity.type !== "encounter") {
+      return null;
+    }
+    return archiveEncounterDetails.find((item) => item.id === selectedArchiveEntity.id) ?? null;
+  }, [archiveEncounterDetails, selectedArchiveEntity]);
+  const selectedArchivePrescription = useMemo<DoctorArchivePrescriptionDetail | null>(() => {
+    if (!selectedArchiveEntity || selectedArchiveEntity.type !== "prescription") {
+      return null;
+    }
+    return archivePrescriptionDetails.find((item) => item.id === selectedArchiveEntity.id) ?? null;
+  }, [archivePrescriptionDetails, selectedArchiveEntity]);
   const doctorName =
     dashboard?.user.name?.trim() ||
     user?.name?.trim() ||
     dashboard?.user.email ||
     user?.email ||
     "Doctor";
+
+  useEffect(() => {
+    if (modal !== "archives" || !activePatient?.patient.id || !activePatient?.appointment.id) {
+      if (modal !== "archives") {
+        setArchiveHistory(null);
+        setArchiveHistoryError(null);
+        setSelectedArchiveId(null);
+      }
+      return;
+    }
+
+    let cancelled = false;
+    setArchiveHistoryLoading(true);
+    setArchiveHistoryError(null);
+
+    getDoctorPatientHistory(activePatient.patient.id, activePatient.appointment.id)
+      .then((response) => {
+        if (cancelled) return;
+        setArchiveHistory(response);
+        setSelectedArchiveId((current) => current ?? activePatient.archives[0]?.id ?? null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message =
+          err instanceof Error ? err.message : "Medical archive details could not be loaded";
+        setArchiveHistoryError(message);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setArchiveHistoryLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activePatient?.appointment.id, activePatient?.archives, activePatient?.patient.id, modal]);
 
   useEffect(() => {
     const snapshot = activePatient?.health_snapshot;
@@ -545,6 +735,7 @@ export function DoctorDashboardPage() {
         : new Date().toISOString().slice(0, 10),
     );
   }, [activePatient?.appointment.id, activePatient?.health_snapshot]);
+
   const calculatedHealthBmi = calculateBmi(healthHeightCm, healthWeightKg);
   const legalName = dashboard?.user.legal_name?.trim() || user?.legalName?.trim() || "Not available";
   const doctorInitials = getInitials(doctorName);
@@ -560,15 +751,50 @@ export function DoctorDashboardPage() {
     settings: "Profile Settings",
   } satisfies Record<DoctorPage, string>;
 
-  const queueItems = useMemo(() => {
+  const visibleScheduleItems = useMemo(() => {
     const schedule = dashboard?.schedule ?? [];
-    return schedule.slice(0, 6);
+    return schedule.filter((item) => !isCancelledScheduleItem(item.status));
   }, [dashboard]);
 
+  const queueItems = useMemo(() => {
+    return visibleScheduleItems
+      .filter(
+        (item) =>
+          !isCompletedScheduleItem(item.status) &&
+          !item.encounter &&
+          isUpcomingScheduleItem(item.start_time),
+      )
+      .slice(0, 6);
+  }, [visibleScheduleItems]);
+
   const todayScheduleItems = useMemo(() => {
-    const schedule = dashboard?.schedule ?? [];
-    return schedule.filter((item) => isTodayScheduleItem(item.start_time));
-  }, [dashboard]);
+    return visibleScheduleItems.filter((item) => isTodayScheduleItem(item.start_time));
+  }, [visibleScheduleItems]);
+
+  const scheduledTodayCount = todayScheduleItems.length;
+  const patientsSeenTodayCount = useMemo(
+    () =>
+      todayScheduleItems.filter(
+        (item) => isCompletedScheduleItem(item.status) || Boolean(item.encounter),
+      ).length,
+    [todayScheduleItems],
+  );
+  const pendingReportsTodayCount = useMemo(
+    () =>
+      todayScheduleItems.filter(
+        (item) => isCompletedScheduleItem(item.status) && !item.encounter,
+      ).length,
+    [todayScheduleItems],
+  );
+  const recordedEncountersTodayCount = useMemo(
+    () =>
+      todayScheduleItems.filter((item) =>
+        item.encounter
+          ? isTodayTimestamp(item.encounter.created_at ?? item.start_time)
+          : false,
+      ).length,
+    [todayScheduleItems],
+  );
 
   const approvedAffiliations = useMemo(
     () =>
@@ -577,6 +803,23 @@ export function DoctorDashboardPage() {
         return normalized.includes("approved") || normalized.includes("active");
       }),
     [dashboard],
+  );
+
+  const pendingAffiliations = useMemo(
+    () =>
+      (dashboard?.affiliations ?? []).filter((item) =>
+        item.status.toLowerCase().includes("pending"),
+      ),
+    [dashboard],
+  );
+
+  const requestableHospitals = useMemo(
+    () =>
+      affiliationHospitals.filter((hospital) => {
+        const normalized = (hospital.current_status ?? "").toLowerCase();
+        return !normalized.includes("approved") && !normalized.includes("active") && !normalized.includes("pending");
+      }),
+    [affiliationHospitals],
   );
 
   const approvedHospitalOptions = useMemo(
@@ -598,6 +841,26 @@ export function DoctorDashboardPage() {
     ],
     [approvedHospitalOptions],
   );
+
+  const joinRequestHospitalOptions = useMemo<DashboardSelectOption[]>(
+    () => [
+      { value: "", label: "Select hospital to join" },
+      ...requestableHospitals.map((hospital) => ({
+        value: String(hospital.id),
+        label: hospital.name,
+      })),
+    ],
+    [requestableHospitals],
+  );
+
+  useEffect(() => {
+    if (
+      selectedJoinHospitalId &&
+      !requestableHospitals.some((hospital) => hospital.id === selectedJoinHospitalId)
+    ) {
+      setSelectedJoinHospitalId("");
+    }
+  }, [requestableHospitals, selectedJoinHospitalId]);
 
   const specializationSelectOptions = useMemo(() => {
     const trimmed = profileSpecialization.trim();
@@ -626,9 +889,10 @@ export function DoctorDashboardPage() {
     );
   }, [dashboard, profileAddress, profileName, profileSlmcNumber, profileSpecialization]);
 
+  const trimmedProfileAddress = profileAddress.trim();
   const isProfileFormValid =
     profileName.trim().length >= 2 &&
-    profileAddress.trim().length >= 5 &&
+    (trimmedProfileAddress.length === 0 || trimmedProfileAddress.length >= 5) &&
     profileSpecialization.trim().length >= 2 &&
     profileSlmcNumber.trim().length >= 2;
 
@@ -638,9 +902,7 @@ export function DoctorDashboardPage() {
       setDiseaseSuggestions([]);
       setIsDiseaseSearchLoading(false);
       setSelectedDiseaseSuggestion((current) =>
-        current &&
-        `${current.code ?? ""} - ${current.name}`.trim().toLowerCase() ===
-          diagnosisInput.trim().toLowerCase()
+        current && matchesDiseaseSuggestion(current, diagnosisInput)
           ? current
           : null,
       );
@@ -654,16 +916,21 @@ export function DoctorDashboardPage() {
       .then((items) => {
         if (!active) return;
         setDiseaseSuggestions(items);
-        const exactMatch = items.find((item) => {
-          const code = (item.code ?? "").trim();
-          const name = item.name.trim();
-          const exactLabels = [name.toLowerCase()];
-          if (code) {
-            exactLabels.push(code.toLowerCase(), `${code} - ${name}`.toLowerCase());
+        const exactMatch = items.find((item) => matchesDiseaseSuggestion(item, diagnosisInput));
+        setSelectedDiseaseSuggestion((current) => {
+          if (exactMatch) {
+            return exactMatch;
           }
-          return exactLabels.includes(diagnosisInput.trim().toLowerCase());
+
+          if (!current) {
+            return null;
+          }
+
+          const currentStillExists = items.some((item) => item.id === current.id);
+          return currentStillExists || matchesDiseaseSuggestion(current, diagnosisInput)
+            ? current
+            : null;
         });
-        setSelectedDiseaseSuggestion(exactMatch ?? null);
       })
       .catch(() => {
         if (!active) return;
@@ -965,16 +1232,23 @@ export function DoctorDashboardPage() {
 
   const handleDiagnosisInputChange = (value: string) => {
     setDiagnosisInput(value);
-    const exactMatch = diseaseSuggestions.find((item) => {
-      const code = (item.code ?? "").trim();
-      const name = item.name.trim();
-      const exactLabels = [name.toLowerCase()];
-      if (code) {
-        exactLabels.push(code.toLowerCase(), `${code} - ${name}`.toLowerCase());
-      }
-      return exactLabels.includes(value.trim().toLowerCase());
-    });
+    const exactMatch =
+      diseaseSuggestions.find((item) => matchesDiseaseSuggestion(item, value)) ??
+      (diseaseSuggestions.length === 1 ? diseaseSuggestions[0] : null);
     setSelectedDiseaseSuggestion(exactMatch ?? null);
+  };
+
+  const addSelectedDiagnosis = (item: DoctorDiseaseCatalogItem) => {
+    setSelectedDiagnoses((current) =>
+      current.some((entry) => entry.id === item.id) ? current : [...current, item],
+    );
+    setDiagnosisInput("");
+    setDiseaseSuggestions([]);
+    setSelectedDiseaseSuggestion(null);
+  };
+
+  const removeSelectedDiagnosis = (diseaseId: number) => {
+    setSelectedDiagnoses((current) => current.filter((item) => item.id !== diseaseId));
   };
 
   const addMedicine = () => {
@@ -1045,6 +1319,7 @@ export function DoctorDashboardPage() {
     setDiagnosisInput("");
     setDiseaseSuggestions([]);
     setSelectedDiseaseSuggestion(null);
+    setSelectedDiagnoses([]);
     setClinicalNotes("");
     setHealthHeightCm("");
     setHealthWeightKg("");
@@ -1064,6 +1339,7 @@ export function DoctorDashboardPage() {
     setDiagnosisInput("");
     setDiseaseSuggestions([]);
     setSelectedDiseaseSuggestion(null);
+    setSelectedDiagnoses([]);
     setClinicalNotes("");
     setHealthHeightCm("");
     setHealthWeightKg("");
@@ -1092,12 +1368,35 @@ export function DoctorDashboardPage() {
       return;
     }
 
-    if (!diagnosisInput.trim() || !clinicalNotes.trim()) {
+    if (!clinicalNotes.trim()) {
       showToast("Diagnosis and clinical notes are required.", "error");
       return;
     }
 
-    if (!selectedDiseaseSuggestion) {
+    const nextDiagnoses = [...selectedDiagnoses];
+    let matchedDiseaseSuggestion =
+      selectedDiseaseSuggestion ??
+      diseaseSuggestions.find((item) => matchesDiseaseSuggestion(item, diagnosisInput)) ??
+      (diseaseSuggestions.length === 1 ? diseaseSuggestions[0] : null);
+
+    if (!matchedDiseaseSuggestion) {
+      const fallbackDiseaseSuggestions = await searchDoctorDiseases(diagnosisInput.trim());
+      matchedDiseaseSuggestion =
+        fallbackDiseaseSuggestions.find((item) => matchesDiseaseSuggestion(item, diagnosisInput)) ??
+        (fallbackDiseaseSuggestions.length === 1 ? fallbackDiseaseSuggestions[0] : null);
+      if (fallbackDiseaseSuggestions.length > 0) {
+        setDiseaseSuggestions(fallbackDiseaseSuggestions);
+      }
+      if (matchedDiseaseSuggestion) {
+        setSelectedDiseaseSuggestion(matchedDiseaseSuggestion);
+      }
+    }
+
+    if (matchedDiseaseSuggestion && !nextDiagnoses.some((item) => item.id === matchedDiseaseSuggestion.id)) {
+      nextDiagnoses.push(matchedDiseaseSuggestion);
+    }
+
+    if (nextDiagnoses.length === 0) {
       showToast(
         "Pick a diagnosis from the saved disease search results before submitting.",
         "error",
@@ -1119,9 +1418,9 @@ export function DoctorDashboardPage() {
       await submitDoctorEncounter({
         patient_id: activePatient.patient.id,
         appointment_id: activePatient.appointment.id,
-        diagnosis: selectedDiseaseSuggestion.code
-          ? `${selectedDiseaseSuggestion.code} - ${selectedDiseaseSuggestion.name}`
-          : selectedDiseaseSuggestion.name,
+        disease_id: nextDiagnoses[0].id,
+        diagnosis: formatDiseaseLabel(nextDiagnoses[0]),
+        diagnoses: nextDiagnoses.map((item) => ({ disease_id: item.id })),
         encounter_type: encounterType,
         clinical_notes: clinicalNotes.trim(),
         health_snapshot: Object.keys(healthSnapshot).length ? healthSnapshot : undefined,
@@ -1137,6 +1436,7 @@ export function DoctorDashboardPage() {
       setDiagnosisInput("");
       setDiseaseSuggestions([]);
       setSelectedDiseaseSuggestion(null);
+      setSelectedDiagnoses([]);
       setClinicalNotes("");
       setHealthHeightCm("");
       setHealthWeightKg("");
@@ -1166,7 +1466,10 @@ export function DoctorDashboardPage() {
 
   const saveProfile = async () => {
     if (!isProfileFormValid) {
-      showToast("Preferred name, specialization, and SLMC number need at least 2 characters.", "error");
+      showToast(
+        "Preferred name, specialization, and SLMC number need at least 2 characters. Address can be blank, or at least 5 characters if you enter it.",
+        "error",
+      );
       return;
     }
 
@@ -1233,49 +1536,6 @@ export function DoctorDashboardPage() {
     }
   };
 
-  const startReschedulingAvailability = (slot: DoctorAvailabilitySlot) => {
-    setEditingAvailabilityId(slot.id);
-    setEditingAvailabilityStart(formatSlotInputTime(slot.start_time));
-    setEditingAvailabilityEnd(formatSlotInputTime(slot.end_time));
-  };
-
-  const cancelReschedulingAvailability = () => {
-    setEditingAvailabilityId(null);
-    setEditingAvailabilityStart("");
-    setEditingAvailabilityEnd("");
-  };
-
-  const saveRescheduledAvailability = async (slotId: number) => {
-    if (!availabilityDate || !editingAvailabilityStart || !editingAvailabilityEnd) {
-      showToast("Pick both start and end time before rescheduling.", "error");
-      return;
-    }
-
-    if (editingAvailabilityEnd <= editingAvailabilityStart) {
-      showToast("New end time must be later than start time.", "error");
-      return;
-    }
-
-    setReschedulingAvailabilityId(slotId);
-    try {
-      await updateDoctorAvailability(slotId, {
-        start_time: buildSriLankaIso(availabilityDate, editingAvailabilityStart),
-        end_time: buildSriLankaIso(availabilityDate, editingAvailabilityEnd),
-      });
-      showToast("Availability slot rescheduled.");
-      cancelReschedulingAvailability();
-      const slots = await getDoctorAvailability(availabilityDate, selectedAvailabilityHospitalId);
-      setAvailabilitySlots(slots);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Availability slot could not be rescheduled";
-      setAvailabilityError(message);
-      showToast(message, "error");
-    } finally {
-      setReschedulingAvailabilityId(null);
-    }
-  };
-
   const removeAvailability = async (slotId: number) => {
     setDeletingAvailabilityId(slotId);
     try {
@@ -1296,6 +1556,7 @@ export function DoctorDashboardPage() {
     try {
       await requestDoctorAffiliation({ hospital_id: hospitalId });
       showToast("Hospital join request sent.");
+      setSelectedJoinHospitalId("");
       await loadDashboard();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Hospital request could not be sent", "error");
@@ -1814,7 +2075,7 @@ export function DoctorDashboardPage() {
                       </p>
                       <div className="mt-3 flex items-end justify-between gap-4">
                         <p className="text-3xl font-black text-slate-900 dark:text-white">
-                          {dashboard?.stats.scheduled_today ?? 0}
+                          {scheduledTodayCount}
                         </p>
                         <CalendarDays className="text-blue-500 dark:text-blue-300" size={22} />
                       </div>
@@ -1899,7 +2160,7 @@ export function DoctorDashboardPage() {
                         Patients Seen Today
                       </p>
                       <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">
-                        {dashboard?.stats.patients_seen_today ?? 0}
+                        {patientsSeenTodayCount}
                       </p>
                     </div>
                     <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
@@ -1915,7 +2176,7 @@ export function DoctorDashboardPage() {
                         Pending Reports
                       </p>
                       <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">
-                        {dashboard?.stats.pending_reports ?? 0}
+                        {pendingReportsTodayCount}
                       </p>
                     </div>
                     <div className="rounded-2xl bg-orange-50 p-3 text-orange-500 dark:bg-orange-900/30 dark:text-orange-300">
@@ -1931,7 +2192,7 @@ export function DoctorDashboardPage() {
                         Recorded Encounters
                       </p>
                       <p className="mt-4 text-4xl font-black text-slate-900 dark:text-white">
-                        {dashboard?.stats.recorded_encounters ?? 0}
+                        {recordedEncountersTodayCount}
                       </p>
                     </div>
                     <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
@@ -2019,8 +2280,8 @@ export function DoctorDashboardPage() {
                       ))
                     ) : (
                       <EmptyState
-                        title="No schedule entries yet"
-                        description="Once patients book through your affiliated organisations, upcoming appointments will appear here."
+                        title="No active schedule entries yet"
+                        description="Cancelled appointments are hidden. Upcoming active appointments will appear here."
                         className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
                       />
                     )}
@@ -2083,7 +2344,7 @@ export function DoctorDashboardPage() {
                       <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2">
                         <div className="space-y-2">
                           <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                            Primary Diagnosis (ICD-10 quick search)
+                            Diagnosis
                           </label>
                           <div className="relative">
                             <Search
@@ -2103,11 +2364,7 @@ export function DoctorDashboardPage() {
                                     key={item.id}
                                     type="button"
                                     onClick={() => {
-                                      const nextValue = item.code
-                                        ? `${item.code} - ${item.name}`
-                                        : item.name;
-                                      setDiagnosisInput(nextValue);
-                                      setSelectedDiseaseSuggestion(item);
+                                      addSelectedDiagnosis(item);
                                     }}
                                     className="flex w-full justify-between border-b border-slate-50 px-4 py-3 text-left text-xs hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700"
                                   >
@@ -2122,18 +2379,45 @@ export function DoctorDashboardPage() {
                               </div>
                             ) : null}
                           </div>
-                          {diagnosisInput.trim().length >= 2 ? (
+                          {selectedDiagnoses.length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {selectedDiagnoses.map((item, index) => (
+                                <span
+                                  key={item.id}
+                                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ${
+                                    index === 0
+                                      ? "bg-primary text-white dark:bg-blue-600"
+                                      : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                  }`}
+                                >
+                                  <span>{index === 0 ? `Primary: ${formatDiseaseLabel(item)}` : formatDiseaseLabel(item)}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeSelectedDiagnosis(item.id)}
+                                    className="rounded-full opacity-80 transition hover:opacity-100"
+                                    aria-label={`Remove ${formatDiseaseLabel(item)}`}
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          {diagnosisInput.trim().length >= 2 || selectedDiagnoses.length > 0 ? (
                             <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-300">
                               {isDiseaseSearchLoading ? (
                                 <span>Loading disease catalog...</span>
                               ) : selectedDiseaseSuggestion ? (
                                 <span>
-                                  Using saved disease:{" "}
+                                  Ready to add:{" "}
                                   <span className="font-bold text-primary dark:text-blue-400">
-                                    {selectedDiseaseSuggestion.code
-                                      ? `${selectedDiseaseSuggestion.code} - ${selectedDiseaseSuggestion.name}`
-                                      : selectedDiseaseSuggestion.name}
+                                    {formatDiseaseLabel(selectedDiseaseSuggestion)}
                                   </span>
+                                </span>
+                              ) : selectedDiagnoses.length > 0 ? (
+                                <span>
+                                  You can keep adding diagnoses. The first selected one will be saved
+                                  as the primary diagnosis.
                                 </span>
                               ) : (
                                 <span>
@@ -2170,9 +2454,9 @@ export function DoctorDashboardPage() {
                       </div>
                       <div className="mb-8 rounded-2xl border border-slate-100 bg-slate-50/80 p-5 dark:border-slate-800 dark:bg-slate-800/40">
                         <div className="mb-4">
-                          <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          <h4 className="flex items-center gap-2 text-lg font-bold text-primary dark:text-blue-400">
                             Health Snapshot
-                          </label>
+                          </h4>
                           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                             Save updated vitals here. Height and weight calculate BMI automatically, and every field is optional.
                           </p>
@@ -2262,19 +2546,22 @@ export function DoctorDashboardPage() {
                                   ["Cholesterol", activePatient.health_snapshot.cholesterol],
                                   ["Blood pressure", activePatient.health_snapshot.blood_pressure],
                                   ["Allergies", activePatient.health_snapshot.allergies],
-                                ].map(([label, value]) => (
+                                ].map(([label, value]) => {
+                                  const tone = getSnapshotTone(String(label), value ?? undefined);
+                                  return (
                                   <div
                                     key={label}
-                                    className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/60"
+                                    className={`rounded-xl border px-4 py-3 ${snapshotToneClassName(tone)}`}
                                   >
-                                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">
                                       {label}
                                     </p>
-                                    <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                                    <p className="mt-1 text-sm font-semibold">
                                       {value || "Not recorded"}
                                     </p>
                                   </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             ) : (
                               <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
@@ -2369,12 +2656,6 @@ export function DoctorDashboardPage() {
                       <Pill size={18} />
                       ePrescription
                     </h3>
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="text-green-500" size={16} />
-                      <span className="text-[10px] font-black uppercase tracking-widest text-green-600 dark:text-green-400">
-                        DB Ready
-                      </span>
-                    </div>
                   </div>
                   <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
                     <input
@@ -2395,13 +2676,13 @@ export function DoctorDashboardPage() {
                       value={medDose}
                       onChange={(event) => setMedDose(event.target.value)}
                       className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white"
-                      placeholder="Dosage"
+                      placeholder="Dosage per day"
                     />
                     <input
                       value={medDuration}
                       onChange={(event) => setMedDuration(event.target.value)}
                       className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white"
-                      placeholder="Duration"
+                      placeholder="Duration in days"
                     />
                     <button
                       type="button"
@@ -2468,8 +2749,8 @@ export function DoctorDashboardPage() {
                       <thead className="border-b border-slate-100 text-[10px] uppercase text-slate-400 dark:border-slate-800">
                         <tr>
                           <th className="px-2 pb-3">Medication</th>
-                          <th className="px-2 pb-3">Dosage</th>
-                          <th className="px-2 pb-3">Duration</th>
+                          <th className="px-2 pb-3">Dosage per day</th>
+                          <th className="px-2 pb-3">Duration in days</th>
                           <th className="px-2 pb-3" />
                         </tr>
                       </thead>
@@ -2763,8 +3044,8 @@ export function DoctorDashboardPage() {
                     ))
                   ) : (
                     <EmptyState
-                      title="No appointments today"
-                      description="Only today's booked visits are shown here. Future bookings can wait their turn."
+                      title="No active appointments today"
+                      description="Cancelled appointments are hidden. Only today's active visits are shown here."
                       className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
                     />
                   )}
@@ -2815,103 +3096,103 @@ export function DoctorDashboardPage() {
                         Join Requests
                       </p>
                       <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">
-                        Approved hospitals directory
+                        Request hospital access
                       </h3>
                     </div>
                     <div className="rounded-2xl bg-blue-50 px-4 py-3 text-xs text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
-                      Pick a hospital, send the join request, then wait for admin approval.
+                      Pick one hospital from the dropdown, send the request, then wait for admin approval.
                     </div>
                   </div>
 
-                  <div className="grid gap-4">
-                    {affiliationHospitals.length ? (
-                      affiliationHospitals.map((hospital) => {
-                        const normalizedStatus = (hospital.current_status ?? "").toLowerCase();
-                        const hasApproved =
-                          normalizedStatus.includes("approved") ||
-                          normalizedStatus.includes("active");
-                        const hasPending = normalizedStatus.includes("pending");
+                  <div className="rounded-3xl border border-slate-100 bg-slate-50 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-800/40">
+                    {requestableHospitals.length ? (
+                      <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                        <div>
+                          <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                            Hospital
+                          </label>
+                          <DashboardCustomSelect
+                            value={selectedJoinHospitalId ? String(selectedJoinHospitalId) : ""}
+                            onChange={(value) =>
+                              setSelectedJoinHospitalId(value ? Number(value) : "")
+                            }
+                            options={joinRequestHospitalOptions}
+                            placeholder="Select hospital to join"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            selectedJoinHospitalId
+                              ? void submitAffiliationRequest(selectedJoinHospitalId)
+                              : showToast("Select a hospital before sending the join request.", "error")
+                          }
+                          disabled={!selectedJoinHospitalId || requestingHospitalId === selectedJoinHospitalId}
+                          className="rounded-2xl bg-primary px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {requestingHospitalId === selectedJoinHospitalId ? "Sending..." : "Request Join"}
+                        </button>
+                      </div>
+                    ) : (
+                      <EmptyState
+                        title="No hospitals available to request"
+                        description="Every visible hospital is already linked or waiting on approval, so there is nothing fresh to request right now."
+                        className="rounded-2xl border-slate-200 bg-white p-6 text-left shadow-none dark:bg-slate-900/40"
+                      />
+                    )}
+                  </div>
 
-                        return (
+                  <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                      Pending Requests
+                    </p>
+                    <h3 className="mt-2 text-2xl font-extrabold dark:text-white">
+                      Waiting for approval
+                    </h3>
+                    <div className="mt-6 space-y-3">
+                      {pendingAffiliations.length ? (
+                        pendingAffiliations.map((item) => (
                           <div
-                            key={hospital.id}
-                            className="rounded-3xl border border-slate-100 bg-slate-50 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-800/40"
+                            key={item.id}
+                            className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"
                           >
-                            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                              <div className="space-y-2">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                                    <Building2 size={20} />
-                                  </div>
-                                  <div>
-                                    <p className="text-lg font-extrabold dark:text-slate-100">
-                                      {hospital.name}
-                                    </p>
-                                    <p className="text-xs uppercase tracking-widest text-slate-500">
-                                      {hospital.type ?? "Hospital"} •{" "}
-                                      {formatStatusLabel(hospital.status)}
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span
-                                    className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${hospital.current_status ? affiliationTone(hospital.current_status) : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"}`}
-                                  >
-                                    {hospital.current_status ?? "No Request Yet"}
-                                  </span>
-                                  {hasApproved ? (
-                                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                                      Ready For Scheduling
-                                    </span>
-                                  ) : null}
-                                </div>
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <p className="font-bold dark:text-slate-200">
+                                  {item.organisation.name}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {item.created_at
+                                    ? `Requested ${formatDate(item.created_at)}`
+                                    : "Join request on file"}
+                                </p>
                               </div>
-
-                              <div className="flex flex-wrap gap-3">
+                              <div className="flex items-center gap-3">
+                                <span
+                                  className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${affiliationTone(item.status)}`}
+                                >
+                                  {formatStatusLabel(item.status)}
+                                </span>
                                 <button
                                   type="button"
-                                  onClick={() => void submitAffiliationRequest(hospital.id)}
-                                  disabled={
-                                    !hospital.can_request || requestingHospitalId === hospital.id
-                                  }
-                                  className="rounded-2xl bg-primary px-5 py-3 text-xs font-bold uppercase tracking-widest text-white shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                                  onClick={() => void revokeAffiliation(item.id)}
+                                  disabled={revokingAffiliationId === item.id}
+                                  className="rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold uppercase tracking-widest text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300"
                                 >
-                                  {requestingHospitalId === hospital.id
-                                    ? "Sending..."
-                                    : hasApproved
-                                      ? "Already Joined"
-                                      : hasPending
-                                        ? "Pending Review"
-                                        : "Request Join"}
+                                  {revokingAffiliationId === item.id ? "Updating..." : "Withdraw"}
                                 </button>
-                                {hospital.current_affiliation_id ? (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void revokeAffiliation(hospital.current_affiliation_id!)
-                                    }
-                                    disabled={
-                                      revokingAffiliationId === hospital.current_affiliation_id
-                                    }
-                                    className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-xs font-bold uppercase tracking-widest text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300"
-                                  >
-                                    {revokingAffiliationId === hospital.current_affiliation_id
-                                      ? "Updating..."
-                                      : "Withdraw"}
-                                  </button>
-                                ) : null}
                               </div>
                             </div>
                           </div>
-                        );
-                      })
-                    ) : (
-                      <EmptyState
-                        title="No hospitals available"
-                        description="Approved hospital organisations are not visible yet, so there is nothing to request from this doctor workspace."
-                        className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
-                      />
-                    )}
+                        ))
+                      ) : (
+                        <EmptyState
+                          title="No pending requests"
+                          description="Once you send a join request, it will sit here until the hospital admin approves or rejects it."
+                          className="rounded-2xl border-slate-200 bg-slate-50 p-5 text-left shadow-none dark:bg-slate-800/40"
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -2924,8 +3205,8 @@ export function DoctorDashboardPage() {
                       Current hospital links
                     </h3>
                     <div className="mt-6 space-y-3">
-                      {dashboard?.affiliations.length ? (
-                        dashboard.affiliations.map((item) => (
+                      {approvedAffiliations.length ? (
+                        approvedAffiliations.map((item) => (
                           <div
                             key={item.id}
                             className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"
@@ -3273,18 +3554,10 @@ export function DoctorDashboardPage() {
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
                       Account summary
                     </p>
-                    <div className="mt-6 space-y-4">
+                    <div className="mt-6">
                       <div className="rounded-2xl border border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
                         <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
-                          Current theme
-                        </p>
-                        <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
-                          {theme === "dark" ? "Dark mode" : "Light mode"}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
-                          Doctor record created
+                          Doctor profile created
                         </p>
                         <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">
                           {dashboard?.doctor.created_at
@@ -3391,14 +3664,14 @@ export function DoctorDashboardPage() {
           ) : null}
 
           {modal === "archives" ? (
-            <div className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-3xl border border-slate-200/70 bg-white/96 p-8 shadow-[0_32px_80px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900/96 dark:shadow-[0_36px_90px_rgba(2,6,23,0.7)]">
+            <div className="flex max-h-[84vh] w-full max-w-5xl flex-col rounded-3xl border border-slate-200/70 bg-white/96 p-8 shadow-[0_32px_80px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900/96 dark:shadow-[0_36px_90px_rgba(2,6,23,0.7)]">
               <div className="mb-6 flex items-center justify-between">
                 <div>
                   <h3 className="text-2xl font-bold dark:text-white">
                     {activePatient?.patient.name ?? "Patient"} archives
                   </h3>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    Saved encounters and prescriptions only.
+                    Read-only view of saved encounters and prescriptions.
                   </p>
                 </div>
                 <button
@@ -3409,38 +3682,206 @@ export function DoctorDashboardPage() {
                   <X size={18} />
                 </button>
               </div>
-              <div className="space-y-4 overflow-y-auto pr-2">
-                {activePatient?.archives.length ? (
-                  activePatient.archives.map((item) => (
-                    <div
-                      key={item.id}
-                      className="group flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
-                          {item.type === "prescription" ? (
-                            <Pill size={18} />
+              <div className="grid min-h-0 gap-5 overflow-hidden md:grid-cols-[0.95fr_1.35fr]">
+                <div className="space-y-4 overflow-y-auto pr-2">
+                  {activePatient?.archives.length ? (
+                    activePatient.archives.map((item) => {
+                      const isSelected = item.id === selectedArchiveId;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setSelectedArchiveId(item.id)}
+                          className={`group flex w-full items-center justify-between rounded-2xl border p-4 text-left transition ${
+                            isSelected
+                              ? "border-blue-200 bg-blue-50 shadow-sm dark:border-blue-500/40 dark:bg-blue-950/30"
+                              : "border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                              {item.type === "prescription" ? (
+                                <Pill size={18} />
+                              ) : (
+                                <FileArchive size={18} />
+                              )}
+                            </div>
+                            <div>
+                              <p className="font-bold dark:text-slate-200">{item.title}</p>
+                              <p className="text-xs font-medium text-slate-500">{item.meta}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              {item.type}
+                            </span>
+                            <ChevronRight
+                              size={16}
+                              className={isSelected ? "text-blue-600 dark:text-blue-300" : "text-slate-300"}
+                            />
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <EmptyState
+                      title="No saved archives yet"
+                      description="Encounter and prescription archive entries will appear here after records have been saved for the active patient."
+                      className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
+                    />
+                  )}
+                </div>
+
+                <div className="overflow-y-auto rounded-3xl border border-slate-200 bg-slate-50/80 p-5 dark:border-slate-800 dark:bg-slate-950/60">
+                  {archiveHistoryLoading ? (
+                    <div className="min-h-[280px]">
+                      <LoadingState message="Pulling the patient history into read-only view." />
+                    </div>
+                  ) : archiveHistoryError ? (
+                    <div className="min-h-[280px]">
+                      <ErrorState title="Archive unavailable" message={archiveHistoryError} />
+                    </div>
+                  ) : selectedArchiveRecord?.type === "encounter" && selectedArchiveEncounter ? (
+                    <div className="space-y-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                            Encounter Record
+                          </p>
+                          <h4 className="mt-2 text-xl font-bold dark:text-white">
+                            {selectedArchiveRecord.title}
+                          </h4>
+                          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                            {selectedArchiveRecord.meta}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-slate-200 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          Read only
+                        </span>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                          Clinical Notes
+                        </p>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
+                          {selectedArchiveEncounter.notes?.trim() || "No clinical notes were saved for this encounter."}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                          Linked Prescriptions
+                        </p>
+                        <div className="mt-4 space-y-3">
+                          {selectedArchiveEncounter.prescriptions?.length ? (
+                            selectedArchiveEncounter.prescriptions.map((prescription) => (
+                              <div
+                                key={prescription.id}
+                                className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/70"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className="font-bold dark:text-slate-200">
+                                    Prescription #{prescription.id}
+                                  </p>
+                                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                    {formatStatusLabel(prescription.status)}
+                                  </span>
+                                </div>
+                                <div className="mt-3 space-y-2 text-sm text-slate-600 dark:text-slate-300">
+                                  {prescription.items?.length ? (
+                                    prescription.items.map((line) => (
+                                      <div key={line.id} className="rounded-xl bg-white px-3 py-2 dark:bg-slate-900">
+                                        <span className="font-semibold text-slate-800 dark:text-slate-100">
+                                          {line.medicine_name || "Unnamed medicine"}
+                                        </span>
+                                        <span className="text-slate-500 dark:text-slate-400">
+                                          {" "}
+                                          • {line.dosage || "No dosage"} • {line.instructions || "No instructions"}
+                                        </span>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <p>No prescription line items were saved.</p>
+                                  )}
+                                </div>
+                              </div>
+                            ))
                           ) : (
-                            <FileArchive size={18} />
+                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                              No prescriptions were attached to this encounter.
+                            </p>
                           )}
                         </div>
+                      </div>
+                    </div>
+                  ) : selectedArchiveRecord?.type === "prescription" && selectedArchivePrescription ? (
+                    <div className="space-y-5">
+                      <div className="flex items-start justify-between gap-4">
                         <div>
-                          <p className="font-bold dark:text-slate-200">{item.title}</p>
-                          <p className="text-xs font-medium text-slate-500">{item.meta}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                            Prescription
+                          </p>
+                          <h4 className="mt-2 text-xl font-bold dark:text-white">
+                            {selectedArchiveRecord.title}
+                          </h4>
+                          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                            {selectedArchiveRecord.meta}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-slate-200 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          Read only
+                        </span>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                          Prescription Items
+                        </p>
+                        <div className="mt-4 space-y-3">
+                          {selectedArchivePrescription.items?.length ? (
+                            selectedArchivePrescription.items.map((line) => (
+                              <div
+                                key={line.id}
+                                className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/70"
+                              >
+                                <p className="font-bold dark:text-slate-200">
+                                  {line.medicine_name || "Unnamed medicine"}
+                                </p>
+                                <div className="mt-2 grid gap-2 text-sm text-slate-600 dark:text-slate-300 md:grid-cols-2">
+                                  <p>Dosage per day: {line.dosage || "Not recorded"}</p>
+                                  <p>Quantity: {line.quantity || "Not recorded"}</p>
+                                  <p className="md:col-span-2">
+                                    Instructions: {line.instructions || "Not recorded"}
+                                  </p>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                              No prescription line items were saved.
+                            </p>
+                          )}
                         </div>
                       </div>
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                        {item.type}
-                      </span>
+
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                        Linked encounter:{" "}
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">
+                          {selectedArchivePrescription.encounter_id
+                            ? `Encounter #${selectedArchivePrescription.encounter_id}`
+                            : "Not linked"}
+                        </span>
+                      </div>
                     </div>
-                  ))
-                ) : (
-                  <EmptyState
-                    title="No saved archives yet"
-                    description="Encounter and prescription archive entries will appear here after records have been saved for the active patient."
-                    className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
-                  />
-                )}
+                  ) : (
+                    <EmptyState
+                      title="Select an archive item"
+                      description="Choose an encounter record or prescription on the left to open it in read-only mode."
+                      className="min-h-[280px] rounded-2xl border-0 bg-transparent shadow-none"
+                    />
+                  )}
+                </div>
               </div>
             </div>
           ) : null}
@@ -3552,10 +3993,7 @@ export function DoctorDashboardPage() {
                   </div>
                   {availabilitySlots.length ? (
                     availabilitySlots.map((slot) => {
-                      const isEditing = editingAvailabilityId === slot.id;
-                      const isBusy =
-                        deletingAvailabilityId === slot.id ||
-                        reschedulingAvailabilityId === slot.id;
+                      const isBusy = deletingAvailabilityId === slot.id;
 
                       return (
                         <div
@@ -3566,30 +4004,9 @@ export function DoctorDashboardPage() {
                             <p className="font-bold dark:text-slate-200">
                               {formatDate(slot.start_time)}
                             </p>
-                            {isEditing ? (
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <input
-                                  type="time"
-                                  value={editingAvailabilityStart}
-                                  onChange={(event) =>
-                                    setEditingAvailabilityStart(event.target.value)
-                                  }
-                                  className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white"
-                                />
-                                <input
-                                  type="time"
-                                  value={editingAvailabilityEnd}
-                                  onChange={(event) =>
-                                    setEditingAvailabilityEnd(event.target.value)
-                                  }
-                                  className="rounded-xl border-0 bg-white px-3 py-2 text-sm shadow-inner dark:bg-slate-900 dark:text-white"
-                                />
-                              </div>
-                            ) : (
-                              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                                {formatTimeWindow(slot.start_time, slot.end_time)}
-                              </p>
-                            )}
+                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                              {formatTimeWindow(slot.start_time, slot.end_time)}
+                            </p>
                           </div>
                           <div className="flex flex-wrap items-center gap-3">
                             <span
@@ -3597,49 +4014,15 @@ export function DoctorDashboardPage() {
                             >
                               {slot.is_booked ? "Booked" : "Open"}
                             </span>
-                            {isEditing ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => void saveRescheduledAvailability(slot.id)}
-                                  disabled={isBusy}
-                                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  <CheckCircle2 size={14} />
-                                  {reschedulingAvailabilityId === slot.id ? "Saving..." : "Save"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={cancelReschedulingAvailability}
-                                  disabled={isBusy}
-                                  className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:text-slate-200"
-                                >
-                                  <X size={14} />
-                                  Cancel
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => startReschedulingAvailability(slot)}
-                                  disabled={Boolean(slot.is_booked) || isBusy}
-                                  className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-blue-900/20 dark:text-blue-300"
-                                >
-                                  <PencilLine size={14} />
-                                  Reschedule
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void removeAvailability(slot.id)}
-                                  disabled={Boolean(slot.is_booked) || isBusy}
-                                  className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300"
-                                >
-                                  <Trash2 size={14} />
-                                  {deletingAvailabilityId === slot.id ? "Removing..." : "Remove"}
-                                </button>
-                              </>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => void removeAvailability(slot.id)}
+                              disabled={Boolean(slot.is_booked) || isBusy}
+                              className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300"
+                            >
+                              <Trash2 size={14} />
+                              {deletingAvailabilityId === slot.id ? "Removing..." : "Remove"}
+                            </button>
                           </div>
                         </div>
                       );

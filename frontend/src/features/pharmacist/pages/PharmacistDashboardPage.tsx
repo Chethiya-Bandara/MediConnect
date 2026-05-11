@@ -86,8 +86,81 @@ function noticeClassName(tone: "error" | "info" | "success") {
   return "border-red-200 bg-red-50 text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300";
 }
 
+function getActionAlert(message: string) {
+  const normalized = message.trim().toLowerCase();
+
+  if (
+    normalized.includes("successful") ||
+    normalized.includes("loaded exact queue match") ||
+    normalized.includes("loaded exact match") ||
+    normalized.includes("added") ||
+    normalized.includes("saved")
+  ) {
+    return {
+      tone: "success" as const,
+      title: "Success",
+      description: message,
+    };
+  }
+
+  if (
+    normalized.includes("closest live queue result") ||
+    normalized.includes("pick a prescription first") ||
+    normalized.includes("choose at least one") ||
+    normalized.includes("enter the pharmacy organisation id")
+  ) {
+    return {
+      tone: "info" as const,
+      title: "Heads up",
+      description: message,
+    };
+  }
+
+  return {
+    tone: "error" as const,
+    title: "Action response",
+    description: message,
+  };
+}
+
 interface QrScannerLaneProps {
   onScanSuccess: (decodedText: string) => void;
+}
+
+function extractLookupValueFromScan(decodedText: string) {
+  const normalized = decodedText.trim();
+  if (!normalized) {
+    return "";
+  }
+
+  const dhidMatch = normalized.match(/dhid-[a-z0-9-]+/i);
+  if (dhidMatch) {
+    return dhidMatch[0].toUpperCase();
+  }
+
+  const prescriptionMatch = normalized.match(/presc[a-z0-9-]*/i);
+  if (prescriptionMatch) {
+    return prescriptionMatch[0];
+  }
+
+  try {
+    const url = new URL(normalized);
+    const candidates = [
+      url.searchParams.get("dhid"),
+      url.searchParams.get("prescription"),
+      url.searchParams.get("prescriptionId"),
+      url.searchParams.get("id"),
+      url.pathname.split("/").filter(Boolean).at(-1) ?? "",
+    ];
+    const extracted = candidates.find((candidate) => candidate && candidate.trim());
+    if (extracted) {
+      return extracted.trim();
+    }
+  } catch {
+    // Not a URL, so fall back to the raw scanned text.
+  }
+
+  return normalized;
 }
 
 export const QrScannerLane = ({ onScanSuccess }: QrScannerLaneProps) => {
@@ -140,6 +213,8 @@ export const QrScannerLane = ({ onScanSuccess }: QrScannerLaneProps) => {
       onScanSuccess(decodedText);
     } catch (err) {
       alert("No valid QR code found in this image.");
+    } finally {
+      e.target.value = "";
     }
   };
 
@@ -319,13 +394,7 @@ export function PharmacistDashboardPage() {
     }> = [];
 
     if (dashboard.actionMessage) {
-      items.push({
-        tone: dashboard.actionMessage.toLowerCase().includes("successful") ? "success" : "error",
-        title: dashboard.actionMessage.toLowerCase().includes("successful")
-          ? "Dispense update"
-          : "Action response",
-        description: dashboard.actionMessage,
-      });
+      items.push(getActionAlert(dashboard.actionMessage));
     }
 
     if (dashboard.error) {
@@ -816,9 +885,9 @@ export function PharmacistDashboardPage() {
                   </div> */}
                   <QrScannerLane
                     onScanSuccess={(decodedText) => {
-                      dashboard.setSearchQuery(decodedText);
-                      // Automatically trigger the backend lookup after a successful scan
-                      setTimeout(() => dashboard.lookupPrescription(), 100);
+                      const normalizedLookupValue = extractLookupValueFromScan(decodedText);
+                      dashboard.setSearchQuery(normalizedLookupValue);
+                      dashboard.lookupPrescription(normalizedLookupValue);
                     }}
                   />
                 </div>

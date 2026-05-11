@@ -72,14 +72,36 @@ class EncounterPrescriptionItemRequest(BaseModel):
         return value.strip()
 
 
+class EncounterDiagnosisRequest(BaseModel):
+    disease_id: int
+
+    @field_validator("disease_id")
+    @classmethod
+    def validate_disease_id(cls, value: int):
+        if value <= 0:
+            raise ValueError("Disease ID must be a positive integer")
+        return value
+
+
 class EncounterSubmitRequest(BaseModel):
     patient_id: int
     appointment_id: Optional[int] = None
+    disease_id: Optional[int] = None
     diagnosis: str
+    diagnoses: list[EncounterDiagnosisRequest] = Field(default_factory=list)
     encounter_type: str
     clinical_notes: str
     health_snapshot: Optional["HealthSnapshotInput"] = None
     prescription_items: list[EncounterPrescriptionItemRequest] = Field(default_factory=list)
+
+    @field_validator("disease_id")
+    @classmethod
+    def validate_disease_id(cls, value: Optional[int]):
+        if value is None:
+            return None
+        if value <= 0:
+            raise ValueError("Disease ID must be a positive integer")
+        return value
 
     @field_validator("diagnosis", "encounter_type", "clinical_notes")
     @classmethod
@@ -93,6 +115,8 @@ class EncounterSubmitRequest(BaseModel):
     def validate_payload(self):
         if len(self.prescription_items) > 25:
             raise ValueError("Prescription item count is too high")
+        if self.disease_id is None and not self.diagnoses and len(self.diagnosis.strip()) < 2:
+            raise ValueError("At least one diagnosis is required")
         return self
 
 
@@ -391,16 +415,88 @@ def _search_diseases(query: str, limit: int = 12) -> list[dict]:
     ]
 
 
+def _disease_catalog_item(disease_id: int) -> Optional[dict]:
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("diseases")
+            .select("id, icd, definition, domain")
+            .eq("id", disease_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if not rows:
+        return None
+
+    row = rows[0]
+    return {
+        "id": row.get("id"),
+        "code": row.get("icd"),
+        "name": row.get("definition"),
+        "domain": row.get("domain"),
+    }
+
+
+def _normalize_disease_search_value(value: Optional[str]) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def _matches_disease_search(row: dict, value: str) -> bool:
+    normalized_value = _normalize_disease_search_value(value)
+    code = str(row.get("code") or row.get("icd") or "").strip()
+    name = str(row.get("name") or row.get("definition") or "").strip()
+    normalized_name = _normalize_disease_search_value(name)
+    normalized_code = _normalize_disease_search_value(code)
+    normalized_code_and_name = (
+        _normalize_disease_search_value(f"{code} - {name}") if code else ""
+    )
+
+    if normalized_value in {normalized_name, normalized_code, normalized_code_and_name}:
+        return True
+
+    if normalized_code_and_name and normalized_value.startswith(f"{normalized_code_and_name} ["):
+        return True
+
+    if normalized_name and normalized_value.startswith(f"{normalized_name} ["):
+        return True
+
+    return False
+
+
 def _resolve_disease(query: str) -> Optional[dict]:
     normalized = (query or "").strip()
     if len(normalized) < 2:
         return None
 
+    code_part = normalized
+    name_part = normalized
+    if " - " in normalized:
+        code_part, name_part = [part.strip() for part in normalized.split(" - ", 1)]
+
+    base_name_part = name_part.split("[", 1)[0].strip()
+    search_terms = [
+        term
+        for term in [normalized, code_part, name_part, base_name_part]
+        if len(term) >= 2
+    ]
+
     exact_rows = execute_with_retry(
         lambda: (
             supabase_admin.table("diseases")
             .select("id, icd, definition, domain")
-            .or_(f"icd.ilike.{normalized},definition.ilike.{normalized},domain.ilike.{normalized}")
+            .or_(
+                ",".join(
+                    [
+                        f"icd.ilike.{code_part}",
+                        f"definition.ilike.{name_part}",
+                        f"definition.ilike.{base_name_part}",
+                        f"domain.ilike.{normalized}",
+                    ]
+                )
+            )
             .limit(5)
             .execute()
             .data
@@ -409,9 +505,7 @@ def _resolve_disease(query: str) -> Optional[dict]:
         default=[],
     )
     for row in exact_rows:
-        code = str(row.get("icd") or "").strip().lower()
-        name = str(row.get("definition") or "").strip().lower()
-        if normalized.lower() in {code, name, f"{code} - {name}"}:
+        if _matches_disease_search(row, normalized):
             return {
                 "id": row.get("id"),
                 "code": row.get("icd"),
@@ -419,8 +513,21 @@ def _resolve_disease(query: str) -> Optional[dict]:
                 "domain": row.get("domain"),
             }
 
-    search_rows = _search_diseases(normalized, limit=1)
-    return search_rows[0] if search_rows else None
+    for term in search_terms:
+        search_rows = _search_diseases(term, limit=5)
+        for row in search_rows:
+            if _matches_disease_search(row, normalized):
+                return row
+
+    return None
+
+
+def _disease_label(disease: dict, fallback: str = "") -> str:
+    diagnosis_code = str(disease.get("code") or "").strip()
+    diagnosis_name = str(disease.get("name") or "").strip()
+    if diagnosis_code and diagnosis_name:
+        return f"{diagnosis_code} - {diagnosis_name}"
+    return diagnosis_name or diagnosis_code or fallback
 
 
 def _title_status(value: Optional[str]) -> str:
@@ -751,7 +858,7 @@ def _format_patient_history(encounters, doctor_lookup, appointments_map, organis
     return items
 
 
-def _build_archives(history_items, latest_prescription):
+def _build_archives(history_items, prescriptions):
     archives = []
 
     for item in history_items[:8]:
@@ -767,21 +874,25 @@ def _build_archives(history_items, latest_prescription):
             }
         )
 
-    if latest_prescription:
-        created_at = _parse_iso_datetime(latest_prescription.get("created_at"))
+    for prescription in prescriptions[:8]:
+        created_at = _parse_iso_datetime(prescription.get("created_at"))
         created_label = created_at.strftime("%b %d, %Y") if created_at else "Unknown date"
-        archives.insert(
-            0,
+        archives.append(
             {
-                "id": f"prescription-{latest_prescription['id']}",
-                "title": f"Prescription #{latest_prescription['id']}",
+                "id": f"prescription-{prescription['id']}",
+                "title": f"Prescription #{prescription['id']}",
                 "type": "prescription",
-                "created_at": latest_prescription.get("created_at"),
-                "meta": f"{created_label} • {_title_status(latest_prescription.get('status'))}",
+                "created_at": prescription.get("created_at"),
+                "meta": f"{created_label} • {_title_status(prescription.get('status'))}",
             },
         )
 
-    return archives
+    archives.sort(
+        key=lambda item: _parse_iso_datetime(item.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+    return archives[:12]
 
 
 def _list_patient_health_snapshots(patient_id: int) -> list[dict]:
@@ -1053,7 +1164,7 @@ def _build_active_patient_bundle(active_schedule_item, doctor_id: int):
         "allergies": allergies,
         "health_snapshot": _format_health_snapshot(latest_health_snapshot),
         "history": history_items,
-        "archives": _build_archives(history_items, latest_prescription),
+        "archives": _build_archives(history_items, prescriptions),
     }
 
 
@@ -1400,8 +1511,26 @@ async def submit_encounter(
     if not patient_rows:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    disease = _resolve_disease(parsed_payload.diagnosis)
-    if not disease:
+    resolved_diseases: list[dict] = []
+    if parsed_payload.diagnoses:
+        for item in parsed_payload.diagnoses:
+            disease = _disease_catalog_item(item.disease_id)
+            if not disease:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Diagnosis ID {item.disease_id} was not found in the saved disease catalog.",
+                )
+            resolved_diseases.append(disease)
+    else:
+        disease = (
+            _disease_catalog_item(parsed_payload.disease_id)
+            if parsed_payload.disease_id is not None
+            else _resolve_disease(parsed_payload.diagnosis)
+        )
+        if disease:
+            resolved_diseases.append(disease)
+
+    if not resolved_diseases:
         raise HTTPException(
             status_code=400,
             detail="Diagnosis must match a disease from the saved disease catalog search results.",
@@ -1447,17 +1576,21 @@ async def submit_encounter(
             raise HTTPException(status_code=404, detail="Appointment not found for this doctor and patient")
         appointment = appointment_rows[0]
 
-    diagnosis_code = str(disease.get("code") or "").strip()
-    diagnosis_name = str(disease.get("name") or "").strip()
-    diagnosis_label = (
-        f"{diagnosis_code} - {diagnosis_name}"
-        if diagnosis_code and diagnosis_name
-        else diagnosis_name or diagnosis_code or parsed_payload.diagnosis
-    )
-    compiled_notes = (
-        f"Diagnosis: {diagnosis_label}\n"
-        f"Encounter Type: {parsed_payload.encounter_type}\n\n"
-        f"{parsed_payload.clinical_notes}"
+    diagnosis_label = _disease_label(resolved_diseases[0], parsed_payload.diagnosis)
+    additional_diagnosis_labels = [
+        _disease_label(disease) for disease in resolved_diseases[1:]
+    ]
+    compiled_notes = "".join(
+        [
+            f"Diagnosis: {diagnosis_label}\n",
+            (
+                f"Additional Diagnoses: {'; '.join(additional_diagnosis_labels)}\n"
+                if additional_diagnosis_labels
+                else ""
+            ),
+            f"Encounter Type: {parsed_payload.encounter_type}\n\n",
+            parsed_payload.clinical_notes,
+        ]
     )
 
     encounter_rows = (
@@ -1972,6 +2105,24 @@ def get_patient_history(
     for p in prescriptions:
         prescriptions_map.setdefault(p["encounter_id"], []).append(p)
 
+    prescription_ids = [p["id"] for p in prescriptions if p.get("id")]
+    prescription_items = []
+    if prescription_ids:
+        try:
+            prescription_items = (
+                supabase_admin.table("prescription_items")
+                .select("*")
+                .in_("prescription_id", prescription_ids)
+                .execute()
+                .data or []
+            )
+        except Exception:
+            prescription_items = []
+
+    prescription_items_map = {}
+    for item in prescription_items:
+        prescription_items_map.setdefault(item["prescription_id"], []).append(item)
+
     # ── Log the access ────────────────────────────────────────────
     _log_audit_action(
         context["user_id"],
@@ -1989,7 +2140,13 @@ def get_patient_history(
                 "id":           e.get("id"),
                 "created_at":   e.get("created_at"),
                 "notes":        e.get("notes"),
-                "prescriptions": prescriptions_map.get(e["id"], [])
+                "prescriptions": [
+                    {
+                        **prescription,
+                        "items": prescription_items_map.get(prescription["id"], []),
+                    }
+                    for prescription in prescriptions_map.get(e["id"], [])
+                ]
             }
             for e in encounters
         ]
