@@ -1,14 +1,16 @@
 import json
 import os
 import re
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator, model_validator
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.config.supabase import execute_with_retry, supabase, supabase_admin
 from app.middleware.ai_anonymiser import anonymise_and_check
+from app.middleware.file_validator import validate_upload_file
 from app.middleware.role_checker import RoleChecker, build_user_context
 from app.utils.helpers import validate_dhid, mask_nic, sanitize_search_query
 from app.utils.gemini_client import call_gemini_assistant
@@ -58,6 +60,7 @@ class ConsentUpdateRequest(BaseModel):
 
 class ProfileUpdateRequest(BaseModel):
     preferred_name: Optional[str] = None
+    address: Optional[str] = None
     medical_record_consent_default: Optional[bool] = None
 
     @field_validator("preferred_name")
@@ -70,10 +73,75 @@ class ProfileUpdateRequest(BaseModel):
             raise ValueError("Preferred name must be at least 2 characters")
         return cleaned
 
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, value: Optional[str]):
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if len(cleaned) < 5:
+            raise ValueError("Address must be at least 5 characters")
+        return cleaned
+
     @model_validator(mode="after")
     def validate_payload(self):
-        if self.preferred_name is None and self.medical_record_consent_default is None:
+        if (
+            self.preferred_name is None
+            and self.address is None
+            and self.medical_record_consent_default is None
+        ):
             raise ValueError("Provide at least one profile field to update")
+        return self
+
+
+class PatientSelfRecordCreateRequest(BaseModel):
+    title: Optional[str] = None
+    notes: str
+    health_snapshot: Optional["HealthSnapshotInput"] = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: Optional[str]):
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if len(cleaned) < 2:
+            raise ValueError("Record title must be at least 2 characters")
+        return cleaned
+
+    @field_validator("notes")
+    @classmethod
+    def validate_notes(cls, value: str):
+        cleaned = value.strip()
+        if len(cleaned) < 10:
+            raise ValueError("Medical record notes must be at least 10 characters")
+        return cleaned
+
+
+class HealthSnapshotInput(BaseModel):
+    bmi: Optional[str] = None
+    blood_sugar: Optional[str] = None
+    cholesterol: Optional[str] = None
+    blood_pressure: Optional[str] = None
+    allergies: Optional[str] = None
+    checked_at: Optional[datetime] = None
+
+    @field_validator("bmi", "blood_sugar", "cholesterol", "blood_pressure", "allergies")
+    @classmethod
+    def validate_metric_text(cls, value: Optional[str]):
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if len(cleaned) > 160:
+            raise ValueError("Metric value is too long")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_snapshot(self):
         return self
 
 
@@ -194,6 +262,9 @@ def _require_patient_context(authorization: Optional[str]):
             "email": user_context.get("email"),
             "role": user_context.get("role"),
             "name": user_context.get("name"),
+            "legal_name": user_context.get("legal_name"),
+            "preferred_name": user_context.get("preferred_name"),
+            "address": user_context.get("address"),
         },
         "patient": patient,
     }
@@ -465,6 +536,65 @@ def _resolve_slot_organisation_id(
     return None
 
 
+def _release_slot_for_appointment(appointment: dict):
+    doctor_id = appointment.get("doctor_id")
+    start_time = appointment.get("start_time")
+    end_time = appointment.get("end_time")
+
+    if not doctor_id or not start_time or not end_time:
+        return
+
+    appointment_start = _parse_iso_datetime(start_time)
+    appointment_end = _parse_iso_datetime(end_time)
+    if not appointment_start or not appointment_end:
+        return
+
+    candidate_slots = execute_with_retry(
+        lambda: (
+            supabase_admin.table("availability_slots")
+            .select("id, start_time, end_time, is_booked")
+            .eq("doctor_id", doctor_id)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+    matching_slot_ids = [
+        slot["id"]
+        for slot in candidate_slots
+        if slot.get("id")
+        and _parse_iso_datetime(slot.get("start_time")) == appointment_start
+        and _parse_iso_datetime(slot.get("end_time")) == appointment_end
+    ]
+
+    if not matching_slot_ids:
+        matching_slot_ids = [
+            slot["id"]
+            for slot in candidate_slots
+            if slot.get("id")
+            and slot.get("is_booked")
+            and (slot_start := _parse_iso_datetime(slot.get("start_time")))
+            and (slot_end := _parse_iso_datetime(slot.get("end_time")))
+            and slot_start < appointment_end
+            and slot_end > appointment_start
+        ]
+
+    if not matching_slot_ids:
+        return
+
+    execute_with_retry(
+        lambda: (
+            supabase_admin.table("availability_slots")
+            .update({"is_booked": False})
+            .in_("id", matching_slot_ids)
+            .execute()
+        ),
+        default=None,
+    )
+
+
 def _format_appointment(row, doctor_lookup, organisation_lookup):
     return _format_appointment_with_consent(row, doctor_lookup, organisation_lookup, {})
 
@@ -508,7 +638,15 @@ def _format_appointment_with_consent(row, doctor_lookup, organisation_lookup, co
     }
 
 
-def _format_record(row, appointments_map, doctor_lookup, prescriptions_map, items_map, organisation_lookup):
+def _format_record(
+    row,
+    appointments_map,
+    doctor_lookup,
+    prescriptions_map,
+    items_map,
+    organisation_lookup,
+    attachments_map=None,
+):
     appointment = appointments_map.get(row.get("appointment_id"))
     doctor = doctor_lookup.get(row["doctor_id"], {})
     organisation = organisation_lookup.get(appointment.get("organisation_id")) if appointment else {}
@@ -542,7 +680,248 @@ def _format_record(row, appointments_map, doctor_lookup, prescriptions_map, item
             }
             for prescription in linked_prescriptions
         ],
+        "attachments": [
+            _format_record_attachment(item)
+            for item in (attachments_map or {}).get(row["id"], [])
+        ],
     }
+
+
+def _list_patient_self_records(patient_id: int) -> list[dict]:
+    try:
+        return (
+            execute_with_retry(
+                lambda: (
+                    supabase_admin.table("patient_self_records")
+                    .select("*")
+                    .eq("patient_id", patient_id)
+                    .order("created_at", desc=True)
+                    .execute()
+                    .data
+                    or []
+                ),
+                default=[],
+            )
+            or []
+        )
+    except Exception:
+        return []
+
+
+def _format_patient_self_record(row: dict, attachments=None):
+    title = row.get("title") or "Self Added Record"
+    return {
+        "id": row["id"],
+        "created_at": row.get("created_at"),
+        "notes": row.get("notes"),
+        "title": title,
+        "source": "patient",
+        "doctor": {
+            "id": 0,
+            "name": title,
+            "specialization": "Patient entry",
+        },
+        "appointment": {
+            "id": None,
+            "start_time": None,
+            "end_time": None,
+            "status": None,
+        },
+        "organisation": {
+            "id": None,
+            "name": None,
+        },
+        "prescriptions": [],
+        "attachments": [_format_record_attachment(item) for item in (attachments or [])],
+    }
+
+
+def _safe_attachment_filename(filename: Optional[str]) -> str:
+    original = filename or "attachment"
+    stem, dot, ext = original.rpartition(".")
+    base = stem if dot else original
+    suffix = f".{ext.lower()}" if dot else ""
+    safe_base = re.sub(r"[^a-zA-Z0-9_-]+", "_", base).strip("_") or "attachment"
+    return f"{safe_base[:80]}{suffix}"
+
+
+def _format_record_attachment(row: dict):
+    return {
+        "id": row["id"],
+        "file_name": row.get("file_name"),
+        "file_url": row.get("file_url"),
+        "content_type": row.get("content_type"),
+        "file_size_bytes": row.get("file_size_bytes"),
+        "created_at": row.get("created_at"),
+    }
+
+
+def _list_record_attachments(patient_id: int) -> list[dict]:
+    try:
+        return (
+            execute_with_retry(
+                lambda: (
+                    supabase_admin.table("medical_record_attachments")
+                    .select("*")
+                    .eq("patient_id", patient_id)
+                    .order("created_at", desc=True)
+                    .execute()
+                    .data
+                    or []
+                ),
+                default=[],
+            )
+            or []
+        )
+    except Exception:
+        return []
+
+
+async def _store_record_attachments(
+    *,
+    patient_id: int,
+    source_role: str,
+    source_user_id: Optional[str],
+    files: Optional[list[UploadFile]],
+    encounter_id: Optional[int] = None,
+    patient_self_record_id: Optional[int] = None,
+):
+    if not files:
+        return []
+
+    stored_rows = []
+    for upload in files:
+        if not upload or not (upload.filename or "").strip():
+            continue
+
+        contents = await validate_upload_file(upload)
+        safe_name = _safe_attachment_filename(upload.filename)
+        storage_path = (
+            f"medical-records/patient-{patient_id}/{uuid.uuid4().hex}_{safe_name}"
+        )
+
+        try:
+            supabase_admin.storage.from_("records").upload(
+                path=storage_path,
+                file=contents,
+                file_options={"content-type": upload.content_type or "application/octet-stream"},
+            )
+            file_url = supabase_admin.storage.from_("records").get_public_url(storage_path)
+            inserted = (
+                supabase_admin.table("medical_record_attachments")
+                .insert(
+                    {
+                        "patient_id": patient_id,
+                        "encounter_id": encounter_id,
+                        "patient_self_record_id": patient_self_record_id,
+                        "source_role": source_role,
+                        "source_user_id": source_user_id,
+                        "file_name": upload.filename,
+                        "file_url": file_url,
+                        "content_type": upload.content_type or "application/octet-stream",
+                        "file_size_bytes": len(contents),
+                    }
+                )
+                .execute()
+                .data
+                or []
+            )
+            if inserted:
+                stored_rows.append(inserted[0])
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Medical record attachment upload failed.") from exc
+
+    return stored_rows
+
+
+def _list_patient_health_snapshots(patient_id: int) -> list[dict]:
+    try:
+        return (
+            execute_with_retry(
+                lambda: (
+                    supabase_admin.table("patient_health_snapshots")
+                    .select("*")
+                    .eq("patient_id", patient_id)
+                    .order("checked_at", desc=True)
+                    .execute()
+                    .data
+                    or []
+                ),
+                default=[],
+            )
+            or []
+        )
+    except Exception:
+        return []
+
+
+def _snapshot_has_values(snapshot: Optional[HealthSnapshotInput]) -> bool:
+    if not snapshot:
+        return False
+    return any(
+        [
+            snapshot.bmi,
+            snapshot.blood_sugar,
+            snapshot.cholesterol,
+            snapshot.blood_pressure,
+            snapshot.allergies,
+        ]
+    )
+
+
+def _format_health_snapshot(row: Optional[dict]):
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "bmi": row.get("bmi"),
+        "blood_sugar": row.get("blood_sugar"),
+        "cholesterol": row.get("cholesterol"),
+        "blood_pressure": row.get("blood_pressure"),
+        "allergies": row.get("allergies"),
+        "checked_at": row.get("checked_at") or row.get("created_at"),
+        "source_role": row.get("source_role"),
+    }
+
+
+def _create_health_snapshot(
+    *,
+    patient_id: int,
+    source_role: str,
+    source_user_id: Optional[str],
+    snapshot: Optional[HealthSnapshotInput],
+    encounter_id: Optional[int] = None,
+    patient_self_record_id: Optional[int] = None,
+):
+    if not _snapshot_has_values(snapshot):
+        return None
+
+    rows = (
+        supabase_admin.table("patient_health_snapshots")
+        .insert(
+            {
+                "patient_id": patient_id,
+                "source_role": source_role,
+                "source_user_id": source_user_id,
+                "encounter_id": encounter_id,
+                "patient_self_record_id": patient_self_record_id,
+                "bmi": snapshot.bmi,
+                "blood_sugar": snapshot.blood_sugar,
+                "cholesterol": snapshot.cholesterol,
+                "blood_pressure": snapshot.blood_pressure,
+                "allergies": snapshot.allergies,
+                "checked_at": (
+                    snapshot.checked_at.astimezone().isoformat()
+                    if snapshot.checked_at
+                    else datetime.now().astimezone().isoformat()
+                ),
+            }
+        )
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
 
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -1102,6 +1481,7 @@ def _build_assistant_snapshot(patient: dict, user: dict):
             "id": user["id"],
             "name": user.get("name"),
             "email": user.get("email"),
+            "address": user.get("address"),
         },
         "patient": {
             "id": patient["id"],
@@ -1562,6 +1942,8 @@ def get_overview(authorization: Optional[str] = Header(None)):
         ),
         default=[],
     )
+    self_records = _list_patient_self_records(patient["id"])
+    health_snapshots = _list_patient_health_snapshots(patient["id"])
     prescriptions = execute_with_retry(
         lambda: (
             supabase_admin.table("prescriptions")
@@ -1601,6 +1983,8 @@ def get_overview(authorization: Optional[str] = Header(None)):
     )
 
     recent_encounter = encounters[0] if encounters else None
+    recent_self_record = self_records[0] if self_records else None
+    latest_health_snapshot = health_snapshots[0] if health_snapshots else None
     recent_appointment_map = {
         row["id"]: row
         for row in execute_with_retry(
@@ -1616,6 +2000,21 @@ def get_overview(authorization: Optional[str] = Header(None)):
         )
     } if recent_encounter and recent_encounter.get("appointment_id") else {}
 
+    recent_record_created_at = _parse_iso_datetime(recent_encounter.get("created_at")) if recent_encounter else None
+    recent_self_record_created_at = (
+        _parse_iso_datetime(recent_self_record.get("created_at")) if recent_self_record else None
+    )
+    use_self_record = bool(
+        recent_self_record
+        and (
+            recent_record_created_at is None
+            or (
+                recent_self_record_created_at is not None
+                and recent_self_record_created_at >= recent_record_created_at
+            )
+        )
+    )
+
     return {
         "user": {
             "id": context["user"]["id"],
@@ -1623,6 +2022,7 @@ def get_overview(authorization: Optional[str] = Header(None)):
             "name": context["user"].get("name"),
             "legal_name": context["user"].get("legal_name"),
             "preferred_name": context["user"].get("preferred_name"),
+            "address": context["user"].get("address"),
         },
         "patient": {
             "id": patient["id"],
@@ -1630,6 +2030,7 @@ def get_overview(authorization: Optional[str] = Header(None)):
             "created_at": patient.get("created_at"),
             "medical_record_consent_default": bool(default_consent["granted"]),
             "medical_record_consent_last_updated": default_consent["last_updated"],
+            "health_snapshot": _format_health_snapshot(latest_health_snapshot),
         },
         "stats": {
             "total_appointments": len(appointments),
@@ -1642,7 +2043,7 @@ def get_overview(authorization: Optional[str] = Header(None)):
                     and start_time >= now
                 ]
             ),
-            "medical_records": len(encounters),
+            "medical_records": len(encounters) + len(self_records),
             "active_prescriptions": len(
                 [row for row in prescriptions if row.get("status") != "cancelled"]
             ),
@@ -1653,14 +2054,23 @@ def get_overview(authorization: Optional[str] = Header(None)):
         )
         if upcoming
         else None,
-        "recent_record": {
-            "id": recent_encounter["id"],
-            "created_at": recent_encounter.get("created_at"),
-            "notes": recent_encounter.get("notes"),
-            "appointment": recent_appointment_map.get(recent_encounter.get("appointment_id")),
-        }
-        if recent_encounter
-        else None,
+        "recent_record": (
+            {
+                "id": recent_self_record["id"],
+                "created_at": recent_self_record.get("created_at"),
+                "notes": recent_self_record.get("notes"),
+                "appointment": None,
+            }
+            if use_self_record and recent_self_record
+            else {
+                "id": recent_encounter["id"],
+                "created_at": recent_encounter.get("created_at"),
+                "notes": recent_encounter.get("notes"),
+                "appointment": recent_appointment_map.get(recent_encounter.get("appointment_id")),
+            }
+            if recent_encounter
+            else None
+        ),
     }
 
 
@@ -1714,17 +2124,26 @@ def update_profile(
 
     updated = []
     resolved_name = context["user"].get("name")
+    resolved_address = context["user"].get("address")
+    user_updates = {}
 
     if payload.preferred_name is not None:
+        user_updates["pref_name"] = payload.preferred_name
+        resolved_name = payload.preferred_name
+
+    if payload.address is not None:
+        user_updates["address"] = payload.address
+        resolved_address = payload.address
+
+    if user_updates:
         updated = (
             supabase_admin.table("users")
-            .update({"pref_name": payload.preferred_name})
+            .update(user_updates)
             .eq("id", context["user_id"])
             .execute()
             .data
             or []
         )
-        resolved_name = payload.preferred_name
         _log_audit_action(context["user_id"], "PROFILE_UPDATED", "users", context["patient"]["id"])
 
     if payload.medical_record_consent_default is not None:
@@ -1742,6 +2161,7 @@ def update_profile(
         "name": resolved_name,
         "legal_name": row.get("name"),
         "preferred_name": row.get("pref_name") or resolved_name,
+        "address": row.get("address", resolved_address),
         "role": row.get("role"),
         "medical_record_consent_default": (
             payload.medical_record_consent_default
@@ -1922,6 +2342,9 @@ def update_appointment(
     )
     row = updated[0] if updated else rows[0]
 
+    if update_data.get("status") == "cancelled":
+        _release_slot_for_appointment(row)
+
     _log_audit_action(context["user_id"], "APPOINTMENT_UPDATED", "appointments", appointment_id)
 
     doctor_lookup = _doctor_map({row["doctor_id"]})
@@ -2021,18 +2444,112 @@ def list_records(authorization: Optional[str] = Header(None)):
     for row in items:
         items_map.setdefault(row["prescription_id"], []).append(row)
 
-    return {
-        "items": [
-            _format_record(
+    snapshot_rows = _list_patient_health_snapshots(patient["id"])
+    attachment_rows = _list_record_attachments(patient["id"])
+    snapshot_by_encounter_id = {
+        row.get("encounter_id"): row for row in snapshot_rows if row.get("encounter_id")
+    }
+    snapshot_by_self_record_id = {
+        row.get("patient_self_record_id"): row
+        for row in snapshot_rows
+        if row.get("patient_self_record_id")
+    }
+    attachments_by_encounter_id = {}
+    attachments_by_self_record_id = {}
+    for row in attachment_rows:
+        if row.get("encounter_id"):
+            attachments_by_encounter_id.setdefault(row["encounter_id"], []).append(row)
+        if row.get("patient_self_record_id"):
+            attachments_by_self_record_id.setdefault(row["patient_self_record_id"], []).append(row)
+
+    encounter_records = [
+        {
+            **_format_record(
                 row,
                 appointments_map,
                 doctor_lookup,
                 prescriptions_map,
                 items_map,
                 organisation_lookup,
+                attachments_by_encounter_id,
+            ),
+            "source": "doctor",
+            "health_snapshot": _format_health_snapshot(snapshot_by_encounter_id.get(row["id"])),
+        }
+        for row in encounters
+    ]
+    self_records = [
+        {
+            **_format_patient_self_record(row, attachments_by_self_record_id.get(row["id"], [])),
+            "health_snapshot": _format_health_snapshot(snapshot_by_self_record_id.get(row["id"])),
+        }
+        for row in _list_patient_self_records(patient["id"])
+    ]
+    merged_records = encounter_records + self_records
+    merged_records.sort(
+        key=lambda row: _parse_iso_datetime(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+    return {
+        "items": merged_records
+    }
+
+
+@router.post("/records", dependencies=[Depends(RoleChecker(["patient"]))])
+async def create_patient_self_record(
+    payload: str = Form(...),
+    files: Optional[list[UploadFile]] = File(None),
+    authorization: Optional[str] = Header(None),
+):
+    context = _require_patient_context(authorization)
+    patient = context["patient"]
+    try:
+        parsed_payload = PatientSelfRecordCreateRequest.model_validate_json(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    try:
+        created = (
+            supabase_admin.table("patient_self_records")
+            .insert(
+                {
+                    "patient_id": patient["id"],
+                    "title": parsed_payload.title,
+                    "notes": parsed_payload.notes,
+                }
             )
-            for row in encounters
-        ]
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Patient self-record storage is not ready yet. Run the latest database migration first.",
+        ) from exc
+
+    rows = created.data or []
+    if not rows:
+        raise HTTPException(status_code=500, detail="Failed to save patient medical record")
+
+    snapshot_row = _create_health_snapshot(
+        patient_id=patient["id"],
+        source_role="patient",
+        source_user_id=context["user_id"],
+        snapshot=parsed_payload.health_snapshot,
+        patient_self_record_id=rows[0]["id"],
+    )
+    attachment_rows = await _store_record_attachments(
+        patient_id=patient["id"],
+        source_role="patient",
+        source_user_id=context["user_id"],
+        files=files,
+        patient_self_record_id=rows[0]["id"],
+    )
+
+    _log_audit_action(context["user_id"], "PATIENT_SELF_RECORD_CREATED", "patient_self_records", rows[0]["id"])
+    return {
+        **_format_patient_self_record(rows[0], attachment_rows),
+        "health_snapshot": _format_health_snapshot(snapshot_row),
     }
 
 

@@ -52,6 +52,17 @@ export interface DoctorPrescriptionItem {
   instructions: string | null;
 }
 
+export interface DoctorHealthSnapshot {
+  id: number;
+  bmi: string | null;
+  blood_sugar: string | null;
+  cholesterol: string | null;
+  blood_pressure: string | null;
+  allergies: string | null;
+  checked_at: string | null;
+  source_role: string | null;
+}
+
 export interface DoctorActivePatient {
   patient: {
     id: number;
@@ -79,6 +90,7 @@ export interface DoctorActivePatient {
     items: DoctorPrescriptionItem[];
   } | null;
   allergies: string[];
+  health_snapshot?: DoctorHealthSnapshot | null;
   history: DoctorHistoryItem[];
   archives: DoctorArchiveItem[];
 }
@@ -90,6 +102,7 @@ export interface DoctorDashboardData {
     name: string | null;
     legal_name?: string | null;
     preferred_name?: string | null;
+    address?: string | null;
   };
   doctor: {
     id: number;

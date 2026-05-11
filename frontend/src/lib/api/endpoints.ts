@@ -12,6 +12,7 @@ export const endpoints = {
     bookingOptions: "/patient/dashboard/booking-options",
     availableSlots: "/patient/dashboard/available-slots",
     records: "/patient/dashboard/records",
+    recordsCreate: "/patient/dashboard/records",
     pharmacy: "/patient/dashboard/pharmacy",
     pharmacies: "/patient/dashboard/pharmacies",
     pharmacyEstimate: "/patient/dashboard/pharmacy/estimate",
@@ -47,6 +48,7 @@ export const endpoints = {
     affiliationDecision: "/hospital-admin/affiliations/decision",
     affiliationRevoke: "/hospital-admin/affiliations/revoke",
     availabilityBase: "/hospital-admin/availability",
+    availabilityCancelBooking: "/hospital-admin/availability",
     invite: "/hospital-admin/invite",
   },
   healthMinistryAdmin: {

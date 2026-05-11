@@ -22,6 +22,26 @@ export interface DashboardAppointment {
   };
 }
 
+export interface HealthSnapshot {
+  id: number;
+  bmi: string | null;
+  blood_sugar: string | null;
+  cholesterol: string | null;
+  blood_pressure: string | null;
+  allergies: string | null;
+  checked_at: string | null;
+  source_role: string | null;
+}
+
+export interface MedicalRecordAttachment {
+  id: number;
+  file_name: string | null;
+  file_url: string | null;
+  content_type: string | null;
+  file_size_bytes: number | null;
+  created_at: string | null;
+}
+
 export interface DashboardOverview {
   user: {
     id: string;
@@ -29,6 +49,7 @@ export interface DashboardOverview {
     name: string | null;
     legal_name?: string | null;
     preferred_name?: string | null;
+    address?: string | null;
   };
   patient: {
     id: number;
@@ -36,6 +57,7 @@ export interface DashboardOverview {
     created_at: string | null;
     medical_record_consent_default: boolean;
     medical_record_consent_last_updated: string | null;
+    health_snapshot?: HealthSnapshot | null;
   };
   stats: {
     total_appointments: number;
@@ -88,6 +110,10 @@ export interface DashboardRecord {
   id: number;
   created_at: string | null;
   notes: string | null;
+  title?: string | null;
+  source?: "doctor" | "patient";
+  health_snapshot?: HealthSnapshot | null;
+  attachments?: MedicalRecordAttachment[];
   doctor: {
     id: number;
     name: string;

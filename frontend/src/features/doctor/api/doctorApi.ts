@@ -18,6 +18,7 @@ export function getDoctorDashboard(activeAppointmentId?: number | null) {
 
 export function updateDoctorProfile(payload: {
   preferred_name: string;
+  address: string;
   specialization: string;
   slmc_number: string;
 }) {
@@ -36,6 +37,15 @@ export function submitDoctorEncounter(payload: {
   diagnosis: string;
   encounter_type: string;
   clinical_notes: string;
+  health_snapshot?: {
+    bmi?: string;
+    blood_sugar?: string;
+    cholesterol?: string;
+    blood_pressure?: string;
+    allergies?: string;
+    checked_at?: string;
+  };
+  files?: File[];
   prescription_items: Array<{
     medicine_id?: number | null;
     medicine_name: string;
@@ -43,6 +53,22 @@ export function submitDoctorEncounter(payload: {
     duration: string;
   }>;
 }) {
+  const formData = new FormData();
+  formData.append(
+    "payload",
+    JSON.stringify({
+      patient_id: payload.patient_id,
+      appointment_id: payload.appointment_id,
+      diagnosis: payload.diagnosis,
+      encounter_type: payload.encounter_type,
+      clinical_notes: payload.clinical_notes,
+      health_snapshot: payload.health_snapshot,
+      prescription_items: payload.prescription_items,
+    }),
+  );
+  for (const file of payload.files ?? []) {
+    formData.append("files", file);
+  }
   return apiRequest<{
     success: boolean;
     encounter_id: number;
@@ -50,7 +76,7 @@ export function submitDoctorEncounter(payload: {
     message: string;
   }>(endpoints.doctor.encounters, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: formData,
   });
 }
 

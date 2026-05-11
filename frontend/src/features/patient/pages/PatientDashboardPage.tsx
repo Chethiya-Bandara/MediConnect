@@ -15,6 +15,7 @@ import {
   MessageCircle,
   MoonStar,
   Mail,
+  Plus,
   Pill,
   SendHorizontal,
   ShieldCheck,
@@ -37,6 +38,7 @@ import { useAuth } from "../../auth/context/AuthContext";
 import {
   askHealthAssistant,
   createAppointment,
+  createPatientMedicalRecord,
   getAvailableSlots,
   getAppointments,
   getBookingOptions,
@@ -69,7 +71,7 @@ type Page =
   | "appointments"
   | "pharmacy"
   | "settings";
-type Modal = "digital-id" | "appointment" | "record" | null;
+type Modal = "digital-id" | "appointment" | "record" | "record-create" | "health-snapshot" | null;
 type Theme = "light" | "dark";
 
 const QR_CODE_API_BASE = "https://api.qrserver.com/v1/create-qr-code";
@@ -139,6 +141,104 @@ function formatDateTime(value: string | null | undefined) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatAppointmentGroupDate(value: string | null | undefined) {
+  if (!value) return "Unknown Date";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Unknown Date";
+
+  return new Intl.DateTimeFormat("en-LK", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(parsed);
+}
+
+function getAppointmentGroupKey(value: string | null | undefined) {
+  if (!value) return "unknown-date";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "unknown-date";
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getAppointmentStatusRank(status: string | null | undefined) {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (normalized.includes("pending")) return 0;
+  if (normalized.includes("confirm")) return 1;
+  if (normalized.includes("miss")) return 2;
+  if (normalized.includes("complete")) return 3;
+  if (normalized.includes("cancel")) return 4;
+  return 5;
+}
+
+function formatHealthCheckedDate(value: string | null | undefined) {
+  if (!value) return "Date not saved";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Date not saved";
+  return new Intl.DateTimeFormat("en-LK", {
+    dateStyle: "medium",
+  }).format(parsed);
+}
+
+function calculateBmi(heightCm: string, weightKg: string) {
+  const parsedHeight = Number.parseFloat(heightCm);
+  const parsedWeight = Number.parseFloat(weightKg);
+
+  if (!Number.isFinite(parsedHeight) || !Number.isFinite(parsedWeight) || parsedHeight <= 0 || parsedWeight <= 0) {
+    return "";
+  }
+
+  const heightInMeters = parsedHeight / 100;
+  const bmi = parsedWeight / (heightInMeters * heightInMeters);
+  return bmi.toFixed(1);
+}
+
+function buildHealthSnapshotPayload(fields: {
+  heightCm: string;
+  weightKg: string;
+  bloodSugar: string;
+  cholesterol: string;
+  bloodPressure: string;
+  allergies: string;
+  checkedDate: string;
+}) {
+  const calculatedBmi = calculateBmi(fields.heightCm, fields.weightKg);
+  const payload = {
+    bmi: calculatedBmi,
+    blood_sugar: fields.bloodSugar.trim(),
+    cholesterol: fields.cholesterol.trim(),
+    blood_pressure: fields.bloodPressure.trim(),
+    allergies: fields.allergies.trim(),
+    checked_at: fields.checkedDate ? `${fields.checkedDate}T12:00:00+05:30` : "",
+  };
+
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => typeof value === "string" && value.trim().length > 0),
+  );
+}
+
+function formatFileSize(size: number | null | undefined) {
+  if (!size || size <= 0) return "Unknown size";
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
+function getAppointmentStartTimeRank(value: string | null | undefined) {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? Number.MAX_SAFE_INTEGER : parsed.getTime();
+}
+
+function normalizePharmacyLookup(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
 }
 
 function statusTone(status: string) {
@@ -258,6 +358,103 @@ function DashboardCustomSelect({
   );
 }
 
+function DashboardSearchSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+  helperText,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: DashboardSelectOption[];
+  placeholder: string;
+  helperText?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <div className="relative">
+        <input
+          type="text"
+          value={value}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          placeholder={placeholder}
+          disabled={disabled}
+          className="w-full rounded-xl border-slate-200 bg-white px-4 py-3 pr-12 shadow-sm focus:border-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => setOpen((current) => !current)}
+          disabled={disabled}
+          className="absolute inset-y-0 right-0 flex items-center px-4 text-slate-500 dark:text-slate-300"
+          aria-hidden="true"
+        >
+          <ChevronDown
+            size={18}
+            className={`transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+      </div>
+
+      {helperText ? (
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{helperText}</p>
+      ) : null}
+
+      {open && !disabled ? (
+        <div className="absolute z-20 mt-2 max-h-64 w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+          {options.length > 0 ? (
+            options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  onChange(option.label);
+                  setOpen(false);
+                }}
+                className="flex w-full flex-col rounded-xl px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
+              >
+                <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {option.label}
+                </span>
+                {option.description ? (
+                  <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {option.description}
+                  </span>
+                ) : null}
+              </button>
+            ))
+          ) : (
+            <div className="rounded-xl px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
+              No pharmacies matched that search.
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function estimateTone(status: string) {
   switch (status) {
     case "available":
@@ -279,6 +476,13 @@ function recordPreview(record: DashboardRecord) {
   }
 
   return cleaned.length > 180 ? `${cleaned.slice(0, 177)}...` : cleaned;
+}
+
+function recordHeading(record: DashboardRecord) {
+  if (record.source === "patient") {
+    return record.title?.trim() || "Self Added Record";
+  }
+  return record.doctor.name;
 }
 
 function toDateInputValue(value: string | null | undefined) {
@@ -359,13 +563,28 @@ export function PatientDashboardPage() {
   const [selectedRecord, setSelectedRecord] = useState<DashboardRecord | null>(null);
   const [selectedPrescriptionId, setSelectedPrescriptionId] = useState("");
   const [selectedPharmacyId, setSelectedPharmacyId] = useState("");
+  const [selectedPharmacyQuery, setSelectedPharmacyQuery] = useState("");
   const [pharmacyEstimate, setPharmacyEstimate] = useState<PharmacyEstimate | null>(null);
   const [appointmentForm, setAppointmentForm] = useState(initialForm);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantMessages, setAssistantMessages] = useState<AssistantChatMessage[]>([]);
   const [assistantHistoryLoaded, setAssistantHistoryLoaded] = useState(false);
   const [isAssistantLoading, setIsAssistantLoading] = useState(false);
+  const [recordTitle, setRecordTitle] = useState("");
+  const [recordNotes, setRecordNotes] = useState("");
+  const [recordHeightCm, setRecordHeightCm] = useState("");
+  const [recordWeightKg, setRecordWeightKg] = useState("");
+  const [recordBloodSugar, setRecordBloodSugar] = useState("");
+  const [recordCholesterol, setRecordCholesterol] = useState("");
+  const [recordBloodPressure, setRecordBloodPressure] = useState("");
+  const [recordAllergies, setRecordAllergies] = useState("");
+  const [recordCheckedDate, setRecordCheckedDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [recordFiles, setRecordFiles] = useState<File[]>([]);
+  const [isSavingRecord, setIsSavingRecord] = useState(false);
   const [profileName, setProfileName] = useState("");
+  const [profileAddress, setProfileAddress] = useState("");
   const [medicalRecordConsentDefault, setMedicalRecordConsentDefault] = useState(true);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -379,6 +598,7 @@ export function PatientDashboardPage() {
 
   const displayName = overview?.user.name || user?.name || user?.email?.split("@")[0] || "Patient";
   const legalName = overview?.user.legal_name || user?.legalName || "Not available";
+  const latestHealthSnapshot = overview?.patient.health_snapshot ?? null;
   const upcomingAppointments = appointments.filter(
     (item) => item.status.toLowerCase() !== "cancelled",
   );
@@ -389,6 +609,24 @@ export function PatientDashboardPage() {
   const qrCodeUrl = overview?.patient.dhid
     ? `${QR_CODE_API_BASE}/?size=220x220&data=${encodeURIComponent(overview.patient.dhid)}`
     : "";
+
+  const resetRecordForm = () => {
+    setRecordTitle("");
+    setRecordNotes("");
+    setRecordFiles([]);
+  };
+
+  const resetHealthSnapshotForm = (snapshot?: typeof latestHealthSnapshot) => {
+    setRecordHeightCm("");
+    setRecordWeightKg("");
+    setRecordBloodSugar(snapshot?.blood_sugar ?? "");
+    setRecordCholesterol(snapshot?.cholesterol ?? "");
+    setRecordBloodPressure(snapshot?.blood_pressure ?? "");
+    setRecordAllergies(snapshot?.allergies ?? "");
+    setRecordCheckedDate(snapshot?.checked_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
+  };
+
+  const calculatedSnapshotBmi = calculateBmi(recordHeightCm, recordWeightKg);
 
   const organisationOptions = useMemo(() => {
     const uniqueOrganisations = new Map<number, string>();
@@ -496,6 +734,41 @@ export function PatientDashboardPage() {
     [pharmacyOptions, selectedPharmacyId],
   );
 
+  const filteredPharmacyOptions = useMemo(() => {
+    const normalizedQuery = normalizePharmacyLookup(selectedPharmacyQuery);
+    if (!normalizedQuery) {
+      return pharmacyOptions;
+    }
+
+    return pharmacyOptions.filter((item) =>
+      normalizePharmacyLookup(`${item.name} ${item.id}`).includes(normalizedQuery),
+    );
+  }, [pharmacyOptions, selectedPharmacyQuery]);
+
+  const appointmentsByDate = useMemo(() => {
+    const grouped = new Map<string, DashboardAppointment[]>();
+
+    for (const item of appointments) {
+      const key = getAppointmentGroupKey(item.start_time);
+      const current = grouped.get(key) ?? [];
+      current.push(item);
+      grouped.set(key, current);
+    }
+
+    return Array.from(grouped.entries()).map(([key, items]) => ({
+      key,
+      label: formatAppointmentGroupDate(items[0]?.start_time),
+      items: [...items].sort((left, right) => {
+        const statusDiff =
+          getAppointmentStatusRank(left.status) - getAppointmentStatusRank(right.status);
+        if (statusDiff !== 0) {
+          return statusDiff;
+        }
+        return getAppointmentStartTimeRank(left.start_time) - getAppointmentStartTimeRank(right.start_time);
+      }),
+    }));
+  }, [appointments]);
+
   const showToast = (message: string, tone: "success" | "error" | "info" = "success") => {
     if (toastTimeoutRef.current) {
       window.clearTimeout(toastTimeoutRef.current);
@@ -578,6 +851,10 @@ export function PatientDashboardPage() {
   useEffect(() => {
     setProfileName(displayName);
   }, [displayName]);
+
+  useEffect(() => {
+    setProfileAddress(overview?.user.address ?? "");
+  }, [overview?.user.address]);
 
   useEffect(() => {
     setMedicalRecordConsentDefault(overview?.patient.medical_record_consent_default ?? true);
@@ -701,6 +978,14 @@ export function PatientDashboardPage() {
     setPharmacyEstimate(null);
     setPharmacyEstimateError(null);
   }, [selectedPharmacyId, selectedPrescriptionId]);
+
+  useEffect(() => {
+    if (!selectedPharmacyMeta) {
+      return;
+    }
+
+    setSelectedPharmacyQuery(selectedPharmacyMeta.name);
+  }, [selectedPharmacyMeta]);
 
   const sendAssistantMessage = async (preset?: string) => {
     const text = (preset ?? assistantInput).trim();
@@ -916,8 +1201,13 @@ export function PatientDashboardPage() {
 
   const saveProfile = async () => {
     const cleaned = profileName.trim();
+    const cleanedAddress = profileAddress.trim();
     if (!cleaned || cleaned.length < 2) {
       showToast("Preferred name must be at least 2 characters.", "error");
+      return;
+    }
+    if (!cleanedAddress || cleanedAddress.length < 5) {
+      showToast("Address must be at least 5 characters.", "error");
       return;
     }
 
@@ -925,6 +1215,7 @@ export function PatientDashboardPage() {
     try {
       await updatePatientProfile({
         preferred_name: cleaned,
+        address: cleanedAddress,
         medical_record_consent_default: medicalRecordConsentDefault,
       });
       showToast("Profile updated.");
@@ -933,6 +1224,91 @@ export function PatientDashboardPage() {
       showToast(error instanceof Error ? error.message : "Profile update failed", "error");
     } finally {
       setIsSavingProfile(false);
+    }
+  };
+
+  const openCreateRecordModal = () => {
+    resetRecordForm();
+    resetHealthSnapshotForm();
+    setModal("record-create");
+  };
+
+  const openHealthSnapshotModal = () => {
+    resetRecordForm();
+    resetHealthSnapshotForm(latestHealthSnapshot);
+    setModal("health-snapshot");
+  };
+
+  const savePatientRecord = async () => {
+    const cleanedTitle = recordTitle.trim();
+    const cleanedNotes = recordNotes.trim();
+
+    if (cleanedNotes.length < 10) {
+      showToast("Medical record notes must be at least 10 characters.", "error");
+      return;
+    }
+
+    setIsSavingRecord(true);
+    try {
+      const healthSnapshot = buildHealthSnapshotPayload({
+        heightCm: recordHeightCm,
+        weightKg: recordWeightKg,
+        bloodSugar: recordBloodSugar,
+        cholesterol: recordCholesterol,
+        bloodPressure: recordBloodPressure,
+        allergies: recordAllergies,
+        checkedDate: recordCheckedDate,
+      });
+      await createPatientMedicalRecord({
+        title: cleanedTitle || undefined,
+        notes: cleanedNotes,
+        health_snapshot: Object.keys(healthSnapshot).length ? healthSnapshot : undefined,
+        files: recordFiles,
+      });
+      showToast("Medical record added.");
+      setModal(null);
+      resetRecordForm();
+      resetHealthSnapshotForm();
+      await loadDashboard();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Medical record save failed", "error");
+    } finally {
+      setIsSavingRecord(false);
+    }
+  };
+
+  const saveHealthSnapshot = async () => {
+    const healthSnapshot = buildHealthSnapshotPayload({
+      heightCm: recordHeightCm,
+      weightKg: recordWeightKg,
+      bloodSugar: recordBloodSugar,
+      cholesterol: recordCholesterol,
+      bloodPressure: recordBloodPressure,
+      allergies: recordAllergies,
+      checkedDate: recordCheckedDate,
+    });
+
+    if (Object.keys(healthSnapshot).length === 0) {
+      showToast("Add at least one health snapshot value.", "error");
+      return;
+    }
+
+    setIsSavingRecord(true);
+    try {
+      await createPatientMedicalRecord({
+        title: "Health snapshot update",
+        notes: "Patient updated health snapshot values.",
+        health_snapshot: healthSnapshot,
+      });
+      showToast("Health snapshot updated.");
+      setModal(null);
+      resetRecordForm();
+      resetHealthSnapshotForm();
+      await loadDashboard();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Health snapshot save failed", "error");
+    } finally {
+      setIsSavingRecord(false);
     }
   };
 
@@ -964,6 +1340,17 @@ export function PatientDashboardPage() {
     } finally {
       setIsEstimateLoading(false);
     }
+  };
+
+  const handlePharmacyQueryChange = (value: string) => {
+    setSelectedPharmacyQuery(value);
+
+    const normalizedValue = normalizePharmacyLookup(value);
+    const matchedOption =
+      pharmacyOptions.find((item) => normalizePharmacyLookup(item.name) === normalizedValue) ??
+      (filteredPharmacyOptions.length === 1 ? filteredPharmacyOptions[0] : null);
+
+    setSelectedPharmacyId(matchedOption ? String(matchedOption.id) : "");
   };
 
   return (
@@ -1458,25 +1845,72 @@ export function PatientDashboardPage() {
                   </div>
                 </div>
 
-                <div className="col-span-12 rounded-[1.7rem] border border-slate-100 bg-slate-50 p-8 dark:border-slate-800 dark:bg-slate-800/50 lg:col-span-4">
-                  <h2 className="mb-4 font-headline text-xl font-bold">Latest Medical Record</h2>
-                  {overview.recent_record ? (
-                    <div className="rounded-xl border border-slate-100 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-                      <p className="text-sm text-slate-500 dark:text-slate-400">
-                        {formatDateTime(overview.recent_record.created_at)}
-                      </p>
-                      <p className="mt-2 text-base font-medium">
-                        {overview.recent_record.notes ||
-                          "No consultation notes were saved for this record."}
-                      </p>
+                <div className="col-span-12 space-y-6 lg:col-span-4">
+                  <div className="rounded-[1.7rem] border border-slate-100 bg-slate-50 p-8 dark:border-slate-800 dark:bg-slate-800/50">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <h2 className="font-headline text-xl font-bold">Latest Health Snapshot</h2>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          Freshest vitals and allergy data saved on your timeline.
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-primary shadow-sm dark:bg-slate-900 dark:text-blue-300">
+                        {latestHealthSnapshot
+                          ? formatHealthCheckedDate(latestHealthSnapshot.checked_at)
+                          : "No checks yet"}
+                      </span>
                     </div>
-                  ) : (
-                    <EmptyState
-                      title="No encounter records yet"
-                      description="Your consultation history will appear here once a doctor saves your first encounter."
-                      className="rounded-xl p-5"
-                    />
-                  )}
+                    {latestHealthSnapshot ? (
+                      <div className="space-y-3">
+                        {[
+                          ["BMI", latestHealthSnapshot.bmi],
+                          ["Blood sugar", latestHealthSnapshot.blood_sugar],
+                          ["Cholesterol", latestHealthSnapshot.cholesterol],
+                          ["Blood pressure", latestHealthSnapshot.blood_pressure],
+                          ["Allergies", latestHealthSnapshot.allergies],
+                        ].map(([label, value]) => (
+                          <div
+                            key={label}
+                            className="flex items-start justify-between gap-4 rounded-xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900"
+                          >
+                            <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                              {label}
+                            </span>
+                            <span className="text-right text-sm font-semibold text-slate-700 dark:text-slate-200">
+                              {value || "Not recorded"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyState
+                        title="No vitals saved yet"
+                        description="Doctors or patients can add BMI, blood sugar, cholesterol, blood pressure, and allergies from the medical records flow."
+                        className="rounded-xl p-5"
+                      />
+                    )}
+                  </div>
+
+                  <div className="rounded-[1.7rem] border border-slate-100 bg-slate-50 p-8 dark:border-slate-800 dark:bg-slate-800/50">
+                    <h2 className="mb-4 font-headline text-xl font-bold">Latest Medical Record</h2>
+                    {overview.recent_record ? (
+                      <div className="rounded-xl border border-slate-100 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                          {formatDateTime(overview.recent_record.created_at)}
+                        </p>
+                        <p className="mt-2 text-base font-medium">
+                          {overview.recent_record.notes ||
+                            "No consultation notes were saved for this record."}
+                        </p>
+                      </div>
+                    ) : (
+                      <EmptyState
+                        title="No encounter records yet"
+                        description="Your consultation history will appear here once a doctor saves your first encounter."
+                        className="rounded-xl p-5"
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
             </section>
@@ -1487,7 +1921,7 @@ export function PatientDashboardPage() {
                 ref={assistantScrollRef}
                 className="min-h-[calc(100svh-20rem)] overflow-y-auto rounded-[1.9rem] border border-slate-100 bg-white px-4 py-6 dark:border-slate-800 dark:bg-slate-900 md:px-8 md:py-8"
               >
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_340px]">
+                <div className="grid gap-5">
                   <div className="flex flex-col gap-4">
                     {deferredAssistantMessages.map((message) => (
                       <div
@@ -1525,19 +1959,6 @@ export function PatientDashboardPage() {
                     ) : null}
                   </div>
 
-                  <aside className="rounded-[1.6rem] border border-slate-200 bg-slate-50/80 p-5 dark:border-slate-700 dark:bg-slate-800/40">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">
-                      Quick help
-                    </p>
-                    <div className="mt-4 space-y-4 text-sm text-slate-600 dark:text-slate-300">
-                      <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 dark:border-slate-700 dark:bg-slate-900/80">
-                        Ask about appointments, prescriptions, diagnoses, or past records.
-                      </div>
-                      <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 dark:border-slate-700 dark:bg-slate-900/80">
-                        Use the prompt buttons or type your own question below.
-                      </div>
-                    </div>
-                  </aside>
                 </div>
               </div>
 
@@ -1569,6 +1990,101 @@ export function PatientDashboardPage() {
 
           {!isLoading && !dashboardError && page === "records" ? (
             <section className="space-y-6">
+              <div className="flex flex-col gap-4 rounded-[1.7rem] border border-slate-200 bg-white px-5 py-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">
+                    Health snapshot
+                  </p>
+                  <h3 className="mt-2 text-xl font-extrabold text-slate-900 dark:text-white">
+                    Personal health overview
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    Keep your latest BMI, weight-related stats, sugar, cholesterol, pressure, and allergy details in one place.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={openHealthSnapshotModal}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white transition hover:bg-[#0a4f87] dark:bg-blue-600 dark:hover:bg-blue-500"
+                >
+                  <Plus size={16} />
+                  Update Health Snapshot
+                </button>
+              </div>
+
+              <div className="rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-7">
+                <div className="flex flex-col gap-3 border-b border-slate-100 pb-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                      Latest saved values
+                    </p>
+                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                      This card mirrors the freshest snapshot saved from your medical record flow.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-primary dark:bg-slate-800 dark:text-blue-300">
+                    {latestHealthSnapshot
+                      ? formatHealthCheckedDate(latestHealthSnapshot.checked_at)
+                      : "No checks yet"}
+                  </span>
+                </div>
+
+                {latestHealthSnapshot ? (
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    {[
+                      ["BMI", latestHealthSnapshot.bmi],
+                      ["Last checked date", formatHealthCheckedDate(latestHealthSnapshot.checked_at)],
+                      ["Blood sugar", latestHealthSnapshot.blood_sugar],
+                      ["Cholesterol", latestHealthSnapshot.cholesterol],
+                      ["Blood pressure", latestHealthSnapshot.blood_pressure],
+                      ["Allergies", latestHealthSnapshot.allergies],
+                    ].map(([label, value]) => (
+                      <div
+                        key={label}
+                        className={`rounded-2xl border border-slate-200 bg-slate-50/80 px-5 py-4 dark:border-slate-700 dark:bg-slate-800/50 ${
+                          label === "Blood pressure" || label === "Allergies" ? "md:col-span-2" : ""
+                        }`}
+                      >
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                          {label}
+                        </p>
+                        <p className="mt-3 text-lg font-semibold text-slate-800 dark:text-slate-100">
+                          {value || "Not recorded"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No health snapshot yet"
+                    description="Save your first snapshot to keep BMI, blood sugar, cholesterol, blood pressure, and allergies ready on this page."
+                    className="mt-5 rounded-2xl"
+                  />
+                )}
+              </div>
+
+              <div className="flex flex-col gap-4 rounded-[1.7rem] border border-slate-200 bg-white px-5 py-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">
+                    Personal archive
+                  </p>
+                  <h3 className="mt-2 text-xl font-extrabold text-slate-900 dark:text-white">
+                    Medical records
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    Doctor encounter records stay here, and you can also add your own personal health notes.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={openCreateRecordModal}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white transition hover:bg-[#0a4f87] dark:bg-blue-600 dark:hover:bg-blue-500"
+                >
+                  <Plus size={16} />
+                  Add Medical Record
+                </button>
+              </div>
+
               <div className="grid grid-cols-1 gap-4 2xl:grid-cols-3 xl:grid-cols-2">
                 {records.length === 0 ? (
                   <EmptyState
@@ -1584,7 +2100,7 @@ export function PatientDashboardPage() {
                     >
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div>
-                          <p className="font-bold">{record.doctor.name}</p>
+                          <p className="font-bold">{recordHeading(record)}</p>
                           <p className="text-sm text-slate-500 dark:text-slate-400">
                             {record.doctor.specialization || "Specialization not set"}
                             {record.organisation.name ? ` • ${record.organisation.name}` : ""}
@@ -1693,68 +2209,82 @@ export function PatientDashboardPage() {
                 />
               ) : null}
 
-              <div className="grid grid-cols-1 gap-4 2xl:grid-cols-3 xl:grid-cols-2">
+              <div className="space-y-6">
                 {appointments.length === 0 ? (
                   <EmptyState
                     title="No appointments yet"
                     description="When you reserve a live slot, it will appear here with confirmation status, consent details, and follow-up actions."
-                    className="rounded-[1.7rem] xl:col-span-2 2xl:col-span-3"
+                    className="rounded-[1.7rem]"
                   />
                 ) : (
-                  appointments.map((item) => (
-                    <article
-                      key={item.id}
-                      className="flex h-full flex-col rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
-                    >
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <p className="text-xl font-bold">{item.doctor.name}</p>
-                          <p className="text-sm text-slate-500 dark:text-slate-400">
-                            {item.doctor.specialization || "Specialization not set"} at{" "}
-                            {item.organisation.name}
-                          </p>
-                          <p className="mt-2 text-sm font-semibold text-primary dark:text-blue-400">
-                            {formatDateTime(item.start_time)} to {formatDateTime(item.end_time)}
-                          </p>
-                          <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                            Full-history consent: {item.consent.status}
-                          </p>
-                          {item.consent.last_updated ? (
-                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                              Last changed {formatDateTime(item.consent.last_updated)}
-                            </p>
-                          ) : null}
-                        </div>
-                        <span
-                          className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}
-                        >
-                          {formatStatusLabel(item.status)}
-                        </span>
+                  appointmentsByDate.map((group) => (
+                    <div key={group.key} className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+                        <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                          {group.label}
+                        </p>
+                        <div className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
                       </div>
-                      <div className="mt-5 flex flex-wrap gap-2">
-                        {["cancelled", "completed"].includes(item.status.toLowerCase()) ? null : (
-                          <button
-                            type="button"
-                            onClick={() => void toggleConsent(item.id, !item.consent.granted)}
-                            className={`rounded-xl px-4 py-2 text-xs font-bold ${
-                              item.consent.granted
-                                ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                                : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
-                            }`}
+
+                      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+                        {group.items.map((item) => (
+                          <article
+                            key={item.id}
+                            className="flex h-full flex-col rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
                           >
-                            {item.consent.granted ? "Revoke Consent" : "Grant Consent"}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => void cancelAppointment(item.id)}
-                          disabled={item.status.toLowerCase() === "cancelled"}
-                          className="rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:opacity-50 dark:bg-red-900/20 dark:text-red-400"
-                        >
-                          Cancel
-                        </button>
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <p className="text-xl font-bold">{item.doctor.name}</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                  {item.doctor.specialization || "Specialization not set"} at{" "}
+                                  {item.organisation.name}
+                                </p>
+                                <p className="mt-2 text-sm font-semibold text-primary dark:text-blue-400">
+                                  {formatDateTime(item.start_time)} to {formatDateTime(item.end_time)}
+                                </p>
+                                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                                  Full-history consent: {item.consent.status}
+                                </p>
+                                {item.consent.last_updated ? (
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    Last changed {formatDateTime(item.consent.last_updated)}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <span
+                                className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${statusTone(item.status)}`}
+                              >
+                                {formatStatusLabel(item.status)}
+                              </span>
+                            </div>
+                            <div className="mt-5 flex flex-wrap gap-2">
+                              {["cancelled", "completed"].includes(item.status.toLowerCase()) ? null : (
+                                <button
+                                  type="button"
+                                  onClick={() => void toggleConsent(item.id, !item.consent.granted)}
+                                  className={`rounded-xl px-4 py-2 text-xs font-bold ${
+                                    item.consent.granted
+                                      ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                      : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
+                                  }`}
+                                >
+                                  {item.consent.granted ? "Revoke Consent" : "Grant Consent"}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => void cancelAppointment(item.id)}
+                                disabled={item.status.toLowerCase() === "cancelled"}
+                                className="rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:opacity-50 dark:bg-red-900/20 dark:text-red-400"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </article>
+                        ))}
                       </div>
-                    </article>
+                    </div>
                   ))
                 )}
               </div>
@@ -1808,13 +2338,19 @@ export function PatientDashboardPage() {
                     Pharmacy
                   </span>
                   <div className="mt-3">
-                    <DashboardCustomSelect
-                      value={selectedPharmacyId}
-                      onChange={setSelectedPharmacyId}
-                      placeholder="Select a pharmacy"
-                      options={pharmacyOptions.map((option) => ({
+                    <DashboardSearchSelect
+                      value={selectedPharmacyQuery}
+                      onChange={handlePharmacyQueryChange}
+                      placeholder="Type or select a pharmacy"
+                      helperText={
+                        selectedPharmacyId
+                          ? `Matched pharmacy ID ${selectedPharmacyId}.`
+                          : "Type the pharmacy name or pick one from the suggestion list."
+                      }
+                      options={filteredPharmacyOptions.map((option) => ({
                         value: String(option.id),
                         label: option.name,
+                        description: `${option.indexed_items} indexed item(s)`,
                       }))}
                     />
                   </div>
@@ -2117,25 +2653,6 @@ export function PatientDashboardPage() {
                       </div>
                     </div>
 
-                    <label className="mt-6 block">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-                        Preferred name
-                      </span>
-                      <input
-                        type="text"
-                        value={profileName}
-                        onChange={(event) => setProfileName(event.target.value)}
-                        className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                      />
-                    </label>
-
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-                        Legal name on NIC
-                      </p>
-                      <p className="mt-2 font-medium">{legalName}</p>
-                    </div>
-
                     <div className="mt-6 rounded-[1.35rem] border border-slate-200 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-900/70">
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-center gap-4">
@@ -2185,6 +2702,38 @@ export function PatientDashboardPage() {
                         </div>
                       </div>
                     </div>
+
+                    <label className="mt-6 block">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                        Preferred name
+                      </span>
+                      <input
+                        type="text"
+                        value={profileName}
+                        onChange={(event) => setProfileName(event.target.value)}
+                        className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      />
+                    </label>
+
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                        Legal name on NIC
+                      </p>
+                      <p className="mt-2 font-medium">{legalName}</p>
+                    </div>
+
+                    <label className="mt-6 block">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                        Address
+                      </span>
+                      <textarea
+                        value={profileAddress}
+                        onChange={(event) => setProfileAddress(event.target.value)}
+                        rows={3}
+                        className="mt-3 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                        placeholder="221B Galle Road, Colombo"
+                      />
+                    </label>
 
                     <div className="mt-6 rounded-[1.35rem] border border-slate-200 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-900/70">
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -2471,7 +3020,7 @@ export function PatientDashboardPage() {
                   Open Record
                 </p>
                 <h3 className="mt-2 font-headline text-2xl font-extrabold text-primary dark:text-blue-400 md:text-3xl">
-                  {selectedRecord.doctor.name}
+                  {recordHeading(selectedRecord)}
                 </h3>
                 <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                   {selectedRecord.doctor.specialization || "Specialization not set"}
@@ -2533,6 +3082,27 @@ export function PatientDashboardPage() {
                   <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-300">
                     {selectedRecord.notes || "No notes stored for this encounter."}
                   </p>
+                  {selectedRecord.attachments?.length ? (
+                    <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Attachments</p>
+                      <div className="mt-3 space-y-2">
+                        {selectedRecord.attachments.map((attachment) => (
+                          <a
+                            key={attachment.id}
+                            href={attachment.file_url || "#"}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-primary hover:text-primary dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:text-blue-300"
+                          >
+                            <span>{attachment.file_name || "Attachment"}</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              {formatFileSize(attachment.file_size_bytes)}
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50/75 p-5 dark:border-slate-700 dark:bg-slate-800/45">
@@ -2630,6 +3200,319 @@ export function PatientDashboardPage() {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {modal === "record-create" ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md"
+          onClick={(event) => event.target === event.currentTarget && !isSavingRecord && setModal(null)}
+        >
+          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[2rem] border border-slate-200/80 bg-white shadow-[0_32px_90px_rgba(2,6,23,0.48)] dark:border-slate-700/90 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 pb-5 pt-6 dark:border-slate-800 md:px-8">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Patient Entry
+                </p>
+                <h3 className="mt-2 font-headline text-2xl font-extrabold text-primary dark:text-blue-400 md:text-3xl">
+                  Add medical record
+                </h3>
+                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                  Save your own symptoms, lab reminders, medication history, or anything you want kept on your patient timeline.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isSavingRecord && setModal(null)}
+                className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:text-slate-400 dark:hover:bg-slate-800"
+                disabled={isSavingRecord}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6 md:px-8">
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                  Record title
+                </span>
+                <input
+                  type="text"
+                  value={recordTitle}
+                  onChange={(event) => setRecordTitle(event.target.value)}
+                  placeholder="Blood pressure note"
+                  className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                  Notes
+                </span>
+                <textarea
+                  value={recordNotes}
+                  onChange={(event) => setRecordNotes(event.target.value)}
+                  rows={8}
+                  placeholder="Write the symptoms, readings, medicines, or follow-up reminder you want saved."
+                  className="mt-3 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+              </label>
+
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                      Attach files
+                    </p>
+                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                      Optional. PDF, JPG, JPEG, or PNG only. Keep each file under 5MB.
+                    </p>
+                  </div>
+                  <label className="inline-flex cursor-pointer items-center justify-center rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800">
+                    <Plus size={16} className="mr-2" />
+                    Add files
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files ?? []);
+                        setRecordFiles(files);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                {recordFiles.length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    {recordFiles.map((file) => (
+                      <div
+                        key={`${file.name}-${file.lastModified}`}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+                      >
+                        <div>
+                          <p className="font-semibold text-slate-700 dark:text-slate-100">{file.name}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{formatFileSize(file.size)}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRecordFiles((current) =>
+                              current.filter(
+                                (entry) =>
+                                  !(
+                                    entry.name === file.name &&
+                                    entry.lastModified === file.lastModified &&
+                                    entry.size === file.size
+                                  ),
+                              ),
+                            )
+                          }
+                          className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
+                This creates a patient-authored record. It does not pretend to be a doctor encounter or prescription.
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 dark:border-slate-800 sm:flex-row sm:justify-end md:px-8">
+              <button
+                type="button"
+                onClick={() => setModal(null)}
+                disabled={isSavingRecord}
+                className="rounded-2xl bg-slate-100 px-4 py-3.5 font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-800 dark:text-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void savePatientRecord()}
+                disabled={isSavingRecord}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3.5 font-bold text-white transition hover:bg-[#0a4f87] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-blue-600 dark:hover:bg-blue-500"
+              >
+                <BadgeCheck size={16} />
+                {isSavingRecord ? "Saving..." : "Save Record"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {modal === "health-snapshot" ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md"
+          onClick={(event) => event.target === event.currentTarget && !isSavingRecord && setModal(null)}
+        >
+          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[2rem] border border-slate-200/80 bg-white shadow-[0_32px_90px_rgba(2,6,23,0.48)] dark:border-slate-700/90 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 pb-5 pt-6 dark:border-slate-800 md:px-8">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Patient Entry
+                </p>
+                <h3 className="mt-2 font-headline text-2xl font-extrabold text-primary dark:text-blue-400 md:text-3xl">
+                  Update health snapshot
+                </h3>
+                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                  Update your height, weight, sugar, cholesterol, blood pressure, and allergy details. BMI is calculated automatically.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isSavingRecord && setModal(null)}
+                className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:text-slate-400 dark:hover:bg-slate-800"
+                disabled={isSavingRecord}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-6 md:px-8">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <div className="mb-4">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                    Health snapshot
+                  </span>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    Fill only what you know. Height and weight are used to calculate BMI automatically.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                      Height (cm)
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={recordHeightCm}
+                      onChange={(event) => setRecordHeightCm(event.target.value)}
+                      placeholder="170"
+                      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                      Weight (kg)
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={recordWeightKg}
+                      onChange={(event) => setRecordWeightKg(event.target.value)}
+                      placeholder="70"
+                      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    />
+                  </label>
+
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3.5 dark:border-slate-700 dark:bg-slate-900">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                      Calculated BMI
+                    </p>
+                    <p className="mt-3 text-lg font-semibold text-slate-800 dark:text-slate-100">
+                      {calculatedSnapshotBmi || "Add height and weight"}
+                    </p>
+                  </div>
+
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                      Last checked date
+                    </span>
+                    <input
+                      type="date"
+                      value={recordCheckedDate}
+                      onChange={(event) => setRecordCheckedDate(event.target.value)}
+                      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                      Blood sugar
+                    </span>
+                    <input
+                      type="text"
+                      value={recordBloodSugar}
+                      onChange={(event) => setRecordBloodSugar(event.target.value)}
+                      placeholder="110 mg/dL"
+                      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                      Cholesterol
+                    </span>
+                    <input
+                      type="text"
+                      value={recordCholesterol}
+                      onChange={(event) => setRecordCholesterol(event.target.value)}
+                      placeholder="185 mg/dL"
+                      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    />
+                  </label>
+
+                  <label className="block md:col-span-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                      Blood pressure
+                    </span>
+                    <input
+                      type="text"
+                      value={recordBloodPressure}
+                      onChange={(event) => setRecordBloodPressure(event.target.value)}
+                      placeholder="120/80 mmHg"
+                      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    />
+                  </label>
+
+                  <label className="block md:col-span-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                      Allergies
+                    </span>
+                    <input
+                      type="text"
+                      value={recordAllergies}
+                      onChange={(event) => setRecordAllergies(event.target.value)}
+                      placeholder="Peanuts, Penicillin"
+                      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium shadow-sm transition focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 dark:border-slate-800 sm:flex-row sm:justify-end md:px-8">
+              <button
+                type="button"
+                onClick={() => setModal(null)}
+                disabled={isSavingRecord}
+                className="rounded-2xl bg-slate-100 px-4 py-3.5 font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-800 dark:text-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveHealthSnapshot()}
+                disabled={isSavingRecord}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3.5 font-bold text-white transition hover:bg-[#0a4f87] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-blue-600 dark:hover:bg-blue-500"
+              >
+                <BadgeCheck size={16} />
+                {isSavingRecord ? "Saving..." : "Save Snapshot"}
+              </button>
             </div>
           </div>
         </div>

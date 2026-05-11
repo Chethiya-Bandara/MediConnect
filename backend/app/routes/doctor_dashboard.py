@@ -3,10 +3,11 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 import uuid
+import re
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile, Depends, Query
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile, Depends, Query
 from app.middleware.file_validator import validate_upload_file, sanitize_filename
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.config.supabase import execute_with_retry, supabase, supabase_admin
 from app.middleware.consent_guard import check_consent, auto_revoke_consent
@@ -21,6 +22,7 @@ SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 
 class ProfileUpdateRequest(BaseModel):
     preferred_name: str
+    address: str
     specialization: str
     slmc_number: str
 
@@ -30,6 +32,14 @@ class ProfileUpdateRequest(BaseModel):
         cleaned = value.strip()
         if len(cleaned) < 2:
             raise ValueError("Field must be at least 2 characters")
+        return cleaned
+
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, value: str):
+        cleaned = value.strip()
+        if len(cleaned) < 5:
+            raise ValueError("Address must be at least 5 characters")
         return cleaned
 
 
@@ -68,6 +78,7 @@ class EncounterSubmitRequest(BaseModel):
     diagnosis: str
     encounter_type: str
     clinical_notes: str
+    health_snapshot: Optional["HealthSnapshotInput"] = None
     prescription_items: list[EncounterPrescriptionItemRequest] = Field(default_factory=list)
 
     @field_validator("diagnosis", "encounter_type", "clinical_notes")
@@ -83,6 +94,27 @@ class EncounterSubmitRequest(BaseModel):
         if len(self.prescription_items) > 25:
             raise ValueError("Prescription item count is too high")
         return self
+
+
+class HealthSnapshotInput(BaseModel):
+    bmi: Optional[str] = None
+    blood_sugar: Optional[str] = None
+    cholesterol: Optional[str] = None
+    blood_pressure: Optional[str] = None
+    allergies: Optional[str] = None
+    checked_at: Optional[datetime] = None
+
+    @field_validator("bmi", "blood_sugar", "cholesterol", "blood_pressure", "allergies")
+    @classmethod
+    def validate_metric_text(cls, value: Optional[str]):
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if len(cleaned) > 160:
+            raise ValueError("Metric value is too long")
+        return cleaned
 
 
 class AssistantHistoryMessage(BaseModel):
@@ -752,6 +784,158 @@ def _build_archives(history_items, latest_prescription):
     return archives
 
 
+def _list_patient_health_snapshots(patient_id: int) -> list[dict]:
+    try:
+        return (
+            execute_with_retry(
+                lambda: (
+                    supabase_admin.table("patient_health_snapshots")
+                    .select("*")
+                    .eq("patient_id", patient_id)
+                    .order("checked_at", desc=True)
+                    .execute()
+                    .data
+                    or []
+                ),
+                default=[],
+            )
+            or []
+        )
+    except Exception:
+        return []
+
+
+def _snapshot_has_values(snapshot: Optional[HealthSnapshotInput]) -> bool:
+    if not snapshot:
+        return False
+    return any(
+        [
+            snapshot.bmi,
+            snapshot.blood_sugar,
+            snapshot.cholesterol,
+            snapshot.blood_pressure,
+            snapshot.allergies,
+        ]
+    )
+
+
+def _format_health_snapshot(row: Optional[dict]):
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "bmi": row.get("bmi"),
+        "blood_sugar": row.get("blood_sugar"),
+        "cholesterol": row.get("cholesterol"),
+        "blood_pressure": row.get("blood_pressure"),
+        "allergies": row.get("allergies"),
+        "checked_at": row.get("checked_at") or row.get("created_at"),
+        "source_role": row.get("source_role"),
+    }
+
+
+def _create_health_snapshot(
+    *,
+    patient_id: int,
+    source_role: str,
+    source_user_id: Optional[str],
+    snapshot: Optional[HealthSnapshotInput],
+    encounter_id: Optional[int] = None,
+):
+    if not _snapshot_has_values(snapshot):
+        return None
+
+    rows = (
+        supabase_admin.table("patient_health_snapshots")
+        .insert(
+            {
+                "patient_id": patient_id,
+                "source_role": source_role,
+                "source_user_id": source_user_id,
+                "encounter_id": encounter_id,
+                "bmi": snapshot.bmi,
+                "blood_sugar": snapshot.blood_sugar,
+                "cholesterol": snapshot.cholesterol,
+                "blood_pressure": snapshot.blood_pressure,
+                "allergies": snapshot.allergies,
+                "checked_at": (
+                    snapshot.checked_at.astimezone().isoformat()
+                    if snapshot.checked_at
+                    else datetime.now().astimezone().isoformat()
+                ),
+            }
+        )
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
+
+
+def _safe_record_attachment_filename(filename: Optional[str]) -> str:
+    original = filename or "attachment"
+    stem, dot, ext = original.rpartition(".")
+    base = stem if dot else original
+    suffix = f".{ext.lower()}" if dot else ""
+    safe_base = re.sub(r"[^a-zA-Z0-9_-]+", "_", base).strip("_") or "attachment"
+    return f"{safe_base[:80]}{suffix}"
+
+
+async def _store_record_attachments(
+    *,
+    patient_id: int,
+    source_role: str,
+    source_user_id: Optional[str],
+    files: Optional[list[UploadFile]],
+    encounter_id: Optional[int] = None,
+):
+    if not files:
+        return []
+
+    stored_rows = []
+    for upload in files:
+        if not upload or not (upload.filename or "").strip():
+            continue
+
+        contents = await validate_upload_file(upload)
+        safe_name = _safe_record_attachment_filename(upload.filename)
+        storage_path = (
+            f"medical-records/patient-{patient_id}/{uuid.uuid4().hex}_{safe_name}"
+        )
+
+        try:
+            supabase_admin.storage.from_("records").upload(
+                path=storage_path,
+                file=contents,
+                file_options={"content-type": upload.content_type or "application/octet-stream"},
+            )
+            file_url = supabase_admin.storage.from_("records").get_public_url(storage_path)
+            inserted = (
+                supabase_admin.table("medical_record_attachments")
+                .insert(
+                    {
+                        "patient_id": patient_id,
+                        "encounter_id": encounter_id,
+                        "source_role": source_role,
+                        "source_user_id": source_user_id,
+                        "file_name": upload.filename,
+                        "file_url": file_url,
+                        "content_type": upload.content_type or "application/octet-stream",
+                        "file_size_bytes": len(contents),
+                    }
+                )
+                .execute()
+                .data
+                or []
+            )
+            if inserted:
+                stored_rows.append(inserted[0])
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Medical record attachment upload failed.") from exc
+
+    return stored_rows
+
+
 def _build_active_patient_bundle(active_schedule_item, doctor_id: int):
     if not active_schedule_item:
         return None
@@ -822,6 +1006,15 @@ def _build_active_patient_bundle(active_schedule_item, doctor_id: int):
         patient_organisation_lookup,
     )
     latest_encounter = patient_encounters[0] if patient_encounters else None
+    health_snapshots = _list_patient_health_snapshots(patient_id)
+    latest_health_snapshot = health_snapshots[0] if health_snapshots else None
+    allergies = []
+    if latest_health_snapshot and latest_health_snapshot.get("allergies"):
+        allergies = [
+            item.strip()
+            for item in str(latest_health_snapshot.get("allergies") or "").replace("\n", ",").split(",")
+            if item.strip()
+        ]
 
     return {
         "patient": {
@@ -857,7 +1050,8 @@ def _build_active_patient_bundle(active_schedule_item, doctor_id: int):
         }
         if latest_prescription
         else None,
-        "allergies": [],
+        "allergies": allergies,
+        "health_snapshot": _format_health_snapshot(latest_health_snapshot),
         "history": history_items,
         "archives": _build_archives(history_items, latest_prescription),
     }
@@ -969,6 +1163,7 @@ def _build_dashboard_payload(context, active_appointment_id: Optional[int] = Non
             "name": user.get("pref_name") or user.get("name"),
             "legal_name": user.get("name"),
             "preferred_name": user.get("pref_name"),
+            "address": user.get("address"),
         },
         "doctor": {
             "id": doctor["id"],
@@ -1110,7 +1305,7 @@ def update_doctor_profile(
 
     updated_user = (
         supabase_admin.table("users")
-        .update({"pref_name": payload.preferred_name})
+        .update({"pref_name": payload.preferred_name, "address": payload.address})
         .eq("id", context["user_id"])
         .execute()
         .data
@@ -1140,7 +1335,11 @@ def update_doctor_profile(
     user_row = (
         updated_user[0]
         if updated_user
-        else {**context["user"], "pref_name": payload.preferred_name}
+        else {
+            **context["user"],
+            "pref_name": payload.preferred_name,
+            "address": payload.address,
+        }
     )
     doctor_row = (
         updated_doctor[0]
@@ -1158,6 +1357,7 @@ def update_doctor_profile(
             "name": user_row.get("pref_name") or user_row.get("name"),
             "legal_name": user_row.get("name"),
             "preferred_name": user_row.get("pref_name"),
+            "address": user_row.get("address"),
         },
         "doctor": {
             "id": doctor_row["id"],
@@ -1168,25 +1368,31 @@ def update_doctor_profile(
 
 
 @router.post("/encounters/submit")
-def submit_encounter(
-    payload: EncounterSubmitRequest,
+async def submit_encounter(
+    payload: str = Form(...),
+    files: Optional[list[UploadFile]] = File(None),
     authorization: Optional[str] = Header(None),
 ):
+    try:
+        parsed_payload = EncounterSubmitRequest.model_validate_json(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
     context = _require_doctor_context(authorization)
     doctor = context["doctor"]
 
     # ── Consent Guard (Bihanga B-3.1.1) ──────────────────────────
     # Doctor must have patient consent before accessing history
-    if payload.appointment_id is not None:
+    if parsed_payload.appointment_id is not None:
         check_consent(
             doctor_id=doctor["id"],
-            appointment_id=payload.appointment_id
+            appointment_id=parsed_payload.appointment_id
         )
 
     patient_rows = (
         supabase_admin.table("patients")
         .select("*")
-        .eq("id", payload.patient_id)
+        .eq("id", parsed_payload.patient_id)
         .execute()
         .data
         or []
@@ -1194,7 +1400,7 @@ def submit_encounter(
     if not patient_rows:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    disease = _resolve_disease(payload.diagnosis)
+    disease = _resolve_disease(parsed_payload.diagnosis)
     if not disease:
         raise HTTPException(
             status_code=400,
@@ -1202,7 +1408,7 @@ def submit_encounter(
         )
 
     normalized_prescription_items = []
-    for item in payload.prescription_items:
+    for item in parsed_payload.prescription_items:
         if item.medicine_id is None:
             raise HTTPException(
                 status_code=400,
@@ -1226,13 +1432,13 @@ def submit_encounter(
         )
 
     appointment = None
-    if payload.appointment_id is not None:
+    if parsed_payload.appointment_id is not None:
         appointment_rows = (
             supabase_admin.table("appointments")
             .select("*")
-            .eq("id", payload.appointment_id)
+            .eq("id", parsed_payload.appointment_id)
             .eq("doctor_id", doctor["id"])
-            .eq("patient_id", payload.patient_id)
+            .eq("patient_id", parsed_payload.patient_id)
             .execute()
             .data
             or []
@@ -1246,21 +1452,21 @@ def submit_encounter(
     diagnosis_label = (
         f"{diagnosis_code} - {diagnosis_name}"
         if diagnosis_code and diagnosis_name
-        else diagnosis_name or diagnosis_code or payload.diagnosis
+        else diagnosis_name or diagnosis_code or parsed_payload.diagnosis
     )
     compiled_notes = (
         f"Diagnosis: {diagnosis_label}\n"
-        f"Encounter Type: {payload.encounter_type}\n\n"
-        f"{payload.clinical_notes}"
+        f"Encounter Type: {parsed_payload.encounter_type}\n\n"
+        f"{parsed_payload.clinical_notes}"
     )
 
     encounter_rows = (
         supabase_admin.table("encounters")
         .insert(
             {
-                "patient_id": payload.patient_id,
+                "patient_id": parsed_payload.patient_id,
                 "doctor_id": doctor["id"],
-                "appointment_id": payload.appointment_id,
+                "appointment_id": parsed_payload.appointment_id,
                 "notes": compiled_notes,
             }
         )
@@ -1272,13 +1478,27 @@ def submit_encounter(
         raise HTTPException(status_code=500, detail="Encounter could not be saved")
 
     encounter = encounter_rows[0]
+    _create_health_snapshot(
+        patient_id=parsed_payload.patient_id,
+        source_role="doctor",
+        source_user_id=context["user_id"],
+        snapshot=parsed_payload.health_snapshot,
+        encounter_id=encounter["id"],
+    )
+    await _store_record_attachments(
+        patient_id=parsed_payload.patient_id,
+        source_role="doctor",
+        source_user_id=context["user_id"],
+        files=files,
+        encounter_id=encounter["id"],
+    )
     prescription = None
     if normalized_prescription_items:
         prescription_rows = (
             supabase_admin.table("prescriptions")
             .insert(
                 {
-                    "patient_id": payload.patient_id,
+                    "patient_id": parsed_payload.patient_id,
                     "doctor_id": doctor["id"],
                     "encounter_id": encounter["id"],
                     "status": "active",
@@ -1299,7 +1519,7 @@ def submit_encounter(
                         "dosage": item["dosage"],
                         "instructions": _build_prescription_instructions(
                             item["duration"],
-                            payload.encounter_type,
+                            parsed_payload.encounter_type,
                         ),
                     }
                     for item in normalized_prescription_items

@@ -28,6 +28,7 @@ export async function getAppointments() {
 
 export function updatePatientProfile(payload: {
   preferred_name?: string;
+  address?: string;
   medical_record_consent_default?: boolean;
 }) {
   return apiRequest<DashboardOverview["user"]>(endpoints.patient.profile, {
@@ -88,6 +89,37 @@ export function updateAppointmentConsent(appointmentId: number, granted: boolean
 export async function getMedicalRecords() {
   const response = await apiRequest<ApiListResponse<DashboardRecord>>(endpoints.patient.records);
   return response.items;
+}
+
+export function createPatientMedicalRecord(payload: {
+  title?: string;
+  notes: string;
+  health_snapshot?: {
+    bmi?: string;
+    blood_sugar?: string;
+    cholesterol?: string;
+    blood_pressure?: string;
+    allergies?: string;
+    checked_at?: string;
+  };
+  files?: File[];
+}) {
+  const formData = new FormData();
+  formData.append(
+    "payload",
+    JSON.stringify({
+      title: payload.title,
+      notes: payload.notes,
+      health_snapshot: payload.health_snapshot,
+    }),
+  );
+  for (const file of payload.files ?? []) {
+    formData.append("files", file);
+  }
+  return apiRequest<DashboardRecord>(endpoints.patient.recordsCreate, {
+    method: "POST",
+    body: formData,
+  });
 }
 
 export async function searchPharmacy(query: string) {

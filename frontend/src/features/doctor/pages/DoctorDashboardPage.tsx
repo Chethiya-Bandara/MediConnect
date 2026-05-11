@@ -275,8 +275,67 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
+function calculateBmi(heightCm: string, weightKg: string) {
+  const parsedHeight = Number.parseFloat(heightCm);
+  const parsedWeight = Number.parseFloat(weightKg);
+
+  if (!Number.isFinite(parsedHeight) || !Number.isFinite(parsedWeight) || parsedHeight <= 0 || parsedWeight <= 0) {
+    return "";
+  }
+
+  const heightInMeters = parsedHeight / 100;
+  const bmi = parsedWeight / (heightInMeters * heightInMeters);
+  return bmi.toFixed(1);
+}
+
+function buildDoctorHealthSnapshotPayload(fields: {
+  heightCm: string;
+  weightKg: string;
+  bloodSugar: string;
+  cholesterol: string;
+  bloodPressure: string;
+  allergies: string;
+  checkedDate: string;
+}) {
+  const calculatedBmi = calculateBmi(fields.heightCm, fields.weightKg);
+  const payload = {
+    bmi: calculatedBmi,
+    blood_sugar: fields.bloodSugar.trim(),
+    cholesterol: fields.cholesterol.trim(),
+    blood_pressure: fields.bloodPressure.trim(),
+    allergies: fields.allergies.trim(),
+    checked_at: fields.checkedDate ? `${fields.checkedDate}T12:00:00+05:30` : "",
+  };
+
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => typeof value === "string" && value.trim().length > 0),
+  );
+}
+
+function formatUploadedFileSize(size: number) {
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
 function todayInputDate() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function isTodayScheduleItem(startTime: string | null | undefined) {
+  if (!startTime) return false;
+  const parsed = new Date(startTime);
+  if (Number.isNaN(parsed.getTime())) return false;
+
+  const now = new Date();
+  return (
+    parsed.getFullYear() === now.getFullYear() &&
+    parsed.getMonth() === now.getMonth() &&
+    parsed.getDate() === now.getDate()
+  );
+}
+
+function normalizeMedicineSearchValue(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function formatStatusLabel(value: string | null | undefined) {
@@ -413,6 +472,14 @@ export function DoctorDashboardPage() {
   const [isDiseaseSearchLoading, setIsDiseaseSearchLoading] = useState(false);
   const [encounterType, setEncounterType] = useState("Routine Follow-up");
   const [clinicalNotes, setClinicalNotes] = useState("");
+  const [healthHeightCm, setHealthHeightCm] = useState("");
+  const [healthWeightKg, setHealthWeightKg] = useState("");
+  const [healthBloodSugar, setHealthBloodSugar] = useState("");
+  const [healthCholesterol, setHealthCholesterol] = useState("");
+  const [healthBloodPressure, setHealthBloodPressure] = useState("");
+  const [healthAllergies, setHealthAllergies] = useState("");
+  const [healthCheckedDate, setHealthCheckedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [encounterFiles, setEncounterFiles] = useState<File[]>([]);
   const [medName, setMedName] = useState("");
   const [medDose, setMedDose] = useState("");
   const [medDuration, setMedDuration] = useState("");
@@ -433,6 +500,7 @@ export function DoctorDashboardPage() {
   const [requestingHospitalId, setRequestingHospitalId] = useState<number | null>(null);
   const [revokingAffiliationId, setRevokingAffiliationId] = useState<number | null>(null);
   const [profileName, setProfileName] = useState("");
+  const [profileAddress, setProfileAddress] = useState("");
   const [profileSpecialization, setProfileSpecialization] = useState("");
   const [profileSlmcNumber, setProfileSlmcNumber] = useState("");
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
@@ -462,6 +530,22 @@ export function DoctorDashboardPage() {
     dashboard?.user.email ||
     user?.email ||
     "Doctor";
+
+  useEffect(() => {
+    const snapshot = activePatient?.health_snapshot;
+    setHealthHeightCm("");
+    setHealthWeightKg("");
+    setHealthBloodSugar(snapshot?.blood_sugar ?? "");
+    setHealthCholesterol(snapshot?.cholesterol ?? "");
+    setHealthBloodPressure(snapshot?.blood_pressure ?? "");
+    setHealthAllergies(snapshot?.allergies ?? "");
+    setHealthCheckedDate(
+      snapshot?.checked_at
+        ? new Date(snapshot.checked_at).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
+    );
+  }, [activePatient?.appointment.id, activePatient?.health_snapshot]);
+  const calculatedHealthBmi = calculateBmi(healthHeightCm, healthWeightKg);
   const legalName = dashboard?.user.legal_name?.trim() || user?.legalName?.trim() || "Not available";
   const doctorInitials = getInitials(doctorName);
   const profilePreviewName = profileName.trim() || doctorName;
@@ -479,6 +563,11 @@ export function DoctorDashboardPage() {
   const queueItems = useMemo(() => {
     const schedule = dashboard?.schedule ?? [];
     return schedule.slice(0, 6);
+  }, [dashboard]);
+
+  const todayScheduleItems = useMemo(() => {
+    const schedule = dashboard?.schedule ?? [];
+    return schedule.filter((item) => isTodayScheduleItem(item.start_time));
   }, [dashboard]);
 
   const approvedAffiliations = useMemo(
@@ -531,13 +620,15 @@ export function DoctorDashboardPage() {
 
     return (
       profileName.trim() !== (dashboard.user.name ?? "").trim() ||
+      profileAddress.trim() !== (dashboard.user.address ?? "").trim() ||
       profileSpecialization.trim() !== (dashboard.doctor.specialization ?? "").trim() ||
       profileSlmcNumber.trim() !== (dashboard.doctor.slmc_number ?? "").trim()
     );
-  }, [dashboard, profileName, profileSlmcNumber, profileSpecialization]);
+  }, [dashboard, profileAddress, profileName, profileSlmcNumber, profileSpecialization]);
 
   const isProfileFormValid =
     profileName.trim().length >= 2 &&
+    profileAddress.trim().length >= 5 &&
     profileSpecialization.trim().length >= 2 &&
     profileSlmcNumber.trim().length >= 2;
 
@@ -615,6 +706,7 @@ export function DoctorDashboardPage() {
       setAffiliationHospitals(hospitals);
       setAvailabilityError(null);
       setProfileName(payload.user.name ?? "");
+      setProfileAddress(payload.user.address ?? "");
       setProfileSpecialization(payload.doctor.specialization ?? "");
       setProfileSlmcNumber(payload.doctor.slmc_number ?? "");
     } catch (err) {
@@ -793,9 +885,12 @@ export function DoctorDashboardPage() {
       .then((items) => {
         if (!active) return;
         setMedicineSuggestions(items);
-        const exactMatch = items.find(
-          (item) => item.name.toLowerCase() === medName.trim().toLowerCase(),
-        );
+        const normalizedInput = normalizeMedicineSearchValue(medName);
+        const exactMatch =
+          items.find(
+            (item) => normalizeMedicineSearchValue(item.name) === normalizedInput,
+          ) ??
+          (items.length === 1 ? items[0] : null);
         setSelectedMedicineSuggestion(exactMatch ?? null);
       })
       .catch(() => {
@@ -851,6 +946,7 @@ export function DoctorDashboardPage() {
 
   const resetProfileForm = () => {
     setProfileName(dashboard?.user.name ?? "");
+    setProfileAddress(dashboard?.user.address ?? "");
     setProfileSpecialization(dashboard?.doctor.specialization ?? "");
     setProfileSlmcNumber(dashboard?.doctor.slmc_number ?? "");
     showToast("Profile form reset.", "info");
@@ -858,9 +954,12 @@ export function DoctorDashboardPage() {
 
   const handleMedicineNameChange = (value: string) => {
     setMedName(value);
-    const exactMatch = medicineSuggestions.find(
-      (item) => item.name.toLowerCase() === value.trim().toLowerCase(),
-    );
+    const normalizedValue = normalizeMedicineSearchValue(value);
+    const exactMatch =
+      medicineSuggestions.find(
+        (item) => normalizeMedicineSearchValue(item.name) === normalizedValue,
+      ) ??
+      (medicineSuggestions.length === 1 ? medicineSuggestions[0] : null);
     setSelectedMedicineSuggestion(exactMatch ?? null);
   };
 
@@ -882,8 +981,10 @@ export function DoctorDashboardPage() {
     const matchedSuggestion =
       selectedMedicineSuggestion ??
       medicineSuggestions.find(
-        (item) => item.name.toLowerCase() === medName.trim().toLowerCase(),
+        (item) =>
+          normalizeMedicineSearchValue(item.name) === normalizeMedicineSearchValue(medName),
       ) ??
+      (medicineSuggestions.length === 1 ? medicineSuggestions[0] : null) ??
       null;
     if (!matchedSuggestion) {
       showToast("Pick a saved medicine from the catalog search results before adding it.", "error");
@@ -945,6 +1046,14 @@ export function DoctorDashboardPage() {
     setDiseaseSuggestions([]);
     setSelectedDiseaseSuggestion(null);
     setClinicalNotes("");
+    setHealthHeightCm("");
+    setHealthWeightKg("");
+    setHealthBloodSugar("");
+    setHealthCholesterol("");
+    setHealthBloodPressure("");
+    setHealthAllergies("");
+    setHealthCheckedDate(new Date().toISOString().slice(0, 10));
+    setEncounterFiles([]);
     setPrescriptionDraft([]);
     setEditingDraftId(null);
     await loadDashboard(appointmentId);
@@ -956,6 +1065,14 @@ export function DoctorDashboardPage() {
     setDiseaseSuggestions([]);
     setSelectedDiseaseSuggestion(null);
     setClinicalNotes("");
+    setHealthHeightCm("");
+    setHealthWeightKg("");
+    setHealthBloodSugar("");
+    setHealthCholesterol("");
+    setHealthBloodPressure("");
+    setHealthAllergies("");
+    setHealthCheckedDate(new Date().toISOString().slice(0, 10));
+    setEncounterFiles([]);
     setPrescriptionDraft([]);
     setEditingDraftId(null);
     setMedName("");
@@ -990,6 +1107,15 @@ export function DoctorDashboardPage() {
 
     setSubmittingEncounter(true);
     try {
+      const healthSnapshot = buildDoctorHealthSnapshotPayload({
+        heightCm: healthHeightCm,
+        weightKg: healthWeightKg,
+        bloodSugar: healthBloodSugar,
+        cholesterol: healthCholesterol,
+        bloodPressure: healthBloodPressure,
+        allergies: healthAllergies,
+        checkedDate: healthCheckedDate,
+      });
       await submitDoctorEncounter({
         patient_id: activePatient.patient.id,
         appointment_id: activePatient.appointment.id,
@@ -998,6 +1124,8 @@ export function DoctorDashboardPage() {
           : selectedDiseaseSuggestion.name,
         encounter_type: encounterType,
         clinical_notes: clinicalNotes.trim(),
+        health_snapshot: Object.keys(healthSnapshot).length ? healthSnapshot : undefined,
+        files: encounterFiles,
         prescription_items: prescriptionDraft.map((item) => ({
           medicine_id: item.medicine_id,
           medicine_name: item.medicine_name,
@@ -1010,6 +1138,14 @@ export function DoctorDashboardPage() {
       setDiseaseSuggestions([]);
       setSelectedDiseaseSuggestion(null);
       setClinicalNotes("");
+      setHealthHeightCm("");
+      setHealthWeightKg("");
+      setHealthBloodSugar("");
+      setHealthCholesterol("");
+      setHealthBloodPressure("");
+      setHealthAllergies("");
+      setHealthCheckedDate(new Date().toISOString().slice(0, 10));
+      setEncounterFiles([]);
       setPrescriptionDraft([]);
       setEditingDraftId(null);
       setMedName("");
@@ -1043,6 +1179,7 @@ export function DoctorDashboardPage() {
     try {
       await updateDoctorProfile({
         preferred_name: profileName.trim(),
+        address: profileAddress.trim(),
         specialization: profileSpecialization.trim(),
         slmc_number: profileSlmcNumber.trim(),
       });
@@ -2031,23 +2168,189 @@ export function DoctorDashboardPage() {
                           rows={6}
                         />
                       </div>
+                      <div className="mb-8 rounded-2xl border border-slate-100 bg-slate-50/80 p-5 dark:border-slate-800 dark:bg-slate-800/40">
+                        <div className="mb-4">
+                          <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                            Health Snapshot
+                          </label>
+                          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                            Save updated vitals here. Height and weight calculate BMI automatically, and every field is optional.
+                          </p>
+                        </div>
+                        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.95fr)]">
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={healthHeightCm}
+                              onChange={(event) => setHealthHeightCm(event.target.value)}
+                              className="rounded-xl border-0 bg-white px-4 py-3 text-sm shadow-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-900 dark:text-white"
+                              placeholder="Height (cm)"
+                            />
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={healthWeightKg}
+                              onChange={(event) => setHealthWeightKg(event.target.value)}
+                              className="rounded-xl border-0 bg-white px-4 py-3 text-sm shadow-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-900 dark:text-white"
+                              placeholder="Weight (kg)"
+                            />
+                            <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-900 md:col-span-2">
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                Calculated BMI
+                              </p>
+                              <p className="mt-2 text-base font-semibold text-slate-800 dark:text-slate-100">
+                                {calculatedHealthBmi || "Add height and weight"}
+                              </p>
+                            </div>
+                            <input
+                              type="date"
+                              value={healthCheckedDate}
+                              onChange={(event) => setHealthCheckedDate(event.target.value)}
+                              className="rounded-xl border-0 bg-white px-4 py-3 text-sm shadow-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-900 dark:text-white"
+                            />
+                            <input
+                              value={healthBloodSugar}
+                              onChange={(event) => setHealthBloodSugar(event.target.value)}
+                              className="rounded-xl border-0 bg-white px-4 py-3 text-sm shadow-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-900 dark:text-white"
+                              placeholder="Blood sugar"
+                            />
+                            <input
+                              value={healthCholesterol}
+                              onChange={(event) => setHealthCholesterol(event.target.value)}
+                              className="rounded-xl border-0 bg-white px-4 py-3 text-sm shadow-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-900 dark:text-white"
+                              placeholder="Cholesterol"
+                            />
+                            <input
+                              value={healthBloodPressure}
+                              onChange={(event) => setHealthBloodPressure(event.target.value)}
+                              className="rounded-xl border-0 bg-white px-4 py-3 text-sm shadow-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-900 dark:text-white md:col-span-2"
+                              placeholder="Blood pressure"
+                            />
+                            <input
+                              value={healthAllergies}
+                              onChange={(event) => setHealthAllergies(event.target.value)}
+                              className="rounded-xl border-0 bg-white px-4 py-3 text-sm shadow-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-900 dark:text-white md:col-span-2"
+                              placeholder="Allergies"
+                            />
+                          </div>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                  Previous Snapshot
+                                </p>
+                                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                                  Latest values already saved for this patient.
+                                </p>
+                              </div>
+                              <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                                {activePatient?.health_snapshot?.checked_at
+                                  ? formatDate(activePatient.health_snapshot.checked_at)
+                                  : "No checks yet"}
+                              </span>
+                            </div>
+
+                            {activePatient?.health_snapshot ? (
+                              <div className="mt-4 space-y-3">
+                                {[
+                                  ["BMI", activePatient.health_snapshot.bmi],
+                                  ["Blood sugar", activePatient.health_snapshot.blood_sugar],
+                                  ["Cholesterol", activePatient.health_snapshot.cholesterol],
+                                  ["Blood pressure", activePatient.health_snapshot.blood_pressure],
+                                  ["Allergies", activePatient.health_snapshot.allergies],
+                                ].map(([label, value]) => (
+                                  <div
+                                    key={label}
+                                    className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/60"
+                                  >
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                      {label}
+                                    </p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                                      {value || "Not recorded"}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
+                                No previous snapshot saved for this patient yet.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                       <div className="space-y-2">
                         <label className="px-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                           Attachments
                         </label>
-                        <div className="mt-2 flex flex-wrap gap-4">
-                          <div className="flex min-h-20 flex-1 items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
-                            <Upload size={18} />
-                            <div>
-                              <p className="font-semibold text-slate-700 dark:text-slate-200">
-                                Attachments are currently read-only
-                              </p>
-                              <p className="mt-1 text-xs">
-                                Lab files and images can be reviewed here once backend upload
-                                support is enabled for the doctor workspace.
-                              </p>
+                        <div className="mt-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-start gap-3">
+                              <Upload size={18} />
+                              <div>
+                                <p className="font-semibold text-slate-700 dark:text-slate-200">
+                                  Attach optional supporting files
+                                </p>
+                                <p className="mt-1 text-xs">
+                                  PDF, JPG, JPEG, or PNG only. Each file must stay under 5MB.
+                                </p>
+                              </div>
                             </div>
+                            <label className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800">
+                              Add files
+                              <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                multiple
+                                className="hidden"
+                                onChange={(event) => {
+                                  const files = Array.from(event.target.files ?? []);
+                                  setEncounterFiles(files);
+                                  event.target.value = "";
+                                }}
+                              />
+                            </label>
                           </div>
+                          {encounterFiles.length > 0 ? (
+                            <div className="mt-4 space-y-2">
+                              {encounterFiles.map((file) => (
+                                <div
+                                  key={`${file.name}-${file.lastModified}`}
+                                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+                                >
+                                  <div>
+                                    <p className="font-semibold text-slate-700 dark:text-slate-100">{file.name}</p>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                                      {formatUploadedFileSize(file.size)}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setEncounterFiles((current) =>
+                                        current.filter(
+                                          (entry) =>
+                                            !(
+                                              entry.name === file.name &&
+                                              entry.lastModified === file.lastModified &&
+                                              entry.size === file.size
+                                            ),
+                                        ),
+                                      )
+                                    }
+                                    className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                                  >
+                                    <X size={16} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </>
@@ -2408,8 +2711,8 @@ export function DoctorDashboardPage() {
               <div className="relative rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div className="absolute bottom-12 left-16 top-12 w-px bg-slate-200 dark:bg-slate-700" />
                 <div className="space-y-8">
-                  {dashboard?.schedule.length ? (
-                    dashboard.schedule.map((item) => (
+                  {todayScheduleItems.length ? (
+                    todayScheduleItems.map((item) => (
                       <div key={item.id} className="relative flex items-start gap-6">
                         <div className="w-16 pt-1 text-right">
                           <p className="text-sm font-bold dark:text-slate-300">
@@ -2460,8 +2763,8 @@ export function DoctorDashboardPage() {
                     ))
                   ) : (
                     <EmptyState
-                      title="No appointments yet"
-                      description="Upcoming visits will appear here once patients book against your live availability."
+                      title="No appointments today"
+                      description="Only today's booked visits are shown here. Future bookings can wait their turn."
                       className="rounded-2xl border-slate-200 bg-slate-50 p-6 text-left shadow-none dark:bg-slate-800/40"
                     />
                   )}
@@ -2730,64 +3033,6 @@ export function DoctorDashboardPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-5 md:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
-                        Preferred Name
-                      </span>
-                      <input
-                        type="text"
-                        value={profileName}
-                        onChange={(event) => setProfileName(event.target.value)}
-                        className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
-                        placeholder="Dr. Jane Silva"
-                      />
-                    </label>
-
-                    <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
-                        Legal name on NIC
-                      </p>
-                      <p className="mt-2 font-semibold">{legalName}</p>
-                    </div>
-
-                    <CustomSelectField
-                      id="doctor-specialization"
-                      name="doctor-specialization"
-                      label="Specialization"
-                      value={profileSpecialization}
-                      onChange={setProfileSpecialization}
-                      options={specializationSelectOptions}
-                      placeholder="Select specialization"
-                      helperText="Choose the closest official specialty label for the doctor profile."
-                      triggerClassName="shadow-inner dark:bg-slate-800"
-                    />
-                  </div>
-
-                  <div className="mt-5 grid gap-5 md:grid-cols-[1fr_auto]">
-                    <label className="block">
-                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
-                        SLMC Registration Number
-                      </span>
-                      <input
-                        type="text"
-                        value={profileSlmcNumber}
-                        onChange={(event) => setProfileSlmcNumber(event.target.value)}
-                        className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
-                        placeholder="SLMC-12345"
-                      />
-                    </label>
-
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300 md:min-w-[14rem]">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
-                        Profile status
-                      </p>
-                      <p className="mt-2 font-semibold">
-                        {isProfileDirty ? "Unsaved changes" : "Everything saved"}
-                      </p>
-                    </div>
-                  </div>
-
                   <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50/80 p-5 dark:border-slate-800 dark:bg-slate-800/50">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                       <div className="flex items-center gap-4">
@@ -2835,6 +3080,77 @@ export function DoctorDashboardPage() {
                           Remove
                         </button>
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 grid gap-5 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                        Preferred Name
+                      </span>
+                      <input
+                        type="text"
+                        value={profileName}
+                        onChange={(event) => setProfileName(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
+                        placeholder="Dr. Jane Silva"
+                      />
+                    </label>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Legal name on NIC
+                      </p>
+                      <p className="mt-2 font-semibold">{legalName}</p>
+                    </div>
+
+                    <label className="block md:col-span-2">
+                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                        Address
+                      </span>
+                      <textarea
+                        value={profileAddress}
+                        onChange={(event) => setProfileAddress(event.target.value)}
+                        rows={3}
+                        className="w-full resize-none rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
+                        placeholder="221B Galle Road, Colombo"
+                      />
+                    </label>
+
+                    <CustomSelectField
+                      id="doctor-specialization"
+                      name="doctor-specialization"
+                      label="Specialization"
+                      value={profileSpecialization}
+                      onChange={setProfileSpecialization}
+                      options={specializationSelectOptions}
+                      placeholder="Select specialization"
+                      helperText="Choose the closest official specialty label for the doctor profile."
+                      triggerClassName="shadow-inner dark:bg-slate-800"
+                    />
+                  </div>
+
+                  <div className="mt-5 grid gap-5 md:grid-cols-[1fr_auto]">
+                    <label className="block">
+                      <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                        SLMC Registration Number
+                      </span>
+                      <input
+                        type="text"
+                        value={profileSlmcNumber}
+                        onChange={(event) => setProfileSlmcNumber(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-50 px-4 py-3 shadow-inner dark:bg-slate-800 dark:text-white"
+                        placeholder="SLMC-12345"
+                      />
+                    </label>
+
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300 md:min-w-[14rem]">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">
+                        Profile status
+                      </p>
+                      <p className="mt-2 font-semibold">
+                        {isProfileDirty ? "Unsaved changes" : "Everything saved"}
+                      </p>
                     </div>
                   </div>
 
