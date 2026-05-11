@@ -356,7 +356,7 @@ export function PharmacyAdminDashboardPage() {
 
   return (
     <div className="min-h-screen bg-surface font-body text-on-background antialiased transition-colors dark:bg-slate-950 dark:text-slate-100">
-      <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-100 bg-slate-50 py-6 transition-colors dark:border-slate-800 dark:bg-slate-900">
+      <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-sky-200/60 bg-sky-100 px-4 py-6 dark:border-slate-800 dark:bg-slate-900">
         <div className="mb-8 px-6">
           <AppBrandMark subtitle="Pharmacy Admin" />
         </div>

@@ -1148,7 +1148,7 @@ export function HealthMinistryAdminDashboardPage() {
   return (
     <div className={theme === "dark" ? "dark" : ""}>
       <div className="min-h-screen bg-[#f7fafc] font-body text-[#181c1e] antialiased transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
-        <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6 dark:border-slate-800 dark:bg-slate-900">
+        <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-sky-200/60 bg-sky-100 px-4 py-6 dark:border-slate-800 dark:bg-slate-900">
           <div className="mb-8 px-2">
             <AppBrandMark subtitle="Ministry Admin" />
           </div>
