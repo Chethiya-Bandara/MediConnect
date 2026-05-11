@@ -48,6 +48,7 @@ export interface DoctorPrescriptionItem {
   medicine_id?: number | null;
   medicine_name: string | null;
   dosage: string | null;
+  unit?: string | null;
   quantity: string | null;
   instructions: string | null;
 }

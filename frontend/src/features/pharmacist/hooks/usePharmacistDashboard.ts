@@ -36,6 +36,105 @@ function clampQuantity(value: number, max: number | null) {
   return Math.min(normalized, Math.max(max, 0));
 }
 
+function parsePositiveInteger(value: string | number | null | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 0 ? Math.floor(value) : null;
+  }
+
+  if (typeof value === "string") {
+    const match = value.match(/\d+/);
+    if (match) {
+      const parsed = Number.parseInt(match[0], 10);
+      return parsed > 0 ? parsed : null;
+    }
+  }
+
+  return null;
+}
+
+function parseDurationDays(instructions: string | null | undefined) {
+  if (!instructions) {
+    return null;
+  }
+
+  const match = instructions.match(/Duration:\s*(\d+)/i);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(match[1], 10);
+  return parsed > 0 ? parsed : null;
+}
+
+function parsePackageCapacity(
+  item: Pick<PharmacistPrescriptionItem, "catalogUnit" | "medicineName">,
+) {
+  const candidates = [item.catalogUnit ?? "", item.medicineName ?? ""].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const normalized = candidate.trim().toLowerCase();
+    if (!normalized) {
+      continue;
+    }
+
+    const match =
+      normalized.match(/(\d+(?:\.\d+)?)\s*(ml|drops?|bottle|tab(?:let)?s?)/i) ??
+      normalized.match(/(\d+(?:\.\d+)?)/);
+
+    if (!match) {
+      continue;
+    }
+
+    const parsed = Number.parseFloat(match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function getDispenseMetrics(item: PharmacistPrescriptionItem) {
+  const unitKind = (item.unit ?? "").trim().toLowerCase();
+  const dailyDose = parsePositiveInteger(item.dosage);
+  const durationDays = parseDurationDays(item.instructions);
+  const packageCapacity = parsePackageCapacity(item);
+
+  let prescribedQuantity = item.quantity ?? null;
+  if (dailyDose !== null && durationDays !== null) {
+    if (unitKind === "tablets") {
+      prescribedQuantity = dailyDose * durationDays;
+    } else if (unitKind === "ml" || unitKind === "drops") {
+      const totalVolume =
+        unitKind === "drops" ? (dailyDose * durationDays) / 20 : dailyDose * durationDays;
+      prescribedQuantity =
+        packageCapacity !== null ? Math.max(1, Math.ceil(totalVolume / packageCapacity)) : totalVolume;
+    }
+  }
+
+  const normalizedPrescribedQuantity =
+    prescribedQuantity !== null && Number.isFinite(prescribedQuantity)
+      ? Math.max(Math.floor(prescribedQuantity), 0)
+      : null;
+
+  const remainingQuantity =
+    normalizedPrescribedQuantity === null
+      ? null
+      : Math.max(normalizedPrescribedQuantity - item.dispensedQuantity, 0);
+
+  const quantityLabel =
+    unitKind === "tablets" ? "tablet(s)" : unitKind === "ml" || unitKind === "drops" ? "bottle(s)" : "unit(s)";
+
+  return {
+    prescribedQuantity: normalizedPrescribedQuantity,
+    remainingQuantity,
+    quantityLabel,
+    dailyDose,
+    durationDays,
+    packageCapacity,
+  };
+}
+
 function isSameDay(dateString: string | null) {
   if (!dateString) {
     return false;
@@ -55,7 +154,7 @@ function isSameDay(dateString: string | null) {
 }
 
 function getDefaultAction(item: PharmacistPrescriptionItem): PharmacistDispenseAction {
-  if ((item.remainingQuantity ?? 0) <= 0) {
+  if ((getDispenseMetrics(item).remainingQuantity ?? 0) <= 0) {
     return "DISPENSED";
   }
 
@@ -67,11 +166,12 @@ function getDefaultAction(item: PharmacistPrescriptionItem): PharmacistDispenseA
 }
 
 function getDefaultQuantity(item: PharmacistPrescriptionItem) {
-  if (item.remainingQuantity === null) {
-    return item.quantity ?? 0;
+  const metrics = getDispenseMetrics(item);
+  if (metrics.remainingQuantity === null) {
+    return metrics.prescribedQuantity ?? 0;
   }
 
-  return Math.max(item.remainingQuantity, 0);
+  return Math.max(metrics.remainingQuantity, 0);
 }
 
 function createPlan(detail: PharmacistPrescriptionDetail | null) {
@@ -100,26 +200,6 @@ function getSearchableValues(item: PharmacistPrescriptionSummary) {
 
 function normalizeLookupQuery(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
-}
-
-function calculateDailyBilledValue(history: PharmacistDispenseHistoryEntry[]): number {
-  const today = new Date();
-
-  return history
-    .filter((entry) => {
-      if (!entry.dispensedAt) return false;
-      
-      const dispenseDate = new Date(entry.dispensedAt);
-      return (
-        dispenseDate.getDate() === today.getDate() &&
-        dispenseDate.getMonth() === today.getMonth() &&
-        dispenseDate.getFullYear() === today.getFullYear()
-      );
-    })
-    .reduce((total, entry) => {
-      // Use estimatedTotal from your interface
-      return total + (entry.estimatedTotal ?? 0);
-    }, 0);
 }
 
 function buildStats(
@@ -293,16 +373,17 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
     }
 
     return selectedDetail.items.map((item) => {
+      const metrics = getDispenseMetrics(item);
       const plan = dispensePlan[item.id] ?? {
         action: getDefaultAction(item),
         quantity: getDefaultQuantity(item),
       };
 
-      const remaining = item.remainingQuantity;
+      const remaining = metrics.remainingQuantity;
       let quantityToDispense = 0;
 
       if (plan.action === "DISPENSED") {
-        quantityToDispense = remaining ?? Math.max(item.quantity ?? 0, 0);
+        quantityToDispense = remaining ?? Math.max(metrics.prescribedQuantity ?? 0, 0);
       } else if (plan.action === "PARTIALLY_DISPENSED") {
         quantityToDispense = clampQuantity(plan.quantity, remaining);
       }
@@ -310,6 +391,7 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
       return {
         item,
         plan,
+        metrics,
         quantityToDispense,
       };
     });
@@ -319,10 +401,11 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
     () =>
       plannedItems
         .filter(({ quantityToDispense, item }) => quantityToDispense > 0 && item.unitPrice !== null)
-        .map(({ item, quantityToDispense }) => ({
+        .map(({ item, metrics, quantityToDispense }) => ({
           id: item.id,
           name: item.medicineName,
           quantity: quantityToDispense,
+          quantityLabel: metrics.quantityLabel,
           unitPrice: item.unitPrice ?? 0,
           total: quantityToDispense * (item.unitPrice ?? 0),
         })),
@@ -357,13 +440,14 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
         action: getDefaultAction(item),
         quantity: getDefaultQuantity(item),
       };
+      const metrics = getDispenseMetrics(item);
 
       let quantity = previous.quantity;
       if (action === "DISPENSED") {
         quantity = getDefaultQuantity(item);
       } else if (action === "PARTIALLY_DISPENSED") {
-        quantity = clampQuantity(previous.quantity || 1, item.remainingQuantity);
-        if (quantity === 0 && (item.remainingQuantity ?? 0) > 0) {
+        quantity = clampQuantity(previous.quantity || 1, metrics.remainingQuantity);
+        if (quantity === 0 && (metrics.remainingQuantity ?? 0) > 0) {
           quantity = 1;
         }
       } else {
@@ -391,12 +475,13 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
         action: getDefaultAction(item),
         quantity: getDefaultQuantity(item),
       };
+      const metrics = getDispenseMetrics(item);
 
       return {
         ...current,
         [itemId]: {
           ...existing,
-          quantity: clampQuantity(quantity, item.remainingQuantity),
+          quantity: clampQuantity(quantity, metrics.remainingQuantity),
         },
       };
     });

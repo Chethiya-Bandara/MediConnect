@@ -30,6 +30,7 @@ export interface PharmacistPrescriptionItem {
   id: string;
   medicineName: string;
   dosage: string | null;
+  unit: string | null;
   quantity: number | null;
   instructions: string | null;
   unitPrice: number | null;

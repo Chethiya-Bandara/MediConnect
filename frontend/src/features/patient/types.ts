@@ -102,6 +102,7 @@ export interface PrescriptionItem {
   id: number;
   medicine_name: string;
   dosage: string;
+  unit?: string | null;
   quantity: string;
   instructions: string;
 }
@@ -162,6 +163,7 @@ export interface PharmacyEstimateItem {
   inventory_id: number | null;
   medicine_name: string;
   dosage: string | null;
+  unit?: string | null;
   quantity: string;
   quantity_value: number;
   instructions: string | null;
@@ -217,6 +219,7 @@ export interface DispensingLineItem {
   id: number;
   medicine_name: string | null;
   dosage: string | null;
+  unit?: string | null;
   instructions: string | null;
   quantity_dispensed: number;
   price: number;

@@ -46,7 +46,8 @@ class ProfileUpdateRequest(BaseModel):
 class EncounterPrescriptionItemRequest(BaseModel):
     medicine_id: Optional[int] = None
     medicine_name: str
-    dosage: str = ""
+    dosage: int = Field(..., gt=0, le=1000)
+    unit: str = ""
     duration: str = ""
 
     @field_validator("medicine_id")
@@ -66,10 +67,19 @@ class EncounterPrescriptionItemRequest(BaseModel):
             raise ValueError("Medicine name must be at least 2 characters")
         return cleaned
 
-    @field_validator("dosage", "duration")
+    @field_validator("duration")
     @classmethod
     def normalize_optional_text(cls, value: str):
         return value.strip()
+
+    @field_validator("unit")
+    @classmethod
+    def validate_unit(cls, value: str):
+        cleaned = value.strip().lower()
+        allowed_units = {"tablets", "ml", "drops"}
+        if cleaned not in allowed_units:
+            raise ValueError("Unit must be tablets, ml, or drops")
+        return cleaned
 
 
 class EncounterDiagnosisRequest(BaseModel):
@@ -92,6 +102,7 @@ class EncounterSubmitRequest(BaseModel):
     encounter_type: str
     clinical_notes: str
     health_snapshot: Optional["HealthSnapshotInput"] = None
+    valid_period: Optional[int] = None
     prescription_items: list[EncounterPrescriptionItemRequest] = Field(default_factory=list)
 
     @field_validator("disease_id")
@@ -101,6 +112,17 @@ class EncounterSubmitRequest(BaseModel):
             return None
         if value <= 0:
             raise ValueError("Disease ID must be a positive integer")
+        return value
+
+    @field_validator("valid_period")
+    @classmethod
+    def validate_valid_period(cls, value: Optional[int]):
+        if value is None:
+            return None
+        if value <= 0:
+            raise ValueError("Valid period must be a positive number of days")
+        if value > 365:
+            raise ValueError("Valid period cannot exceed 365 days")
         return value
 
     @field_validator("diagnosis", "encounter_type", "clinical_notes")
@@ -1556,6 +1578,7 @@ async def submit_encounter(
                 "medicine_id": medicine["id"],
                 "medicine_name": medicine.get("name") or item.medicine_name,
                 "dosage": item.dosage,
+                "unit": item.unit,
                 "duration": item.duration,
             }
         )
@@ -1635,6 +1658,7 @@ async def submit_encounter(
                     "doctor_id": doctor["id"],
                     "encounter_id": encounter["id"],
                     "status": "active",
+                    "valid_period": parsed_payload.valid_period,
                 }
             )
             .execute()
@@ -1650,6 +1674,7 @@ async def submit_encounter(
                         "medicine_id": item["medicine_id"],
                         "medicine_name": item["medicine_name"],
                         "dosage": item["dosage"],
+                        "unit": item["unit"],
                         "instructions": _build_prescription_instructions(
                             item["duration"],
                             parsed_payload.encounter_type,

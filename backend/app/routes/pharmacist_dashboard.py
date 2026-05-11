@@ -2,7 +2,7 @@
 # Pharmacist dashboard endpoints
 # Signature verification added by Bihanga (B-4.1.2)
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 from typing import Optional
 
@@ -80,6 +80,43 @@ def _serialize_prescription_item(item: dict) -> dict:
 
 def _sorted_unique(values):
     return sorted({value for value in values if value is not None})
+
+
+def _parse_iso_datetime(value) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        try:
+            return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_prescription_expiry(row: dict) -> Optional[str]:
+    created_at = _parse_iso_datetime(row.get("created_at"))
+    valid_period = _coerce_int(row.get("valid_period"))
+    if created_at is None or valid_period is None:
+        return None
+    return (created_at + timedelta(days=valid_period)).astimezone().isoformat()
+
+
+def _is_prescription_within_valid_period(row: dict) -> bool:
+    status = (row.get("status") or "").strip().lower()
+    if status != "active":
+        return False
+
+    created_at = _parse_iso_datetime(row.get("created_at"))
+    valid_period = _coerce_int(row.get("valid_period"))
+    if created_at is None or valid_period is None:
+        return True
+
+    return created_at + timedelta(days=valid_period) >= datetime.now().astimezone()
 
 
 def _user_map(user_ids) -> dict:
@@ -472,6 +509,7 @@ def _serialize_prescription_summary(
         "doctor_name": doctor.get("name"),
         "hospital_name": organisation_name,
         "organisation_name": organisation_name,
+        "expires_at": _resolve_prescription_expiry(row),
         "total_items": len(prescription_items_lookup.get(row.get("id"), [])),
         "signature_valid": None,
     }
@@ -613,8 +651,7 @@ def get_prescriptions():
     prescriptions = execute_with_retry(
         lambda: (
             supabase_admin.table("prescriptions")
-            .select("id, status, created_at, patient_id, doctor_id, encounter_id")
-            .eq("status", "active")
+            .select("id, status, created_at, patient_id, doctor_id, encounter_id, valid_period")
             .order("created_at", desc=True)
             .execute()
             .data
@@ -622,6 +659,7 @@ def get_prescriptions():
         ),
         default=list,
     )
+    prescriptions = [row for row in prescriptions if _is_prescription_within_valid_period(row)]
     context = _build_prescription_context(prescriptions)
     return [
         _serialize_prescription_summary(row, **context)
@@ -944,7 +982,7 @@ def get_prescriptions_by_dhid(dhid: str):
     prescriptions = execute_with_retry(
         lambda: (
             supabase_admin.table("prescriptions")
-            .select("id, status, created_at, patient_id, doctor_id, encounter_id")
+            .select("id, status, created_at, patient_id, doctor_id, encounter_id, valid_period")
             .eq("patient_id", patient["id"])
             .order("created_at", desc=True)
             .execute()
@@ -953,6 +991,7 @@ def get_prescriptions_by_dhid(dhid: str):
         ),
         default=list,
     )
+    prescriptions = [row for row in prescriptions if _is_prescription_within_valid_period(row)]
     context = _build_prescription_context(prescriptions)
     return [
         _serialize_prescription_summary(row, **context)

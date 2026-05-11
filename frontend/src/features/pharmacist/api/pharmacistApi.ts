@@ -28,7 +28,8 @@ interface RawPrescriptionItem {
   id?: string | number | null;
   medicine_name?: string | null;
   drug_name?: string | null;
-  dosage?: string | null;
+  dosage?: string | number | null;
+  unit?: string | null;
   quantity?: number | string | null;
   quantity_prescribed?: number | string | null;
   instructions?: string | null;
@@ -138,7 +139,8 @@ function normalizeItem(raw: RawPrescriptionItem): PharmacistPrescriptionItem {
   return {
     id: asString(raw.id) ?? buildFallbackId("item", raw),
     medicineName: raw.medicine_name ?? raw.drug_name ?? "Unnamed medicine",
-    dosage: raw.dosage ?? null,
+    dosage: asString(raw.dosage),
+    unit: raw.unit ?? null,
     quantity: prescribedQuantity,
     instructions: raw.instructions ?? null,
     unitPrice: asNumber(raw.unit_price ?? raw.price),

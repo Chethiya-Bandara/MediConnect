@@ -1414,6 +1414,7 @@ def _build_assistant_snapshot(patient: dict, user: dict):
             "medicine_id": item.get("medicine_id"),
             "medicine_name": item.get("medicine_name"),
             "dosage": item.get("dosage"),
+            "unit": item.get("unit"),
             "quantity": _prescription_quantity_label(item),
             "instructions": item.get("instructions"),
         }
@@ -1659,7 +1660,11 @@ def _fallback_assistant_answer(message: str, snapshot: dict) -> str:
                         ", ".join(
                             piece
                             for piece in [
-                                item.get("dosage") or "As directed",
+                                (
+                                    f"{item.get('dosage')} {item.get('unit')}"
+                                    if item.get("dosage") and item.get("unit")
+                                    else item.get("dosage") or "As directed"
+                                ),
                                 _prescription_quantity_label(item),
                             ]
                             if piece
@@ -2832,6 +2837,7 @@ def estimate_pharmacy_bill(
                 "inventory_id": matched_inventory_id,
                 "medicine_name": medicine_name,
                 "dosage": item.get("dosage"),
+                "unit": item.get("unit"),
                 "quantity": quantity_label,
                 "quantity_value": quantity_value,
                 "instructions": item.get("instructions"),
@@ -2940,6 +2946,7 @@ def list_dispensing(authorization: Optional[str] = Header(None)):
                 "id": row["id"],
                 "medicine_name": linked_item.get("medicine_name"),
                 "dosage": linked_item.get("dosage"),
+                "unit": linked_item.get("unit"),
                 "instructions": linked_item.get("instructions"),
                 "quantity_dispensed": row.get("quantity_dispensed"),
                 "price": row.get("price"),

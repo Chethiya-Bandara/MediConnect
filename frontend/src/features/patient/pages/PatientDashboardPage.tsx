@@ -201,6 +201,11 @@ function calculateBmi(heightCm: string, weightKg: string) {
   return bmi.toFixed(1);
 }
 
+function formatPrescriptionDosage(dosage: string | null | undefined, unit?: string | null) {
+  if (!dosage) return "Dosage not set";
+  return unit ? `${dosage} ${unit}` : dosage;
+}
+
 function buildHealthSnapshotPayload(fields: {
   heightCm: string;
   weightKg: string;
@@ -2280,7 +2285,9 @@ export function PatientDashboardPage() {
                                         key={item.id}
                                         className="text-sm text-slate-600 dark:text-slate-300"
                                       >
-                                        {item.medicine_name} • {item.dosage} • Qty {item.quantity}
+                                        {item.medicine_name} •{" "}
+                                        {formatPrescriptionDosage(item.dosage, item.unit)} • Qty{" "}
+                                        {item.quantity}
                                       </div>
                                     ))}
                                   </div>
@@ -2553,7 +2560,7 @@ export function PatientDashboardPage() {
                             </span>
                           </div>
                           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                            {item.dosage || "Dosage not set"} • Qty {item.quantity}
+                            {formatPrescriptionDosage(item.dosage, item.unit)} • Qty {item.quantity}
                           </p>
                           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                             {item.instructions || "No instructions saved"}
@@ -2684,7 +2691,7 @@ export function PatientDashboardPage() {
                                   {lineItem.medicine_name || "Unnamed item"}
                                 </p>
                                 <p className="mt-1 text-slate-500 dark:text-slate-400">
-                                  {lineItem.dosage || "Dosage not set"} • Qty{" "}
+                                  {formatPrescriptionDosage(lineItem.dosage, lineItem.unit)} • Qty{" "}
                                   {lineItem.quantity_dispensed}
                                 </p>
                                 <p className="mt-1 text-slate-500 dark:text-slate-400">
@@ -3277,7 +3284,7 @@ export function PatientDashboardPage() {
                                     {item.medicine_name}
                                   </p>
                                   <p className="mt-1 text-slate-500 dark:text-slate-400">
-                                    {item.dosage || "Dosage not set"} • Qty{" "}
+                                    {formatPrescriptionDosage(item.dosage, item.unit)} • Qty{" "}
                                     {item.quantity || "Not set"}
                                   </p>
                                   <p className="mt-1 text-slate-500 dark:text-slate-400">

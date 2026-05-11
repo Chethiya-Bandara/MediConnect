@@ -82,6 +82,7 @@ type DraftPrescriptionItem = {
   medicine_id: number | null;
   medicine_name: string;
   dosage: string;
+  unit: "tablets" | "ml" | "drops";
   duration: string;
 };
 
@@ -116,6 +117,12 @@ const encounterTypeOptions: DashboardSelectOption[] = [
   { value: "Routine Follow-up", label: "Routine Follow-up" },
   { value: "Specialist Referral", label: "Specialist Referral" },
 ];
+
+const prescriptionUnitOptions = [
+  { value: "tablets", label: "Tablets" },
+  { value: "ml", label: "mL" },
+  { value: "drops", label: "Drops" },
+] as const;
 
 const DOCTOR_THEME_STORAGE_KEY = "doctor-dashboard-theme";
 const LEGACY_PATIENT_THEME_STORAGE_KEY = "patient-dashboard-theme";
@@ -236,6 +243,7 @@ function makeDraftMedicine(
   medicine_id: number | null,
   medicine_name: string,
   dosage: string,
+  unit: "tablets" | "ml" | "drops",
   duration: string,
 ): DraftPrescriptionItem {
   return {
@@ -243,6 +251,7 @@ function makeDraftMedicine(
     medicine_id,
     medicine_name,
     dosage,
+    unit,
     duration,
   };
 }
@@ -602,7 +611,9 @@ export function DoctorDashboardPage() {
   const [encounterFiles, setEncounterFiles] = useState<File[]>([]);
   const [medName, setMedName] = useState("");
   const [medDose, setMedDose] = useState("");
+  const [medUnit, setMedUnit] = useState<"tablets" | "ml" | "drops">("tablets");
   const [medDuration, setMedDuration] = useState("");
+  const [prescriptionValidPeriod, setPrescriptionValidPeriod] = useState("30");
   const [medicineSuggestions, setMedicineSuggestions] = useState<DoctorMedicineCatalogItem[]>([]);
   const [selectedMedicineSuggestion, setSelectedMedicineSuggestion] =
     useState<DoctorMedicineCatalogItem | null>(null);
@@ -1270,6 +1281,15 @@ export function DoctorDashboardPage() {
       showToast("Medicine name is required before adding a prescription item.", "error");
       return;
     }
+    if (!/^\d+$/.test(medDose.trim())) {
+      showToast("Dosage per day must be a whole number before adding a prescription item.", "error");
+      return;
+    }
+    const parsedDose = Number.parseInt(medDose.trim(), 10);
+    if (parsedDose <= 0 || parsedDose > 1000) {
+      showToast("Dosage per day must be between 1 and 1000.", "error");
+      return;
+    }
 
     if (editingDraftId) {
       setPrescriptionDraft((current) =>
@@ -1279,7 +1299,8 @@ export function DoctorDashboardPage() {
                 ...item,
                 medicine_id,
                 medicine_name,
-                dosage: medDose.trim(),
+                dosage: String(parsedDose),
+                unit: medUnit,
                 duration: medDuration.trim(),
               }
             : item,
@@ -1290,13 +1311,14 @@ export function DoctorDashboardPage() {
     } else {
       setPrescriptionDraft((current) => [
         ...current,
-        makeDraftMedicine(medicine_id, medicine_name, medDose.trim(), medDuration.trim()),
+        makeDraftMedicine(medicine_id, medicine_name, String(parsedDose), medUnit, medDuration.trim()),
       ]);
       showToast("Medicine added to the encounter draft.");
     }
 
     setMedName("");
     setMedDose("");
+    setMedUnit("tablets");
     setMedDuration("");
     setMedicineSuggestions([]);
     setSelectedMedicineSuggestion(null);
@@ -1306,6 +1328,7 @@ export function DoctorDashboardPage() {
     setEditingDraftId(item.id);
     setMedName(item.medicine_name);
     setMedDose(item.dosage);
+    setMedUnit(item.unit);
     setMedDuration(item.duration);
     setSelectedMedicineSuggestion(
       item.medicine_id
@@ -1331,6 +1354,13 @@ export function DoctorDashboardPage() {
     setEncounterFiles([]);
     setPrescriptionDraft([]);
     setEditingDraftId(null);
+    setPrescriptionValidPeriod("30");
+    setMedName("");
+    setMedDose("");
+    setMedUnit("tablets");
+    setMedDuration("");
+    setMedicineSuggestions([]);
+    setSelectedMedicineSuggestion(null);
     await loadDashboard(appointmentId);
     setPage("encounter");
   };
@@ -1351,8 +1381,10 @@ export function DoctorDashboardPage() {
     setEncounterFiles([]);
     setPrescriptionDraft([]);
     setEditingDraftId(null);
+    setPrescriptionValidPeriod("30");
     setMedName("");
     setMedDose("");
+    setMedUnit("tablets");
     setMedDuration("");
     setMedicineSuggestions([]);
     setSelectedMedicineSuggestion(null);
@@ -1404,6 +1436,19 @@ export function DoctorDashboardPage() {
       return;
     }
 
+    const normalizedValidPeriod = prescriptionValidPeriod.trim();
+    if (prescriptionDraft.length > 0) {
+      if (!/^\d+$/.test(normalizedValidPeriod)) {
+        showToast("Set a valid prescription period in days before submitting.", "error");
+        return;
+      }
+      const parsedValidPeriod = Number.parseInt(normalizedValidPeriod, 10);
+      if (parsedValidPeriod <= 0 || parsedValidPeriod > 365) {
+        showToast("Prescription valid period must be between 1 and 365 days.", "error");
+        return;
+      }
+    }
+
     setSubmittingEncounter(true);
     try {
       const healthSnapshot = buildDoctorHealthSnapshotPayload({
@@ -1425,10 +1470,15 @@ export function DoctorDashboardPage() {
         clinical_notes: clinicalNotes.trim(),
         health_snapshot: Object.keys(healthSnapshot).length ? healthSnapshot : undefined,
         files: encounterFiles,
+        valid_period:
+          prescriptionDraft.length > 0
+            ? Number.parseInt(prescriptionValidPeriod.trim(), 10)
+            : undefined,
         prescription_items: prescriptionDraft.map((item) => ({
           medicine_id: item.medicine_id,
           medicine_name: item.medicine_name,
-          dosage: item.dosage,
+          dosage: Number.parseInt(item.dosage, 10),
+          unit: item.unit,
           duration: item.duration,
         })),
       });
@@ -1448,8 +1498,10 @@ export function DoctorDashboardPage() {
       setEncounterFiles([]);
       setPrescriptionDraft([]);
       setEditingDraftId(null);
+      setPrescriptionValidPeriod("30");
       setMedName("");
       setMedDose("");
+      setMedUnit("tablets");
       setMedDuration("");
       setMedicineSuggestions([]);
       setSelectedMedicineSuggestion(null);
@@ -2651,13 +2703,29 @@ export function DoctorDashboardPage() {
                 </div>
 
                 <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <div className="mb-8 flex items-center justify-between">
+                  <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <h3 className="flex items-center gap-2 text-lg font-bold text-primary dark:text-blue-400">
                       <Pill size={18} />
                       ePrescription
                     </h3>
+                    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/60">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500 dark:text-slate-400">
+                        Valid period
+                      </span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="365"
+                        step="1"
+                        value={prescriptionValidPeriod}
+                        onChange={(event) => setPrescriptionValidPeriod(event.target.value)}
+                        className="w-24 rounded-xl border-0 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-primary-container dark:bg-slate-900 dark:text-white"
+                        placeholder="30"
+                      />
+                      <span className="text-sm text-slate-500 dark:text-slate-400">days</span>
+                    </div>
                   </div>
-                  <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
+                  <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-5">
                     <input
                       value={medName}
                       list="doctor-medicine-catalog"
@@ -2675,9 +2743,25 @@ export function DoctorDashboardPage() {
                     <input
                       value={medDose}
                       onChange={(event) => setMedDose(event.target.value)}
+                      type="number"
+                      min="1"
+                      max="1000"
                       className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white"
                       placeholder="Dosage per day"
                     />
+                    <select
+                      value={medUnit}
+                      onChange={(event) =>
+                        setMedUnit(event.target.value as "tablets" | "ml" | "drops")
+                      }
+                      className="rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm focus:ring-2 focus:ring-primary-container dark:bg-slate-800 dark:text-white"
+                    >
+                      {prescriptionUnitOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                     <input
                       value={medDuration}
                       onChange={(event) => setMedDuration(event.target.value)}
@@ -2734,6 +2818,7 @@ export function DoctorDashboardPage() {
                           setEditingDraftId(null);
                           setMedName("");
                           setMedDose("");
+                          setMedUnit("tablets");
                           setMedDuration("");
                           setMedicineSuggestions([]);
                           setSelectedMedicineSuggestion(null);
@@ -2765,7 +2850,7 @@ export function DoctorDashboardPage() {
                                 {item.medicine_name}
                               </td>
                               <td className="px-2 py-4 text-slate-500 dark:text-slate-400">
-                                {item.dosage || "As directed"}
+                                {item.dosage ? `${item.dosage} ${item.unit}` : "As directed"}
                               </td>
                               <td className="px-2 py-4 text-slate-500 dark:text-slate-400">
                                 {item.duration || "N/A"}
@@ -3786,7 +3871,11 @@ export function DoctorDashboardPage() {
                                         </span>
                                         <span className="text-slate-500 dark:text-slate-400">
                                           {" "}
-                                          • {line.dosage || "No dosage"} • {line.instructions || "No instructions"}
+                                          •{" "}
+                                          {line.dosage
+                                            ? `${line.dosage}${line.unit ? ` ${line.unit}` : ""}`
+                                            : "No dosage"}{" "}
+                                          • {line.instructions || "No instructions"}
                                         </span>
                                       </div>
                                     ))
@@ -3838,7 +3927,12 @@ export function DoctorDashboardPage() {
                                   {line.medicine_name || "Unnamed medicine"}
                                 </p>
                                 <div className="mt-2 grid gap-2 text-sm text-slate-600 dark:text-slate-300 md:grid-cols-2">
-                                  <p>Dosage per day: {line.dosage || "Not recorded"}</p>
+                                  <p>
+                                    Dosage per day:{" "}
+                                    {line.dosage
+                                      ? `${line.dosage}${line.unit ? ` ${line.unit}` : ""}`
+                                      : "Not recorded"}
+                                  </p>
                                   <p>Quantity: {line.quantity || "Not recorded"}</p>
                                   <p className="md:col-span-2">
                                     Instructions: {line.instructions || "Not recorded"}

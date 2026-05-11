@@ -57,10 +57,12 @@ export function submitDoctorEncounter(payload: {
     checked_at?: string;
   };
   files?: File[];
+  valid_period?: number;
   prescription_items: Array<{
     medicine_id?: number | null;
     medicine_name: string;
-    dosage: string;
+    dosage: number;
+    unit: string;
     duration: string;
   }>;
 }) {
@@ -76,6 +78,7 @@ export function submitDoctorEncounter(payload: {
       encounter_type: payload.encounter_type,
       clinical_notes: payload.clinical_notes,
       health_snapshot: payload.health_snapshot,
+      valid_period: payload.valid_period,
       prescription_items: payload.prescription_items,
     }),
   );
