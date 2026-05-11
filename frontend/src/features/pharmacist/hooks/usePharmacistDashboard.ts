@@ -102,6 +102,26 @@ function normalizeLookupQuery(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
 }
 
+function calculateDailyBilledValue(history: PharmacistDispenseHistoryEntry[]): number {
+  const today = new Date();
+
+  return history
+    .filter((entry) => {
+      if (!entry.dispensedAt) return false;
+      
+      const dispenseDate = new Date(entry.dispensedAt);
+      return (
+        dispenseDate.getDate() === today.getDate() &&
+        dispenseDate.getMonth() === today.getMonth() &&
+        dispenseDate.getFullYear() === today.getFullYear()
+      );
+    })
+    .reduce((total, entry) => {
+      // Use estimatedTotal from your interface
+      return total + (entry.estimatedTotal ?? 0);
+    }, 0);
+}
+
 function buildStats(
   prescriptions: PharmacistPrescriptionSummary[],
   history: PharmacistDispenseHistoryEntry[],
@@ -122,11 +142,16 @@ function buildStats(
       ? detail.items.reduce((sum, item) => sum + (item.unitPrice ?? 0) * (item.quantity ?? 0), 0)
       : null);
 
+  const totalBilledToday = history
+    .filter((entry) => entry.dispensedAt && isSameDay(entry.dispensedAt))
+    .reduce((sum, entry) => sum + (entry.estimatedTotal ?? 0), 0);
+
   return {
     pendingPrescriptions,
     dispensedToday,
     queuedItems,
     estimatedValue,
+    totalBilledToday,
   };
 }
 
@@ -392,7 +417,7 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
 
     if (exactMatch) {
       setSelectedPrescriptionId(exactMatch.id);
-      setActionMessage(`Loaded exact queue match ${exactMatch.id}.`);
+      setActionMessage("Verify / Lookup mode successful");
       return true;
     }
 

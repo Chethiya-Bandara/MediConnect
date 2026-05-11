@@ -91,7 +91,7 @@ function getActionAlert(message: string) {
 
   if (
     normalized.includes("successful") ||
-    normalized.includes("loaded exact queue match") ||
+    normalized.includes("Verify / Lookup mode successful") ||
     normalized.includes("loaded exact match") ||
     normalized.includes("added") ||
     normalized.includes("saved")
@@ -816,10 +816,6 @@ export function PharmacistDashboardPage() {
                         Paste a `DHID-XXXX-XXXX` or a prescription ID from the live queue.
                       </p>
                     </div>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      {dashboard.filteredPrescriptions.length} live match
-                      {dashboard.filteredPrescriptions.length === 1 ? "" : "es"}
-                    </span>
                   </div>
 
                   <div className="flex flex-col gap-4 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-2 dark:border-slate-800 dark:bg-slate-900 sm:flex-row">
@@ -856,33 +852,10 @@ export function PharmacistDashboardPage() {
                     <span className="rounded-full bg-blue-50 px-3 py-1 font-bold text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
                       {looksLikeDhid ? "Lookup mode: DHID" : "Lookup mode: Queue / prescription ID"}
                     </span>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      Privacy boundary: no diagnosis or encounter notes exposed
-                    </span>
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                  {/* <div className="mb-4 flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-800">
-                      <QrCode size={22} />
-                    </div>
-                    <div>
-                      <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-                        Scan-ready lane
-                      </p>
-                      <p className="text-sm text-slate-500 dark:text-slate-400">
-                        Browser camera scanning is not available yet, so use a scanned DHID or prescription ID from your verified workflow.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center dark:border-slate-700 dark:bg-slate-950">
-                    <QrCode className="mx-auto mb-3 text-slate-300 dark:text-slate-700" size={42} />
-                    <p className="text-sm font-semibold">Scan lane reserved</p>
-                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                      For now, scan the patient QR outside the browser and paste the verified DHID here.
-                    </p>
-                  </div> */}
                   <QrScannerLane
                     onScanSuccess={(decodedText) => {
                       const normalizedLookupValue = extractLookupValueFromScan(decodedText);
@@ -914,14 +887,14 @@ export function PharmacistDashboardPage() {
             <div className="grid grid-cols-12 gap-8">
               <div className="col-span-12 space-y-8 lg:col-span-8">
                 <div className="flex flex-wrap gap-4">
-                  <div className="min-w-[180px] rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  {/* <div className="min-w-[180px] rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
                       Active Queue
                     </p>
                     <p className="mt-3 text-3xl font-extrabold">
                       {dashboard.stats.pendingPrescriptions}
                     </p>
-                  </div>
+                  </div> */}
                   <div className="min-w-[180px] rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
                       Dispensed Today
@@ -930,10 +903,10 @@ export function PharmacistDashboardPage() {
                   </div>
                   <div className="min-w-[220px] rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
-                      Estimated Queue Value
+                      Total Bill Value
                     </p>
                     <p className="mt-3 text-3xl font-extrabold">
-                      {formatLkr(dashboard.stats.estimatedValue)}
+                      {formatLkr(dashboard.stats.totalBilledToday)}
                     </p>
                   </div>
                 </div>
@@ -1071,8 +1044,7 @@ export function PharmacistDashboardPage() {
                         Prescription Items
                       </h3>
                       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                        Live item data from the selected prescription.
-                        endpoint.
+                        Item data from the selected prescription.
                       </p>
                     </div>
                     {dashboard.isLoadingList ? (
@@ -1197,7 +1169,7 @@ export function PharmacistDashboardPage() {
                                     }
                                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:ring-blue-500"
                                   >
-                                    <option value="ISSUED">ISSUED</option>
+                                    <option value="ISSUED">NOT_DISPENSED</option>
                                     <option value="PARTIALLY_DISPENSED">PARTIALLY_DISPENSED</option>
                                     <option value="DISPENSED">DISPENSED</option>
                                     <option disabled value="CANCELLED">

@@ -69,6 +69,7 @@ export interface PharmacistOverviewStats {
   dispensedToday: number;
   queuedItems: number;
   estimatedValue: number | null;
+  totalBilledToday: number;
 }
 
 export interface PharmacistDashboardState {
