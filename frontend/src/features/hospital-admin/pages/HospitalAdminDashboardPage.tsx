@@ -667,6 +667,13 @@ export function HospitalAdminDashboardPage() {
                         View All
                       </button>
                     </div>
+                    {dashboard.affiliationsMessage ? (
+                      <div
+                        className={`border-b px-6 py-3 text-sm ${noticeClassName(dashboard.affiliationsMessage)}`}
+                      >
+                        {dashboard.affiliationsMessage}
+                      </div>
+                    ) : null}
                     <div className="grid grid-cols-4 bg-slate-50/80 px-6 py-3 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
                       <span>Doctor</span>
                       <span>Specialization</span>
@@ -696,19 +703,21 @@ export function HospitalAdminDashboardPage() {
                           <div className="flex justify-end gap-2">
                             <button
                               type="button"
-                              onClick={() =>
-                                void handleAffiliationDecision("APPROVED", row.affiliationId)
-                              }
-                              className="rounded-lg p-2 text-blue-700 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                              onClick={() => void handleAffiliationDecision("approved", row.affiliationId)}
+                              disabled={dashboard.isSubmittingAffiliationAction}
+                              title="Approve"
+                              aria-label={`Approve ${row.doctorName ?? `Doctor ${row.doctorId}`}`}
+                              className="rounded-lg p-2 text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
                             >
                               <CheckCircle2 size={18} />
                             </button>
                             <button
                               type="button"
-                              onClick={() =>
-                                void handleAffiliationDecision("REJECTED", row.affiliationId)
-                              }
-                              className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30"
+                              onClick={() => void handleAffiliationDecision("rejected", row.affiliationId)}
+                              disabled={dashboard.isSubmittingAffiliationAction}
+                              title="Reject"
+                              aria-label={`Reject ${row.doctorName ?? `Doctor ${row.doctorId}`}`}
+                              className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-900/30"
                             >
                               <XCircle size={18} />
                             </button>
@@ -925,9 +934,7 @@ export function HospitalAdminDashboardPage() {
                                 <td className="px-6 py-4 text-right space-x-2">
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      void handleAffiliationDecision("APPROVED", row.affiliationId)
-                                    }
+                                    onClick={() => void handleAffiliationDecision("approved", row.affiliationId)}
                                     disabled={dashboard.isSubmittingAffiliationAction}
                                     className="rounded-lg bg-green-50 px-4 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100 disabled:opacity-60 dark:bg-green-900/30 dark:text-green-400"
                                   >
@@ -935,9 +942,7 @@ export function HospitalAdminDashboardPage() {
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      void handleAffiliationDecision("REJECTED", row.affiliationId)
-                                    }
+                                    onClick={() => void handleAffiliationDecision("rejected", row.affiliationId)}
                                     disabled={dashboard.isSubmittingAffiliationAction}
                                     className="rounded-lg bg-red-50 px-4 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60 dark:bg-red-900/30 dark:text-red-400"
                                   >
@@ -1006,7 +1011,7 @@ export function HospitalAdminDashboardPage() {
                               </p>
                               <p className="flex justify-between text-xs text-slate-500 dark:text-slate-400">
                                 <span>Status:</span>
-                                <span>{formatStatusLabel(doctor.status ?? "APPROVED")}</span>
+                                <span>{formatStatusLabel(doctor.status ?? "approved")}</span>
                               </p>
                               <p className="flex justify-between text-xs text-slate-500 dark:text-slate-400">
                                 <span>Joined:</span>
@@ -1030,7 +1035,8 @@ export function HospitalAdminDashboardPage() {
                                 onClick={() =>
                                   void dashboard.submitAffiliationRevoke(doctor.affiliationId)
                                 }
-                                className="flex items-center justify-center gap-1 rounded-lg bg-red-50 py-2 text-xs font-bold text-red-700 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"
+                                disabled={dashboard.isSubmittingAffiliationAction}
+                                className="flex items-center justify-center gap-1 rounded-lg bg-red-50 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"
                               >
                                 <XCircle size={14} />
                                 Revoke

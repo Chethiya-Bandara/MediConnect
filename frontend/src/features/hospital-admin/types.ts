@@ -1,6 +1,6 @@
 export type HospitalAdminSection = "overview" | "doctors" | "affiliations" | "settings";
 
-export type AffiliationDecisionStatus = "APPROVED" | "REJECTED";
+export type AffiliationDecisionStatus = "approved" | "rejected";
 
 export interface HospitalAvailabilitySlot {
   id: string;

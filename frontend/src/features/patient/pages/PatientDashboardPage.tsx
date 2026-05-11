@@ -667,6 +667,35 @@ export function PatientDashboardPage() {
   const upcomingAppointments = appointments.filter(
     (item) => item.status.toLowerCase() === "pending"
   );
+  const appointmentSummary = useMemo(() => {
+    let total = 0;
+    let pending = 0;
+    let completed = 0;
+    let missed = 0;
+
+    for (const item of appointments) {
+      const normalized = item.status.toLowerCase();
+      if (normalized === "pending") {
+        pending += 1;
+        total += 1;
+      }
+      if (normalized === "completed") {
+        completed += 1;
+        total += 1;
+      }
+      if (normalized === "missed") {
+        missed += 1;
+        total += 1;
+      }
+    }
+
+    return {
+      total,
+      pending,
+      completed,
+      missed,
+    };
+  }, [appointments]);
   const deferredAssistantMessages = useDeferredValue(assistantMessages);
   const assistantStorageKey = `patient-dashboard-assistant:v${assistantHistoryVersion}:${overview?.user.id || user?.id || user?.email || "guest"}`;
   const profilePhotoStorageKey = `patient-dashboard-profile-photo:${overview?.user.id || user?.id || user?.email || "guest"}`;
@@ -2270,6 +2299,27 @@ export function PatientDashboardPage() {
 
           {!isLoading && !dashboardError && page === "appointments" ? (
             <section className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ["Total Appointments", appointmentSummary.total],
+                  ["Pending Appointments", appointmentSummary.pending],
+                  ["Completed Appointments", appointmentSummary.completed],
+                  ["Missed Appointments", appointmentSummary.missed],
+                ].map(([label, value]) => (
+                  <article
+                    key={label}
+                    className="rounded-[1.5rem] border border-slate-200/90 bg-[linear-gradient(135deg,_rgba(255,255,255,0.9)_0%,_rgba(241,245,249,0.8)_100%)] p-6 shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-[linear-gradient(135deg,_rgba(15,23,42,0.9)_0%,_rgba(30,41,59,0.8)_100%)]"
+                  >
+                    <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500 dark:text-slate-400">
+                      {label}
+                    </p>
+                    <p className="mt-3 font-headline text-4xl font-extrabold text-slate-900 dark:text-white">
+                      {value}
+                    </p>
+                  </article>
+                ))}
+              </div>
+
               {bookingOptions.length === 0 ? (
                 <AlertBanner
                   tone="info"

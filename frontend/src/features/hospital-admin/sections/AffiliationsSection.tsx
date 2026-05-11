@@ -20,7 +20,7 @@ export function AffiliationsSection({
   onRevokeAffiliation,
 }: AffiliationsSectionProps) {
   const [decisionAffiliationId, setDecisionAffiliationId] = useState("");
-  const [decisionStatus, setDecisionStatus] = useState<AffiliationDecisionStatus>("APPROVED");
+  const [decisionStatus, setDecisionStatus] = useState<AffiliationDecisionStatus>("approved");
   const [revokeAffiliationId, setRevokeAffiliationId] = useState("");
 
   return (
@@ -63,8 +63,8 @@ export function AffiliationsSection({
               }
               className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
             >
-              <option value="APPROVED">Approve</option>
-              <option value="REJECTED">Reject</option>
+              <option value="approved">Approve</option>
+              <option value="rejected">Reject</option>
             </select>
           </label>
 
