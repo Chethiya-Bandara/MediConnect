@@ -52,6 +52,28 @@ export interface DoctorPrescriptionItem {
   instructions: string | null;
 }
 
+export interface DoctorArchivePrescriptionDetail {
+  id: number;
+  encounter_id?: number | null;
+  status: string | null;
+  created_at: string | null;
+  items: DoctorPrescriptionItem[];
+}
+
+export interface DoctorArchiveEncounterDetail {
+  id: number;
+  created_at: string | null;
+  notes: string | null;
+  prescriptions: DoctorArchivePrescriptionDetail[];
+}
+
+export interface DoctorPatientHistoryResponse {
+  patient_id: number;
+  doctor_id: number;
+  consent: string;
+  encounters: DoctorArchiveEncounterDetail[];
+}
+
 export interface DoctorHealthSnapshot {
   id: number;
   bmi: string | null;

@@ -78,6 +78,29 @@ def _local_date(value: Optional[str]) -> Optional[str]:
     return parsed.astimezone(SRI_LANKA_TZ).date().isoformat()
 
 
+def _active_slot_appointment(slot: dict, organisation_id: int) -> Optional[dict]:
+    doctor_id = slot.get("doctor_id")
+    start_time = slot.get("start_time")
+    end_time = slot.get("end_time")
+    if not doctor_id or not start_time or not end_time:
+        return None
+
+    rows = (
+        supabase_admin.table("appointments")
+        .select("*")
+        .eq("doctor_id", doctor_id)
+        .eq("organisation_id", organisation_id)
+        .not_.in_("status", ["cancelled", "completed"])
+        .lt("start_time", end_time)
+        .gt("end_time", start_time)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
+
+
 def _insert_availability_rows(rows: list[dict]):
     return (
         supabase_admin.table("availability_slots")
@@ -601,6 +624,51 @@ def delete_availability(
 
     supabase_admin.table("availability_slots").delete().eq("id", slot_id).execute()
     return {"success": True}
+
+
+@router.post("/availability/{slot_id}/cancel-booking")
+def cancel_booked_appointment_for_slot(
+    slot_id: int,
+    context=Depends(_hospital_admin_context),
+):
+    current_rows = (
+        supabase_admin.table("availability_slots")
+        .select("*")
+        .eq("id", slot_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not current_rows:
+        raise HTTPException(status_code=404, detail="Availability slot not found")
+
+    current = current_rows[0]
+    if current.get("hospital_id") and str(current.get("hospital_id")) != str(context["hospital"]["id"]):
+        raise HTTPException(status_code=403, detail="Slot does not belong to this hospital")
+
+    if not _approved_hospital_affiliation(current.get("doctor_id"), context["hospital"]["id"]):
+        raise HTTPException(status_code=403, detail="Slot does not belong to this hospital scope")
+    if not current.get("is_booked"):
+        raise HTTPException(status_code=400, detail="This slot is already open")
+
+    appointment = _active_slot_appointment(current, context["organisation"]["id"])
+    if not appointment:
+        supabase_admin.table("availability_slots").update({"is_booked": False}).eq("id", slot_id).execute()
+        return {
+            "success": True,
+            "message": "Slot was marked booked without an active appointment. It has been reopened.",
+            "appointment_id": None,
+        }
+
+    supabase_admin.table("appointments").update({"status": "cancelled"}).eq("id", appointment["id"]).execute()
+    supabase_admin.table("availability_slots").update({"is_booked": False}).eq("id", slot_id).execute()
+
+    return {
+        "success": True,
+        "message": "Booked appointment cancelled and slot reopened.",
+        "appointment_id": appointment["id"],
+    }
 
 
 @router.post("/invite")

@@ -252,6 +252,15 @@ export function deleteAvailabilitySlot(slotId: string) {
   );
 }
 
+export function cancelBookedAvailabilitySlot(slotId: string) {
+  return apiRequest<{ success: boolean; message?: string; appointment_id?: number | null }>(
+    `${endpoints.hospitalAdmin.availabilityCancelBooking}/${encodeURIComponent(slotId)}/cancel-booking`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export async function inviteDoctor(payload: InviteDoctorPayload) {
   return apiRequest<{ message?: string }>(endpoints.hospitalAdmin.invite, {
     method: "POST",

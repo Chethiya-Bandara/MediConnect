@@ -231,6 +231,71 @@ function formatFileSize(size: number | null | undefined) {
   return `${Math.max(1, Math.round(size / 1024))} KB`;
 }
 
+type SnapshotTone = "neutral" | "good" | "warning" | "danger";
+
+function getSnapshotTone(label: string, value: string | null | undefined): SnapshotTone {
+  const normalizedLabel = label.trim().toLowerCase();
+  const normalizedValue = (value ?? "").trim().toLowerCase();
+
+  if (!normalizedValue || normalizedValue === "not recorded" || normalizedLabel === "last checked date") {
+    return "neutral";
+  }
+
+  if (normalizedLabel === "bmi") {
+    const bmi = Number.parseFloat(normalizedValue);
+    if (!Number.isFinite(bmi)) return "neutral";
+    if (bmi < 18.5) return "warning";
+    if (bmi < 25) return "good";
+    if (bmi < 30) return "warning";
+    return "danger";
+  }
+
+  if (normalizedLabel === "blood sugar") {
+    const sugar = Number.parseFloat(normalizedValue);
+    if (!Number.isFinite(sugar)) return "neutral";
+    if (sugar < 100) return "good";
+    if (sugar < 126) return "warning";
+    return "danger";
+  }
+
+  if (normalizedLabel === "cholesterol") {
+    const cholesterol = Number.parseFloat(normalizedValue);
+    if (!Number.isFinite(cholesterol)) return "neutral";
+    if (cholesterol < 200) return "good";
+    if (cholesterol < 240) return "warning";
+    return "danger";
+  }
+
+  if (normalizedLabel === "blood pressure") {
+    const match = normalizedValue.match(/(\d+)\s*\/\s*(\d+)/);
+    if (!match) return "neutral";
+    const systolic = Number.parseInt(match[1], 10);
+    const diastolic = Number.parseInt(match[2], 10);
+    if (systolic < 120 && diastolic < 80) return "good";
+    if (systolic < 130 && diastolic < 80) return "warning";
+    return "danger";
+  }
+
+  if (normalizedLabel === "allergies") {
+    return ["none", "no", "n/a", "nil"].includes(normalizedValue) ? "good" : "danger";
+  }
+
+  return "neutral";
+}
+
+function snapshotToneClassName(tone: SnapshotTone) {
+  if (tone === "good") {
+    return "border-emerald-200 bg-emerald-50/90 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300";
+  }
+  if (tone === "warning") {
+    return "border-amber-200 bg-amber-50/90 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300";
+  }
+  if (tone === "danger") {
+    return "border-rose-200 bg-rose-50/90 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300";
+  }
+  return "border-slate-200 bg-white text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200";
+}
+
 function getAppointmentStartTimeRank(value: string | null | undefined) {
   if (!value) return Number.MAX_SAFE_INTEGER;
   const parsed = new Date(value);
@@ -1868,19 +1933,22 @@ export function PatientDashboardPage() {
                           ["Cholesterol", latestHealthSnapshot.cholesterol],
                           ["Blood pressure", latestHealthSnapshot.blood_pressure],
                           ["Allergies", latestHealthSnapshot.allergies],
-                        ].map(([label, value]) => (
+                        ].map(([label, value]) => {
+                          const tone = getSnapshotTone(String(label), value ?? undefined);
+                          return (
                           <div
                             key={label}
-                            className="flex items-start justify-between gap-4 rounded-xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900"
+                            className={`flex items-start justify-between gap-4 rounded-xl border px-4 py-3 ${snapshotToneClassName(tone)}`}
                           >
-                            <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                            <span className="text-[11px] font-bold uppercase tracking-[0.2em] opacity-80">
                               {label}
                             </span>
-                            <span className="text-right text-sm font-semibold text-slate-700 dark:text-slate-200">
+                            <span className="text-right text-sm font-semibold">
                               {value || "Not recorded"}
                             </span>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <EmptyState
@@ -2038,21 +2106,24 @@ export function PatientDashboardPage() {
                       ["Cholesterol", latestHealthSnapshot.cholesterol],
                       ["Blood pressure", latestHealthSnapshot.blood_pressure],
                       ["Allergies", latestHealthSnapshot.allergies],
-                    ].map(([label, value]) => (
+                    ].map(([label, value]) => {
+                      const tone = getSnapshotTone(String(label), value ?? undefined);
+                      return (
                       <div
                         key={label}
-                        className={`rounded-2xl border border-slate-200 bg-slate-50/80 px-5 py-4 dark:border-slate-700 dark:bg-slate-800/50 ${
+                        className={`rounded-2xl border px-5 py-4 ${snapshotToneClassName(tone)} ${
                           label === "Blood pressure" || label === "Allergies" ? "md:col-span-2" : ""
                         }`}
                       >
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] opacity-80">
                           {label}
                         </p>
-                        <p className="mt-3 text-lg font-semibold text-slate-800 dark:text-slate-100">
+                        <p className="mt-3 text-lg font-semibold">
                           {value || "Not recorded"}
                         </p>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <EmptyState

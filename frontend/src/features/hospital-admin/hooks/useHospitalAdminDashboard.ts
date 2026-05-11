@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  cancelBookedAvailabilitySlot,
   createAvailabilitySlot,
   deleteAvailabilitySlot,
   decideAffiliation,
@@ -223,6 +224,34 @@ export function useHospitalAdminDashboard() {
     }
   };
 
+  const cancelBookedAvailability = async (
+    slotId: string,
+    doctorId = activeDoctorId,
+    slotDate?: string,
+  ) => {
+    setIsSubmittingDoctorAction(true);
+    setDoctorsMessage(null);
+
+    try {
+      const response = await cancelBookedAvailabilitySlot(slotId);
+      setDoctorsMessage(response.message ?? "Booked appointment cancelled and slot reopened.");
+      if (doctorId) {
+        await loadAvailability(doctorId, slotDate);
+      }
+      await refreshDashboard();
+      return true;
+    } catch (availabilityError) {
+      setDoctorsMessage(
+        availabilityError instanceof Error
+          ? availabilityError.message
+          : "Booked appointment cancellation failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingDoctorAction(false);
+    }
+  };
+
   const sendInvite = async (payload: InviteDoctorPayload) => {
     setIsSubmittingDoctorAction(true);
     setDoctorsMessage(null);
@@ -313,6 +342,7 @@ export function useHospitalAdminDashboard() {
     addAvailability,
     editAvailability,
     removeAvailability,
+    cancelBookedAvailability,
     sendInvite,
     submitAffiliationDecision,
     submitAffiliationRevoke,

@@ -498,6 +498,14 @@ export function HospitalAdminDashboardPage() {
     await dashboard.removeAvailability(slotId, selectedDoctorId, slotDate);
   };
 
+  const cancelBookedSlot = async (slotId: string) => {
+    if (!selectedDoctorId) {
+      return;
+    }
+
+    await dashboard.cancelBookedAvailability(slotId, selectedDoctorId, slotDate);
+  };
+
   const exportAuditLogs = () => {
     if (filteredAuditLogs.length === 0) {
       setExportMessage(
@@ -1461,6 +1469,17 @@ export function HospitalAdminDashboardPage() {
                                       <Trash2 size={14} />
                                       Delete
                                     </button>
+                                    {slot.isBooked ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => void cancelBookedSlot(slot.id)}
+                                        disabled={dashboard.isSubmittingDoctorAction}
+                                        className="inline-flex items-center gap-2 rounded-lg bg-amber-100 px-3 py-2 text-xs font-bold text-amber-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-amber-900/30 dark:text-amber-200"
+                                      >
+                                        <XCircle size={14} />
+                                        Cancel Booking
+                                      </button>
+                                    ) : null}
                                   </>
                                 )}
                               </div>
