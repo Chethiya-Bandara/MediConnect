@@ -406,7 +406,7 @@ export function PharmacyAdminDashboardPage() {
 
       <header className="fixed left-64 right-0 top-0 z-30 flex h-16 items-center justify-between border-b border-slate-100 bg-white/80 px-8 shadow-sm backdrop-blur-xl transition-colors dark:border-slate-800 dark:bg-slate-950/80">
         <div className="flex items-center">
-          <span className="font-headline text-xl font-extrabold tracking-tight text-blue-900 dark:text-blue-400">
+          <span className="font-headline text-[1.45rem] font-extrabold uppercase tracking-[0.08em] text-blue-900 dark:text-blue-400 sm:text-[1.75rem]">
             National Health Portal
           </span>
         </div>

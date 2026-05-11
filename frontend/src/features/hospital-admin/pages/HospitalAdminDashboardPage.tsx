@@ -577,17 +577,9 @@ export function HospitalAdminDashboardPage() {
         <header className="fixed left-64 right-0 top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/80 px-8 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/80">
           <div className="w-full max-w-md">
             <div className="relative">
-              <Search
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                size={16}
-              />
-              <input
-                className="w-full rounded-full border-0 bg-slate-100 py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                placeholder="Search doctors, schedules, or logs..."
-                type="text"
-                value={auditSearch}
-                onChange={(event) => setAuditSearch(event.target.value)}
-              />
+              <span className="font-headline text-[1.45rem] font-extrabold uppercase tracking-[0.08em] text-blue-900 dark:text-blue-400 sm:text-[1.75rem]">
+                National Health Portal
+              </span>
             </div>
           </div>
 

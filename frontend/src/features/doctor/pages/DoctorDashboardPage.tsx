@@ -743,7 +743,7 @@ export function DoctorDashboardPage() {
   const profilePreviewInitials = getInitials(profilePreviewName);
   const profilePhotoStorageKey = `doctor-dashboard-profile-photo:${dashboard?.user.id || user?.id || dashboard?.user.email || user?.email || "guest"}`;
   const pageHeaderTitle = {
-    home: "Home",
+    home: "Welcome",
     overview: "Overview",
     encounter: "Encounter Record",
     appointments: "Schedule",
@@ -1685,9 +1685,9 @@ export function DoctorDashboardPage() {
       <header className="fixed left-64 right-0 top-0 z-30 flex items-center justify-between border-b border-slate-100 bg-white/80 px-8 py-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80">
         <div className="flex items-center gap-6">
           <div>
-            <h1 className="font-headline text-xl font-extrabold text-blue-900 dark:text-blue-400">
+            <h2 className="font-headline text-[1.45rem] font-extrabold uppercase tracking-[0.08em] text-blue-900 dark:text-blue-400 sm:text-[1.75rem]">
               {pageHeaderTitle[page]}
-            </h1>
+            </h2>
             {page === "encounter" ? (
               <div className="mt-0.5 flex items-center gap-2">
                 <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">
@@ -3577,22 +3577,11 @@ export function DoctorDashboardPage() {
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
             <div>
               <p className="text-sm font-bold dark:text-slate-300">
-                National Health Identity System
+                National Health Integration System
               </p>
               <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">
-                © 2026 Digital Health Ministry SL • Doctor Portal v3.1
+                © 2026 National Health Ministry
               </p>
-            </div>
-            <div className="flex gap-8">
-              {["Privacy", "Terms", "Security"].map((item) => (
-                <a
-                  key={item}
-                  href="#"
-                  className="text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:underline"
-                >
-                  {item}
-                </a>
-              ))}
             </div>
           </div>
         </footer>

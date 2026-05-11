@@ -1189,7 +1189,7 @@ export function HealthMinistryAdminDashboardPage() {
 
         <header className="fixed left-64 right-0 top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/85 px-8 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/85">
           <div className="flex items-center gap-4">
-            <span className="font-headline text-xl font-extrabold text-blue-950 dark:text-blue-300">
+            <span className="font-headline text-[1.45rem] font-extrabold uppercase tracking-[0.08em] text-blue-900 dark:text-blue-400 sm:text-[1.75rem]">
               National Health Portal
             </span>
             <span className="hidden rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.28em] text-blue-900 md:inline-block dark:bg-blue-900/50 dark:text-blue-100">

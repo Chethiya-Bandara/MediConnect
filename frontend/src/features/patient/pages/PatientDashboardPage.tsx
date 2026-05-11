@@ -665,7 +665,7 @@ export function PatientDashboardPage() {
   const legalName = overview?.user.legal_name || user?.legalName || "Not available";
   const latestHealthSnapshot = overview?.patient.health_snapshot ?? null;
   const upcomingAppointments = appointments.filter(
-    (item) => item.status.toLowerCase() !== "cancelled",
+    (item) => item.status.toLowerCase() === "pending"
   );
   const deferredAssistantMessages = useDeferredValue(assistantMessages);
   const assistantStorageKey = `patient-dashboard-assistant:v${assistantHistoryVersion}:${overview?.user.id || user?.id || user?.email || "guest"}`;
@@ -772,7 +772,7 @@ export function PatientDashboardPage() {
       records.flatMap((record) =>
         record.prescriptions.map((prescription) => ({
           id: prescription.id,
-          label: `Prescription #${prescription.id} • ${record.doctor.name} • ${formatDateTime(
+          label: `${record.doctor.name} • ${formatDateTime(
             prescription.created_at || record.created_at,
           )}`,
           doctorName: record.doctor.name,
@@ -846,7 +846,6 @@ export function PatientDashboardPage() {
   const [bgIndex, setBgIndex] = useState(0);
 
   useEffect(() => {
-    // Only run the timer if the user is actually on the home page
     if (page !== "home") return;
 
     const interval = setInterval(() => {
@@ -2413,15 +2412,9 @@ export function PatientDashboardPage() {
                       value={selectedPharmacyQuery}
                       onChange={handlePharmacyQueryChange}
                       placeholder="Type or select a pharmacy"
-                      helperText={
-                        selectedPharmacyId
-                          ? `Matched pharmacy ID ${selectedPharmacyId}.`
-                          : "Type the pharmacy name or pick one from the suggestion list."
-                      }
                       options={filteredPharmacyOptions.map((option) => ({
                         value: String(option.id),
                         label: option.name,
-                        description: `${option.indexed_items} indexed item(s)`,
                       }))}
                     />
                   </div>
@@ -2447,119 +2440,110 @@ export function PatientDashboardPage() {
               ) : null}
 
               {pharmacyEstimate ? (
-                <div className="space-y-5">
-                  <div className="grid gap-4 md:grid-cols-4">
-                    <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
-                      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
-                        Estimated Total
-                      </p>
-                      <p className="mt-3 font-headline text-3xl font-extrabold text-primary dark:text-blue-400">
-                        {formatLkr(pharmacyEstimate.summary.estimated_total)}
-                      </p>
-                    </article>
-                    <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
-                      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
-                        Included Items
-                      </p>
-                      <p className="mt-3 font-headline text-3xl font-extrabold">
-                        {pharmacyEstimate.summary.included_items}
-                      </p>
-                    </article>
-                    <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
-                      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
-                        Excluded Items
-                      </p>
-                      <p className="mt-3 font-headline text-3xl font-extrabold">
-                        {pharmacyEstimate.summary.excluded_items}
-                      </p>
-                    </article>
-                    <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
-                      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
-                        Pharmacy
-                      </p>
-                      <p className="mt-3 text-lg font-bold">{pharmacyEstimate.pharmacy.name}</p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        Prescription #{pharmacyEstimate.prescription.id} •{" "}
-                        {pharmacyEstimate.prescription.doctor_name || "Doctor not found"}
-                      </p>
-                    </article>
-                  </div>
+              <div className="space-y-5">
+                <div className="grid gap-4 md:grid-cols-4">
+                  <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                      Estimated Total
+                    </p>
+                    <p className="mt-3 font-headline text-3xl font-extrabold text-primary dark:text-blue-400">
+                      {formatLkr(pharmacyEstimate.summary.estimated_total)}
+                    </p>
+                  </article>
+                  <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                      Included Items
+                    </p>
+                    <p className="mt-3 font-headline text-3xl font-extrabold">
+                      {pharmacyEstimate.summary.included_items}
+                    </p>
+                  </article>
+                  <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                      Excluded Items
+                    </p>
+                    <p className="mt-3 font-headline text-3xl font-extrabold">
+                      {pharmacyEstimate.summary.excluded_items}
+                    </p>
+                  </article>
+                  <article className="rounded-[1.4rem] bg-slate-50 p-5 dark:bg-slate-800/60">
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                      Pharmacy
+                    </p>
+                    <p className="mt-3 text-lg font-bold">{pharmacyEstimate.pharmacy.name}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Prescription #{pharmacyEstimate.prescription.id} •{" "}
+                      {pharmacyEstimate.prescription.doctor_name || "Doctor not found"}
+                    </p>
+                  </article>
+                </div>
 
-                  {pharmacyEstimate.summary.unavailable_items > 0 ? (
-                    <AlertBanner
-                      tone="info"
-                      title="Some items are missing from this pharmacy"
-                      message="Anything marked unavailable is excluded from the bill total, so the final amount only covers what this pharmacy can actually issue."
-                    />
-                  ) : null}
+                {pharmacyEstimate.summary.unavailable_items > 0 ? (
+                  <AlertBanner
+                    tone="info"
+                    title="Some items are missing from this pharmacy"
+                    message="Anything marked unavailable is excluded from the bill total, so the final amount only covers what this pharmacy can actually issue."
+                  />
+                ) : null}
 
-                  <div className="grid gap-4">
-                    {pharmacyEstimate.items.map((item) => (
-                      <article
-                        key={item.id}
-                        className="rounded-[1.4rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
-                      >
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-lg font-bold">{item.medicine_name}</p>
-                              <span
-                                className={`rounded-full px-3 py-1 text-xs font-bold ${estimateTone(item.availability_status)}`}
-                              >
-                                {item.availability_label}
-                              </span>
-                            </div>
-                            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                              {item.dosage || "Dosage not set"} • Qty {item.quantity}
-                            </p>
-                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                              {item.instructions || "No instructions saved"}
-                            </p>
+                <div className="grid gap-4">
+                  {pharmacyEstimate.items.map((item) => (
+                    <article
+                      key={item.id}
+                      className="rounded-[1.4rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-lg font-bold">{item.medicine_name}</p>
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-bold ${estimateTone(item.availability_status)}`}
+                            >
+                              {item.availability_label}
+                            </span>
                           </div>
-
-                          <div className="min-w-[12rem] rounded-[1.2rem] bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800/60">
-                            <p>
-                              Stock here:{" "}
-                              <span className="font-semibold">{item.stock_quantity}</span>
-                            </p>
-                            <p className="mt-1">
-                              Unit price:{" "}
-                              <span className="font-semibold">
-                                {item.unit_price == null
-                                  ? "Not priced"
-                                  : formatLkr(item.unit_price)}
-                              </span>
-                            </p>
-                            <p className="mt-1">
-                              Bill line total:{" "}
-                              <span className="font-semibold">
-                                {item.estimated_total == null
-                                  ? "Not included"
-                                  : formatLkr(item.estimated_total)}
-                              </span>
-                            </p>
-                          </div>
+                          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                            {item.dosage || "Dosage not set"} • Qty {item.quantity}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                            {item.instructions || "No instructions saved"}
+                          </p>
                         </div>
 
-                        {item.note ? (
-                          <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">
-                            {item.note}
+                        <div className="min-w-[12rem] rounded-[1.2rem] bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800/60">
+                          <p>
+                            Stock here:{" "}
+                            <span className="font-semibold">{item.stock_quantity}</span>
                           </p>
-                        ) : null}
-                      </article>
-                    ))}
-                  </div>
+                          <p className="mt-1">
+                            Unit price:{" "}
+                            <span className="font-semibold">
+                              {item.unit_price == null
+                                ? "Not priced"
+                                : formatLkr(item.unit_price)}
+                            </span>
+                          </p>
+                          <p className="mt-1">
+                            Bill line total:{" "}
+                            <span className="font-semibold">
+                              {item.estimated_total == null
+                                ? "Not included"
+                                : formatLkr(item.estimated_total)}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+
+                      {item.note ? (
+                        <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">
+                          {item.note}
+                        </p>
+                      ) : null}
+                    </article>
+                  ))}
                 </div>
-              ) : (
-                <div className="rounded-[1.4rem] border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
-                  Select both fields and hit{" "}
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">
-                    Calculate Bill
-                  </span>
-                  . If a drug is missing from that pharmacy, it will be clearly marked and excluded
-                  from the estimate.
-                </div>
-              )}
+              </div>
+            ) : null}
               <div className="space-y-6 border-t border-slate-100 pt-6 dark:border-slate-800">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                   <article className="rounded-[1.5rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950/40">
