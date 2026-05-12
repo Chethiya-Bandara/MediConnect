@@ -17,6 +17,7 @@ import {
   Trash2,
   Users,
   XCircle,
+  Settings,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { AppBrandMark } from "../../../components/ui";
@@ -24,7 +25,7 @@ import { useAuth } from "../../auth/context/AuthContext";
 import { useHospitalAdminDashboard } from "../hooks/useHospitalAdminDashboard";
 import type { AffiliationDecisionStatus, CreateAvailabilityPayload } from "../types";
 
-type DashboardView = "overview" | "staffing" | "scheduling" | "audit";
+type DashboardView = "overview" | "staffing" | "scheduling" | "audit" | "settings";
 type ThemeMode = "light" | "dark";
 type StaffFilter = "all" | "pending" | "approved" | "revoked";
 
@@ -33,6 +34,7 @@ const navItems = [
   { id: "staffing", label: "Staffing & Affiliations", icon: Users },
   { id: "scheduling", label: "Scheduling Slots", icon: CalendarDays },
   { id: "audit", label: "Local Audit Logs", icon: ShieldCheck },
+  { id: "settings", label: "Settings", icon: Settings },
 ] satisfies Array<{
   id: DashboardView;
   label: string;
@@ -608,7 +610,7 @@ export function HospitalAdminDashboardPage() {
             <div className="h-8 w-px bg-slate-200 dark:bg-slate-700" />
             <div className="flex items-center gap-3">
               <div className="text-right">
-                <p className="text-xs font-bold">{user?.name || "Hospital Admin"}</p>
+                <p className="text-xs font-bold">{user?.preferredName || "Hospital Admin"}</p>
                 <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
                   {dashboard.hospital.name ?? "Hospital"}
                 </p>
@@ -1155,13 +1157,6 @@ export function HospitalAdminDashboardPage() {
                     Generate availability slots and load live schedule data for affiliated doctors.
                   </p>
                 </div>
-                {generatedSlotSummary ? (
-                  <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
-                    {generatedSlotSummary.dayLabel ? `${generatedSlotSummary.dayLabel} • ` : ""}
-                    {generatedSlotSummary.total} slots from {generatedSlotSummary.first} to{" "}
-                    {generatedSlotSummary.last}
-                  </div>
-                ) : null}
               </header>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_1fr]">
@@ -1232,7 +1227,7 @@ export function HospitalAdminDashboardPage() {
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="mb-6">
-                    <h3 className="text-lg font-bold">2. Define Time Slots</h3>
+                    <h3 className="text-lg font-bold">Define Time Slots</h3>
                   </div>
 
                   <div className="mb-8 flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50 md:flex-row md:items-end">
@@ -1333,6 +1328,19 @@ export function HospitalAdminDashboardPage() {
                       )}
                     </div>
                   </div>
+                  {dashboard.error ? (
+                    <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+                      {dashboard.error}
+                    </p>
+                  ) : null}
+
+                  {dashboard.doctorsMessage ? (
+                    <p
+                      className={`mb-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(dashboard.doctorsMessage)}`}
+                    >
+                      {dashboard.doctorsMessage}
+                    </p>
+                  ) : null}
 
                   <div className="border-t border-slate-200 pt-6 dark:border-slate-800">
                     <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1494,20 +1502,6 @@ export function HospitalAdminDashboardPage() {
                       )}
                     </div>
                   </div>
-
-                  {dashboard.error ? (
-                    <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
-                      {dashboard.error}
-                    </p>
-                  ) : null}
-
-                  {dashboard.doctorsMessage ? (
-                    <p
-                      className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(dashboard.doctorsMessage)}`}
-                    >
-                      {dashboard.doctorsMessage}
-                    </p>
-                  ) : null}
                 </div>
               </div>
             </section>

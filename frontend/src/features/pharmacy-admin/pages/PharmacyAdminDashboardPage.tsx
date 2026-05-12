@@ -142,6 +142,17 @@ export function PharmacyAdminDashboardPage() {
       return next;
     });
   }, [dashboard.inventory]);
+  
+
+  useEffect(() => {
+    if (reportFeedback) {
+      const timer = setTimeout(() => {
+        setReportFeedback(null);
+      }, 5000); 
+
+      return () => clearTimeout(timer);
+    }
+  }, [reportFeedback]);
 
   useEffect(() => {
     const query = deferredCatalogQuery;
@@ -423,7 +434,7 @@ export function PharmacyAdminDashboardPage() {
           <div className="flex items-center gap-3">
             <div className="hidden text-right md:block">
               <p className="text-xs font-bold text-slate-900 dark:text-slate-200">
-                {user?.name ?? "Pharmacy Admin"}
+                {user?.preferredName ?? "Pharmacy Admin"}
               </p>
               <p className="text-[10px] font-bold uppercase text-primary dark:text-blue-400">
                 Pharmacy Head
@@ -479,7 +490,7 @@ export function PharmacyAdminDashboardPage() {
                 <p className="relative z-10 mb-4 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
                   Inventory Value
                 </p>
-                <h3 className="relative z-10 text-3xl font-extrabold text-blue-900 dark:text-blue-300">
+                <h3 className="relative z-10 text-2xl font-extrabold text-blue-900 dark:text-blue-300">
                   {formatLkr(
                     activeSummary?.inventorySummary.totalInventoryValue ??
                       dashboard.stats.totalStockValue,
@@ -528,7 +539,7 @@ export function PharmacyAdminDashboardPage() {
                 <p className="mb-4 text-xs font-bold uppercase tracking-widest text-blue-700 dark:text-blue-300">
                   Today's Revenue
                 </p>
-                <h3 className="text-3xl font-extrabold text-slate-900 dark:text-white">
+                <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white">
                   {formatLkr(activeSummary?.reportSummary.todayRevenue ?? null)}
                 </h3>
                 <p className="mt-2 text-[10px] font-bold text-blue-600/80 dark:text-blue-300/80">
@@ -622,10 +633,6 @@ export function PharmacyAdminDashboardPage() {
                 <h3 className="text-lg font-bold">Operational Notes</h3>
                 <div className="mt-5 space-y-3 text-sm text-slate-600 dark:text-slate-300">
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    Organization ID in scope:{" "}
-                    <span className="font-bold">{activeOrganizationId || "Not assigned"}</span>
-                  </div>
-                  <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
                     Dashboard summary source:{" "}
                     <span className="font-bold">
                       {activeSummary ? "Live summary" : "Inventory-only"}
@@ -645,10 +652,6 @@ export function PharmacyAdminDashboardPage() {
             <header className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight">Inventory Management</h1>
-                <p className="mt-2 text-slate-500 dark:text-slate-400">
-                  Admin-only stock and price control for organization{" "}
-                  {activeOrganizationId || "not assigned"}.
-                </p>
               </div>
               <button
                 type="button"
@@ -656,7 +659,7 @@ export function PharmacyAdminDashboardPage() {
                 className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-bold text-white shadow-lg transition-all hover:brightness-110 dark:bg-blue-600"
               >
                 <PackagePlus size={16} />
-                New SKU Entry
+                New Entry
               </button>
             </header>
 
@@ -769,7 +772,7 @@ export function PharmacyAdminDashboardPage() {
                     value={dashboard.searchQuery}
                     onChange={(event) => dashboard.setSearchQuery(event.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                    placeholder="Filter by Name, SKU or Ingredient..."
+                    placeholder="Filter by Name or Ingredient..."
                     type="text"
                   />
                 </div>
@@ -777,7 +780,7 @@ export function PharmacyAdminDashboardPage() {
                   <select
                     value={inventoryStatusFilter}
                     onChange={(event) => setInventoryStatusFilter(event.target.value)}
-                    className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800 dark:text-slate-200"
+                    className="rounded-lg bg-slate-100 px-8 py-2 text-sm font-bold dark:bg-slate-800 dark:text-slate-200"
                   >
                     <option value="ALL">All stock states</option>
                     <option value="HEALTHY">Healthy stock</option>
@@ -792,16 +795,9 @@ export function PharmacyAdminDashboardPage() {
                         `Exported ${inventoryRows.length} inventory row(s) to CSV.`,
                       );
                     }}
-                    className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800"
+                    className="rounded-lg bg-slate-100 px-6 py-2 text-sm font-bold dark:bg-slate-800"
                   >
                     Export CSV
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void dashboard.loadInventory()}
-                    className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-bold dark:bg-slate-800"
-                  >
-                    Refresh
                   </button>
                 </div>
               </div>
@@ -833,7 +829,7 @@ export function PharmacyAdminDashboardPage() {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:bg-slate-800/80">
                     <tr>
-                      <th className="px-6 py-4">Medicine & SKU</th>
+                      <th className="px-6 py-4">Medicine</th>
                       <th className="px-6 py-4">Current Stock</th>
                       <th className="px-6 py-4">Unit Price (LKR)</th>
                       <th className="px-6 py-4">Updated</th>
