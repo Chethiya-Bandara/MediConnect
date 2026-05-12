@@ -117,7 +117,7 @@ const assistantPrompts = [
   "What medicines are on my record?",
 ] as const;
 
-const assistantHistoryVersion = 1;
+const assistantHistoryVersion = 2;
 
 function createChatMessage(role: "assistant" | "user", text: string): AssistantChatMessage {
   return {
@@ -2271,7 +2271,6 @@ export function PatientDashboardPage() {
                                 >
                                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                                     <p className="text-sm font-bold">
-                                      Prescription #{prescription.id} •{" "}
                                       {formatStatusLabel(prescription.status)}
                                     </p>
                                     <button
@@ -2535,7 +2534,6 @@ export function PatientDashboardPage() {
                     </p>
                     <p className="mt-3 text-lg font-bold">{pharmacyEstimate.pharmacy.name}</p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      Prescription #{pharmacyEstimate.prescription.id} •{" "}
                       {pharmacyEstimate.prescription.doctor_name || "Doctor not found"}
                     </p>
                   </article>
@@ -2661,9 +2659,6 @@ export function PatientDashboardPage() {
                         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                           <div>
                             <p className="text-lg font-bold">{item.pharmacy.name}</p>
-                            <p className="text-sm text-slate-500 dark:text-slate-400">
-                              Prescription #{item.prescription_id}
-                            </p>
                             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                               {formatDateTime(item.created_at)}
                             </p>

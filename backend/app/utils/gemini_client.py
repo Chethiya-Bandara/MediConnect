@@ -139,11 +139,19 @@ def _build_direct_prompt(message: str, history: list[dict], snapshot: dict, cont
         for item in history[-12:]
         if item.get("text")
     )
+    runtime = snapshot.get("assistant_runtime", {}) if isinstance(snapshot, dict) else {}
+    timezone_name = runtime.get("timezone") or "Asia/Colombo"
+    current_date = runtime.get("current_date") or "unknown"
+    current_datetime = runtime.get("current_datetime") or "unknown"
 
     return (
         f"You are the MediConnect {role_label} AI assistant.\n"
         "Reply in a natural, conversational, free-style way that matches the user's tone.\n"
         "Reply in the same language or language mix the user uses, including Sinhala, Tamil, English, or Singlish when appropriate.\n"
+        f"Treat the current local timezone as {timezone_name}.\n"
+        f"Treat today's local date as {current_date}, and the current local datetime as {current_datetime}.\n"
+        "When the user says today, tomorrow, yesterday, heta, ada, or iye, resolve those words using that local Sri Lanka date only.\n"
+        "Do not guess or shift the date to another timezone.\n"
         "Use the provided JSON context and recent conversation for anything about the user's saved records, appointments, availability, prescriptions, dashboard data, or identity.\n"
         "You may also give general health education, practical next steps, and clarifying questions when the user's message asks for broader guidance.\n"
         "Clearly say when something is general information instead of data from MediConnect records.\n"

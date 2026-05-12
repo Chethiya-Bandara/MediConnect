@@ -4,6 +4,7 @@ import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
@@ -17,6 +18,8 @@ from app.utils.gemini_client import call_gemini_assistant
 from app.middleware.ai_disclaimer import build_safe_response
 
 router = APIRouter(prefix="/patient/dashboard", tags=["patient-dashboard"])
+
+COLOMBO_TZ = ZoneInfo("Asia/Colombo")
 
 _ALLOWED_PATIENT_STATUS_UPDATES = {"cancelled"}
 _TERMINAL_APPOINTMENT_STATUSES = {"completed", "cancelled"}
@@ -931,7 +934,7 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None or parsed.utcoffset() is None:
-            parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            parsed = parsed.replace(tzinfo=COLOMBO_TZ)
         return parsed
     except ValueError:
         return None
@@ -941,7 +944,7 @@ def _assistant_datetime_label(value: Optional[str]) -> str:
     parsed = _parse_iso_datetime(value)
     if not parsed:
         return "an unscheduled time"
-    return parsed.astimezone().strftime("%b %d, %Y at %I:%M %p")
+    return parsed.astimezone(COLOMBO_TZ).strftime("%b %d, %Y at %I:%M %p")
 
 
 def _prescription_quantity_label(item: dict) -> Optional[str]:
@@ -987,7 +990,7 @@ def _extract_confirmation_slot_id(message: str) -> Optional[int]:
 
 def _extract_requested_date(message: str) -> Optional[str]:
     normalized = message.lower()
-    today_local = datetime.now().astimezone().date()
+    today_local = datetime.now(COLOMBO_TZ).date()
 
     if "tomorrow" in normalized:
         return (today_local + timedelta(days=1)).isoformat()
@@ -1018,7 +1021,7 @@ def _assistant_slot_matches_message(slot: dict, normalized_message: str) -> tupl
     slot_date = None
     if slot.get("start_time"):
         parsed = _parse_iso_datetime(slot.get("start_time"))
-        slot_date = parsed.astimezone().date().isoformat() if parsed else None
+        slot_date = parsed.astimezone(COLOMBO_TZ).date().isoformat() if parsed else None
     if requested_date:
         if slot_date != requested_date:
             return -1, True
@@ -1395,7 +1398,7 @@ def _build_assistant_snapshot(patient: dict, user: dict):
     for row in prescription_items:
         items_by_prescription.setdefault(row["prescription_id"], []).append(row)
 
-    now = datetime.now().astimezone()
+    now = datetime.now(COLOMBO_TZ)
     next_appointment = next(
         (
             row
@@ -1488,6 +1491,11 @@ def _build_assistant_snapshot(patient: dict, user: dict):
             "id": patient["id"],
             "dhid": patient.get("dhid"),
             "created_at": patient.get("created_at"),
+        },
+        "assistant_runtime": {
+            "timezone": "Asia/Colombo",
+            "current_date": now.date().isoformat(),
+            "current_datetime": now.isoformat(),
         },
         "stats": {
             "appointments": len(appointments),
@@ -1975,7 +1983,7 @@ def get_overview(authorization: Optional[str] = Header(None)):
     doctor_lookup = _doctor_map({row["doctor_id"] for row in appointments})
     organisation_lookup = _organisation_map({row["organisation_id"] for row in appointments})
     consent_lookup = _consent_state_map({row["id"] for row in appointments})
-    now = datetime.now().astimezone()
+    now = datetime.now(COLOMBO_TZ)
     upcoming = next(
         (
             row

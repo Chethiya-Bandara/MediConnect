@@ -18,6 +18,33 @@ function formatLkr(value: number | null) {
   }).format(value);
 }
 
+function getEffectiveUnitPrice(
+  item: Pick<PharmacistPrescriptionDetail["items"][number], "unitPrice" | "catalogUnit" | "medicineName">,
+) {
+  if (item.unitPrice === null) {
+    return null;
+  }
+
+  const candidates = [item.catalogUnit ?? "", item.medicineName ?? ""].filter(Boolean);
+  for (const candidate of candidates) {
+    const normalized = candidate.trim().toLowerCase();
+    const match =
+      normalized.match(/(\d+)\s*(t|tabs?|tablets?|c|caps?|capsules?)\b/i) ??
+      normalized.match(/\b(\d+)(t|c)\b/i);
+
+    if (!match) {
+      continue;
+    }
+
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return item.unitPrice / parsed;
+    }
+  }
+
+  return item.unitPrice;
+}
+
 interface DispensingSectionProps {
   detail: PharmacistPrescriptionDetail | null;
   isLoading: boolean;
@@ -55,7 +82,10 @@ export function DispensingSection({
   const estimatedTotal = detail.items.every(
     (item) => item.unitPrice !== null && item.quantity !== null,
   )
-    ? detail.items.reduce((sum, item) => sum + (item.unitPrice ?? 0) * (item.quantity ?? 0), 0)
+    ? detail.items.reduce(
+        (sum, item) => sum + ((getEffectiveUnitPrice(item) ?? 0) * (item.quantity ?? 0)),
+        0,
+      )
     : null;
 
   return (
@@ -135,7 +165,7 @@ export function DispensingSection({
                         Unit Price
                       </p>
                       <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                        {formatLkr(item.unitPrice)}
+                        {formatLkr(getEffectiveUnitPrice(item))}
                       </p>
                     </div>
                   </div>

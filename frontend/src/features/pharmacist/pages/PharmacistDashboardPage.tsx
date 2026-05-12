@@ -6,7 +6,6 @@ import {
   Sparkles,
   BarChart3,
   ClipboardCheck,
-  HeartPulse,
   History,
   Info,
   LogOut,
@@ -71,8 +70,26 @@ function getInitials(name?: string | null) {
     .join("");
 }
 
+function getAvatarLetters(name?: string | null) {
+  if (!name) return "PT";
+  const compact = name.replace(/\s+/g, "").trim();
+  if (!compact) return "PT";
+  return compact.slice(0, 2).toUpperCase();
+}
+
 function formatStatusLabel(value: string | null | undefined) {
   if (!value) return "Unknown";
+  if (value === "ISSUED" || value === "PENDING") return "Not Issued";
+  if (value === "PARTIALLY_DISPENSED") return "Partially Issued";
+  if (value === "DISPENSED") return "Issued";
+  return value.replaceAll("_", " ");
+}
+
+function formatStatusActionLabel(value: string | null | undefined) {
+  if (!value) return "Unknown";
+  if (value === "ISSUED" || value === "PENDING") return "Not Dispensing";
+  if (value === "PARTIALLY_DISPENSED") return "Partially Dispensing";
+  if (value === "DISPENSED") return "Dispensing";
   return value.replaceAll("_", " ");
 }
 
@@ -360,6 +377,7 @@ export function PharmacistDashboardPage() {
   const selectedPrescription = dashboard.selectedDetail?.prescription ?? null;
   const latestDispenseEvent = dashboard.selectedDetail?.dispensationHistory[0] ?? null;
   const userInitials = getInitials(user?.name);
+  const selectedPatientAvatar = getAvatarLetters(selectedPrescription?.patientName);
   const lookupQuery = dashboard.searchQuery.trim();
   const looksLikeDhid = /^dhid-/i.test(lookupQuery);
   const matchedDhidPrescriptions = useMemo(() => {
@@ -441,11 +459,11 @@ export function PharmacistDashboardPage() {
   const partialValidationIssues = useMemo(
     () =>
       dashboard.plannedItems.filter(
-        ({ item, plan, quantityToDispense }) =>
+        ({ plan, metrics, quantityToDispense }) =>
           plan.action === "PARTIALLY_DISPENSED" &&
-          ((item.remainingQuantity ?? 0) <= 0 ||
+          ((metrics.remainingQuantity ?? 0) <= 0 ||
             quantityToDispense <= 0 ||
-            quantityToDispense >= (item.remainingQuantity ?? 0)),
+            quantityToDispense > (metrics.remainingQuantity ?? 0)),
       ),
     [dashboard.plannedItems],
   );
@@ -457,7 +475,7 @@ export function PharmacistDashboardPage() {
       return "Cancelled and expired item transitions are not supported by the current pharmacist endpoint.";
     }
     if (partialValidationIssues.length > 0) {
-      return "One or more partial-dispense lines are invalid. Partial quantity must be lower than the remaining quantity and above zero.";
+      return "One or more partial-dispense lines are invalid. Partial quantity must be above zero and cannot exceed the remaining quantity.";
     }
     if (dashboard.billingItems.length === 0) {
       return "Choose at least one valid line-item action.";
@@ -999,8 +1017,8 @@ export function PharmacistDashboardPage() {
                   ) : selectedPrescription ? (
                     <div className="flex flex-col justify-between gap-6 xl:flex-row xl:items-center">
                       <div className="flex items-center gap-6">
-                        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-900/20">
-                          <HeartPulse className="text-primary dark:text-blue-400" size={28} />
+                        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-lg font-extrabold uppercase text-blue-900 dark:bg-blue-900/20 dark:text-blue-300">
+                          {selectedPatientAvatar}
                         </div>
                         <div>
                           <div className="mb-1 flex flex-wrap items-center gap-3">
@@ -1138,12 +1156,26 @@ export function PharmacistDashboardPage() {
                           <tr>
                             <th className="px-6 py-3">Medicine & Dosage</th>
                             <th className="px-6 py-3">Quantity</th>
-                            <th className="px-6 py-3">Transition</th>
+                            <th className="px-6 py-3">Status</th>
                             <th className="px-6 py-3 text-right">Status Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {dashboard.plannedItems.map(({ item, plan, metrics, quantityToDispense }) => (
+                          {dashboard.plannedItems.map(
+                            ({
+                              item,
+                              plan,
+                              metrics,
+                              quantityToDispense,
+                              previewDispensedQuantity,
+                              previewRemainingQuantity,
+                            }) => {
+                              const isOutOfStock =
+                                item.availabilityMessage ===
+                                  "This medicine is not stocked in your pharmacy." ||
+                                (item.pharmacyStock !== null && item.pharmacyStock <= 0);
+
+                              return (
                             <tr
                               key={item.id}
                               className="align-top transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/30"
@@ -1196,17 +1228,17 @@ export function PharmacistDashboardPage() {
                                     Prescribed: {metrics.prescribedQuantity ?? "N/A"} {metrics.quantityLabel}
                                   </p>
                                   <p className="text-slate-500 dark:text-slate-400">
-                                    Dispensed so far: {metrics.dispensedQuantity} {metrics.quantityLabel}
+                                    Dispensed so far: {previewDispensedQuantity} {metrics.quantityLabel}
                                   </p>
                                   <p
                                     className={cn(
                                       "font-medium",
-                                      (metrics.remainingQuantity ?? 0) > 0
+                                      (previewRemainingQuantity ?? 0) > 0
                                         ? "text-red-600 dark:text-red-400"
                                         : "text-emerald-600 dark:text-emerald-400",
                                     )}
                                   >
-                                    Remaining: {metrics.remainingQuantity ?? "Unknown"} {metrics.quantityLabel}
+                                    Remaining: {previewRemainingQuantity ?? "Unknown"} {metrics.quantityLabel}
                                   </p>
                                   {metrics.unitKind === "ml" || metrics.unitKind === "drops" ? (
                                     <p className="text-slate-500 dark:text-slate-400">
@@ -1225,49 +1257,45 @@ export function PharmacistDashboardPage() {
                               </td>
                               <td className="px-6 py-5">
                                 <div className="space-y-2 text-xs">
-                                  <p className="font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-                                    Planned result
-                                  </p>
                                   <p className="rounded-xl bg-slate-100 px-3 py-2 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                                     {formatStatusLabel(plan.action)}
                                   </p>
-                                  <p className="text-slate-500 dark:text-slate-400">
-                                    {quantityToDispense > 0
-                                      ? `${quantityToDispense} ${metrics.quantityLabel} will be sent in this request.`
-                                      : `No ${metrics.quantityLabel} will be sent with the current action.`}
-                                  </p>
+                                  {quantityToDispense > 0 ? (
+                                    <p className="text-slate-500 dark:text-slate-400">
+                                      {`${quantityToDispense} ${metrics.quantityLabel} will be sent in this request.`}
+                                    </p>
+                                  ) : null}
                                 </div>
                               </td>
                               <td className="px-6 py-5">
                                 <div className="flex flex-col items-stretch gap-3 md:items-end">
                                   <select
                                     value={plan.action}
-                                    disabled={(metrics.remainingQuantity ?? 0) <= 0}
+                                    disabled={isOutOfStock || (metrics.remainingQuantity ?? 0) <= 0}
                                     onChange={(event) =>
                                       dashboard.updatePlanAction(
                                         item.id,
                                         event.target.value as
                                           | "ISSUED"
                                           | "PARTIALLY_DISPENSED"
-                                          | "DISPENSED"
-                                          | "CANCELLED"
-                                          | "EXPIRED",
+                                          | "DISPENSED",
                                       )
                                     }
                                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:ring-blue-500"
                                   >
-                                    <option value="ISSUED">NOT_DISPENSED</option>
-                                    <option value="PARTIALLY_DISPENSED">PARTIALLY_DISPENSED</option>
-                                    <option value="DISPENSED">DISPENSED</option>
-                                    <option disabled value="CANCELLED">
-                                      CANCELLED
+                                    <option value="DISPENSED">
+                                      {formatStatusActionLabel("DISPENSED")}
                                     </option>
-                                    <option disabled value="EXPIRED">
-                                      EXPIRED
+                                    <option value="PARTIALLY_DISPENSED">
+                                      {formatStatusActionLabel("PARTIALLY_DISPENSED")}
+                                    </option>
+                                    <option value="ISSUED">
+                                      {formatStatusActionLabel("ISSUED")}
                                     </option>
                                   </select>
 
                                   {plan.action === "PARTIALLY_DISPENSED" &&
+                                  !isOutOfStock &&
                                   (metrics.remainingQuantity ?? 0) > 0 ? (
                                     <label className="block w-full md:w-36">
                                       <span className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-slate-500">
@@ -1308,7 +1336,9 @@ export function PharmacistDashboardPage() {
                                 </div>
                               </td>
                             </tr>
-                          ))}
+                              );
+                            },
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -1328,23 +1358,11 @@ export function PharmacistDashboardPage() {
                     Billing Summary
                   </h3>
 
-                  <label className="mb-5 block">
-                    <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-blue-100/80">
-                      Pharmacy Organisation ID
-                    </span>
-                    <input
-                      value={dashboard.pharmacyId}
-                      onChange={(event) => dashboard.setPharmacyId(event.target.value)}
-                      placeholder="Enter pharmacy ID"
-                      className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-blue-100/60 focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
-                    />
-                  </label>
-
                   <div className="mb-8 space-y-4">
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="rounded-2xl bg-white/5 px-4 py-3">
                         <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-100/70">
-                          Planned items
+                          Items
                         </p>
                         <p className="mt-2 text-2xl font-extrabold">
                           {dashboard.billingItems.length}
@@ -1352,7 +1370,7 @@ export function PharmacistDashboardPage() {
                       </div>
                       <div className="rounded-2xl bg-white/5 px-4 py-3">
                         <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-100/70">
-                          Planned units
+                          Quantity
                         </p>
                         <p className="mt-2 text-2xl font-extrabold">{plannedUnits}</p>
                       </div>

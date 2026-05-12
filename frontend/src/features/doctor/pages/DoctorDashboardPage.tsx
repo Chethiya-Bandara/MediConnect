@@ -2308,6 +2308,9 @@ export function DoctorDashboardPage() {
                                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                                   {item.organisation.name}
                                 </p>
+                                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                  {formatDate(item.start_time)}
+                                </p>
                                 <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                                   {item.patient.dhid ?? "DHID pending"}
                                 </p>

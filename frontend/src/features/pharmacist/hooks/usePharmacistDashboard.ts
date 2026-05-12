@@ -151,13 +151,67 @@ function parsePackageCapacity(
   return null;
 }
 
+function parseTabletPriceDivisor(
+  item: Pick<PharmacistPrescriptionItem, "catalogUnit" | "medicineName">,
+) {
+  const candidates = [item.catalogUnit ?? "", item.medicineName ?? ""].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const normalized = candidate.trim().toLowerCase();
+    if (!normalized) {
+      continue;
+    }
+
+    const match =
+      normalized.match(/(\d+)\s*(t|tabs?|tablets?|c|caps?|capsules?)\b/i) ??
+      normalized.match(/\b(\d+)(t|c)\b/i);
+
+    if (!match) {
+      continue;
+    }
+
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function getEffectiveUnitPrice(
+  item: Pick<PharmacistPrescriptionItem, "unitPrice" | "catalogUnit" | "medicineName" | "unit">,
+) {
+  if (item.unitPrice === null) {
+    return null;
+  }
+
+  const unitKind = normalizeUnitKind(item);
+  if (unitKind === "tablets") {
+    const divisor = parseTabletPriceDivisor(item);
+    if (divisor !== null) {
+      return item.unitPrice / divisor;
+    }
+  }
+
+  return item.unitPrice;
+}
+
 function getDispenseMetrics(item: PharmacistPrescriptionItem) {
   const unitKind = normalizeUnitKind(item);
   const dailyDose = parsePositiveInteger(item.dosage);
   const durationDays = parseDurationDays(item.instructions);
   const packageCapacity = parsePackageCapacity(item);
 
-  let prescribedQuantity = item.quantity ?? null;
+  const rawPrescribedQuantity =
+    item.quantity !== null && Number.isFinite(item.quantity) ? Math.max(Math.floor(item.quantity), 0) : null;
+  const rawDispensedQuantity = Math.max(Math.floor(item.dispensedQuantity || 0), 0);
+  const rawRemainingQuantity =
+    item.remainingQuantity !== null && Number.isFinite(item.remainingQuantity)
+      ? Math.max(Math.floor(item.remainingQuantity), 0)
+      : null;
+
+  let prescribedQuantity = rawPrescribedQuantity;
   if (dailyDose !== null && durationDays !== null) {
     if (unitKind === "tablets") {
       prescribedQuantity = dailyDose * durationDays;
@@ -173,12 +227,21 @@ function getDispenseMetrics(item: PharmacistPrescriptionItem) {
     prescribedQuantity !== null && Number.isFinite(prescribedQuantity)
       ? Math.max(Math.floor(prescribedQuantity), 0)
       : null;
-  const normalizedDispensedQuantity = Math.max(Math.floor(item.dispensedQuantity || 0), 0);
+  const normalizedDispensedQuantity =
+    rawRemainingQuantity !== null && normalizedPrescribedQuantity !== null
+      ? Math.max(normalizedPrescribedQuantity - rawRemainingQuantity, 0)
+      : rawDispensedQuantity;
 
-  const remainingQuantity =
+  const computedRemainingQuantity =
     normalizedPrescribedQuantity === null
       ? null
       : Math.max(normalizedPrescribedQuantity - normalizedDispensedQuantity, 0);
+  const remainingQuantity =
+    rawRemainingQuantity !== null
+      ? computedRemainingQuantity !== null
+        ? Math.min(rawRemainingQuantity, computedRemainingQuantity)
+        : rawRemainingQuantity
+      : computedRemainingQuantity;
 
   const quantityLabel =
     unitKind === "tablets"
@@ -218,6 +281,13 @@ function isSameDay(dateString: string | null) {
 }
 
 function getDefaultAction(item: PharmacistPrescriptionItem): PharmacistDispenseAction {
+  if (
+    item.availabilityMessage === "This medicine is not stocked in your pharmacy." ||
+    (item.pharmacyStock !== null && item.pharmacyStock <= 0)
+  ) {
+    return "ISSUED";
+  }
+
   if ((getDispenseMetrics(item).remainingQuantity ?? 0) <= 0) {
     return "DISPENSED";
   }
@@ -283,7 +353,10 @@ function buildStats(
   const estimatedValue =
     billableTotal ??
     (detail?.items.every((item) => item.unitPrice !== null && item.quantity !== null)
-      ? detail.items.reduce((sum, item) => sum + (item.unitPrice ?? 0) * (item.quantity ?? 0), 0)
+      ? detail.items.reduce(
+          (sum, item) => sum + ((getEffectiveUnitPrice(item) ?? 0) * (item.quantity ?? 0)),
+          0,
+        )
       : null);
 
   const totalBilledToday = history
@@ -473,11 +546,19 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
         quantityToDispense = clampQuantity(plan.quantity, remaining);
       }
 
+      const previewDispensedQuantity = metrics.dispensedQuantity + quantityToDispense;
+      const previewRemainingQuantity =
+        metrics.prescribedQuantity === null
+          ? null
+          : Math.max(metrics.prescribedQuantity - previewDispensedQuantity, 0);
+
       return {
         item,
         plan,
         metrics,
         quantityToDispense,
+        previewDispensedQuantity,
+        previewRemainingQuantity,
       };
     });
   }, [dispensePlan, selectedDetail]);
@@ -486,14 +567,18 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
     () =>
       plannedItems
         .filter(({ quantityToDispense, item }) => quantityToDispense > 0 && item.unitPrice !== null)
-        .map(({ item, metrics, quantityToDispense }) => ({
-          id: item.id,
-          name: item.medicineName,
-          quantity: quantityToDispense,
-          quantityLabel: metrics.quantityLabel,
-          unitPrice: item.unitPrice ?? 0,
-          total: quantityToDispense * (item.unitPrice ?? 0),
-        })),
+        .map(({ item, metrics, quantityToDispense }) => {
+          const effectiveUnitPrice = getEffectiveUnitPrice(item) ?? 0;
+
+          return {
+            id: item.id,
+            name: item.medicineName,
+            quantity: quantityToDispense,
+            quantityLabel: metrics.quantityLabel,
+            unitPrice: effectiveUnitPrice,
+            total: quantityToDispense * effectiveUnitPrice,
+          };
+        }),
     [plannedItems],
   );
 
@@ -526,9 +611,15 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
         quantity: getDefaultQuantity(item),
       };
       const metrics = getDispenseMetrics(item);
+      const isOutOfStock =
+        item.availabilityMessage === "This medicine is not stocked in your pharmacy." ||
+        (item.pharmacyStock !== null && item.pharmacyStock <= 0);
 
       let quantity = previous.quantity;
-      if (action === "DISPENSED") {
+      if (isOutOfStock) {
+        action = "ISSUED";
+        quantity = 0;
+      } else if (action === "DISPENSED") {
         quantity = getDefaultQuantity(item);
       } else if (action === "PARTIALLY_DISPENSED") {
         quantity = clampQuantity(previous.quantity || 1, metrics.remainingQuantity);
@@ -561,12 +652,16 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
         quantity: getDefaultQuantity(item),
       };
       const metrics = getDispenseMetrics(item);
+      const isOutOfStock =
+        item.availabilityMessage === "This medicine is not stocked in your pharmacy." ||
+        (item.pharmacyStock !== null && item.pharmacyStock <= 0);
 
       return {
         ...current,
         [itemId]: {
           ...existing,
-          quantity: clampQuantity(quantity, metrics.remainingQuantity),
+          action: isOutOfStock ? "ISSUED" : existing.action,
+          quantity: isOutOfStock ? 0 : clampQuantity(quantity, metrics.remainingQuantity),
         },
       };
     });
@@ -660,6 +755,7 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
       await Promise.all([loadDetail(nextId), loadHistory()]);
       return true;
     } catch (dispenseError) {
+      await Promise.all([loadDetail(selectedPrescriptionId), loadHistory()]);
       setActionMessage(
         dispenseError instanceof Error ? dispenseError.message : "Dispense action failed.",
       );
