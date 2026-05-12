@@ -1,5 +1,6 @@
 export type PharmacistSection =
   | "home"
+  | "stock"
   | "overview"
   | "lookup"
   | "dispensing"
@@ -19,6 +20,7 @@ export interface PharmacistPrescriptionSummary {
   patientDhid: string | null;
   patientName: string | null;
   doctorName: string | null;
+  encounterType?: string | null;
   issuedAt: string | null;
   expiresAt: string | null;
   totalItems: number | null;
@@ -54,6 +56,19 @@ export interface PharmacistDispenseHistoryEntry {
   estimatedTotal: number | null;
 }
 
+export interface PharmacistInventoryItem {
+  id: string;
+  pharmacyId: string | null;
+  pharmacyName?: string | null;
+  medicineId: number | null;
+  medicineName: string;
+  medicineUnit: string | null;
+  stockQuantity: number | null;
+  unitPrice: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface PharmacistDispensePlanItem {
   action: PharmacistDispenseAction;
   quantity: number;
@@ -79,16 +94,19 @@ export interface PharmacistDashboardState {
   selectedPrescriptionId: string | null;
   selectedDetail: PharmacistPrescriptionDetail | null;
   history: PharmacistDispenseHistoryEntry[];
+  inventory: PharmacistInventoryItem[];
   pharmacyId: string;
   dispensePlan: Record<string, PharmacistDispensePlanItem>;
   stats: PharmacistOverviewStats;
   isLoadingList: boolean;
   isLoadingDetail: boolean;
   isLoadingHistory: boolean;
+  isLoadingInventory: boolean;
   isDispensing: boolean;
   error: string | null;
   detailError: string | null;
   historyError: string | null;
+  inventoryError: string | null;
   actionMessage: string | null;
   searchQuery: string;
 }

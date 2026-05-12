@@ -36,6 +36,7 @@ export const endpoints = {
     prescriptions: "/pharmacist/dashboard/prescriptions",
     dispense: "/pharmacist/dashboard/dispense",
     history: "/pharmacist/dashboard/history",
+    inventory: "/pharmacist/dashboard/inventory",
   },
   pharmacyAdmin: {
     inventoryBase: "/pharmacy-admin/inventory",

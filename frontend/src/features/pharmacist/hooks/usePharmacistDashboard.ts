@@ -3,6 +3,7 @@ import {
   dispensePrescription,
   getPharmacistPrescriptionDetail,
   listPharmacistHistory,
+  listPharmacistInventory,
   listPharmacistPrescriptions,
 } from "../api/pharmacistApi";
 import type {
@@ -10,6 +11,7 @@ import type {
   PharmacistDispenseAction,
   PharmacistDispenseHistoryEntry,
   PharmacistDispensePlanItem,
+  PharmacistInventoryItem,
   PharmacistOverviewStats,
   PharmacistPrescriptionDetail,
   PharmacistPrescriptionItem,
@@ -66,6 +68,61 @@ function parseDurationDays(instructions: string | null | undefined) {
   return parsed > 0 ? parsed : null;
 }
 
+function normalizeUnitKindFromText(value: string | null | undefined) {
+  const normalized = (value ?? "").trim().toLowerCase();
+
+  if (
+    normalized === "tablet" ||
+    normalized === "tablets" ||
+    normalized === "tab" ||
+    normalized === "tabs" ||
+    normalized === "cap" ||
+    normalized === "caps" ||
+    normalized === "capsule" ||
+    normalized === "capsules" ||
+    /\btab(?:let)?s?\b/.test(normalized) ||
+    /\bcap(?:sule)?s?\b/.test(normalized)
+  ) {
+    return "tablets" as const;
+  }
+
+  if (
+    normalized === "drop" ||
+    normalized === "drops" ||
+    normalized === "gtt" ||
+    /\b(drop|drops|gtt)\b/.test(normalized)
+  ) {
+    return "drops" as const;
+  }
+
+  if (
+    normalized === "ml" ||
+    normalized === "milliliter" ||
+    normalized === "milliliters" ||
+    /\bml\b/.test(normalized) ||
+    /\bmilliliters?\b/.test(normalized)
+  ) {
+    return "ml" as const;
+  }
+
+  return null;
+}
+
+function normalizeUnitKind(
+  item: Pick<PharmacistPrescriptionItem, "unit" | "catalogUnit" | "medicineName">,
+) {
+  const directMatch =
+    normalizeUnitKindFromText(item.unit) ??
+    normalizeUnitKindFromText(item.catalogUnit) ??
+    normalizeUnitKindFromText(item.medicineName);
+
+  if (directMatch) {
+    return directMatch;
+  }
+
+  return "unit" as const;
+}
+
 function parsePackageCapacity(
   item: Pick<PharmacistPrescriptionItem, "catalogUnit" | "medicineName">,
 ) {
@@ -95,7 +152,7 @@ function parsePackageCapacity(
 }
 
 function getDispenseMetrics(item: PharmacistPrescriptionItem) {
-  const unitKind = (item.unit ?? "").trim().toLowerCase();
+  const unitKind = normalizeUnitKind(item);
   const dailyDose = parsePositiveInteger(item.dosage);
   const durationDays = parseDurationDays(item.instructions);
   const packageCapacity = parsePackageCapacity(item);
@@ -116,19 +173,26 @@ function getDispenseMetrics(item: PharmacistPrescriptionItem) {
     prescribedQuantity !== null && Number.isFinite(prescribedQuantity)
       ? Math.max(Math.floor(prescribedQuantity), 0)
       : null;
+  const normalizedDispensedQuantity = Math.max(Math.floor(item.dispensedQuantity || 0), 0);
 
   const remainingQuantity =
     normalizedPrescribedQuantity === null
       ? null
-      : Math.max(normalizedPrescribedQuantity - item.dispensedQuantity, 0);
+      : Math.max(normalizedPrescribedQuantity - normalizedDispensedQuantity, 0);
 
   const quantityLabel =
-    unitKind === "tablets" ? "tablet(s)" : unitKind === "ml" || unitKind === "drops" ? "bottle(s)" : "unit(s)";
+    unitKind === "tablets"
+      ? "tablet(s)"
+      : unitKind === "ml" || unitKind === "drops"
+        ? "bottle(s)"
+        : "unit(s)";
 
   return {
     prescribedQuantity: normalizedPrescribedQuantity,
+    dispensedQuantity: normalizedDispensedQuantity,
     remainingQuantity,
     quantityLabel,
+    unitKind,
     dailyDose,
     durationDays,
     packageCapacity,
@@ -238,6 +302,7 @@ function buildStats(
 export function usePharmacistDashboard(pharmacistId?: string, organisationId?: number | null) {
   const [prescriptions, setPrescriptions] = useState<PharmacistPrescriptionSummary[]>([]);
   const [history, setHistory] = useState<PharmacistDispenseHistoryEntry[]>([]);
+  const [inventory, setInventory] = useState<PharmacistInventoryItem[]>([]);
   const [selectedPrescriptionId, setSelectedPrescriptionId] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<PharmacistPrescriptionDetail | null>(null);
   const [dispensePlan, setDispensePlan] = useState<Record<string, PharmacistDispensePlanItem>>({});
@@ -247,10 +312,12 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
   const [isLoadingList, setIsLoadingList] = useState(true);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [isLoadingInventory, setIsLoadingInventory] = useState(true);
   const [isDispensing, setIsDispensing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -320,6 +387,23 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
     }
   };
 
+  const loadInventory = async () => {
+    setIsLoadingInventory(true);
+    setInventoryError(null);
+
+    try {
+      const items = await listPharmacistInventory();
+      setInventory(items);
+    } catch (loadError) {
+      setInventory([]);
+      setInventoryError(
+        loadError instanceof Error ? loadError.message : "Pharmacy inventory could not be loaded.",
+      );
+    } finally {
+      setIsLoadingInventory(false);
+    }
+  };
+
   const loadDetail = async (prescriptionId: string | null) => {
     if (!prescriptionId) {
       setSelectedDetail(null);
@@ -348,6 +432,7 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
 
   useEffect(() => {
     void loadHistory();
+    void loadInventory();
     void loadPrescriptions();
   }, []);
 
@@ -522,7 +607,7 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
 
   const refresh = async () => {
     const nextId = await loadPrescriptions(selectedPrescriptionId);
-    await Promise.all([loadDetail(nextId), loadHistory()]);
+    await Promise.all([loadDetail(nextId), loadHistory(), loadInventory()]);
   };
 
   const dispenseSelected = async () => {
@@ -590,16 +675,19 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
     selectedPrescriptionId,
     selectedDetail,
     history,
+    inventory,
     pharmacyId,
     dispensePlan,
     stats,
     isLoadingList,
     isLoadingDetail,
     isLoadingHistory,
+    isLoadingInventory,
     isDispensing,
     error,
     detailError,
     historyError,
+    inventoryError,
     actionMessage,
     searchQuery,
   };

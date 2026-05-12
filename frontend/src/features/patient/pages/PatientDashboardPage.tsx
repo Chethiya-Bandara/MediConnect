@@ -202,8 +202,14 @@ function calculateBmi(heightCm: string, weightKg: string) {
 }
 
 function formatPrescriptionDosage(dosage: string | null | undefined, unit?: string | null) {
-  if (!dosage) return "Dosage not set";
-  return unit ? `${dosage} ${unit}` : dosage;
+  if (!dosage) return "Dosage per day not set";
+  return unit ? `Dosage per day: ${dosage} ${unit}` : `Dosage per day: ${dosage}`;
+}
+
+function formatPrescriptionInstructions(instructions: string | null | undefined) {
+  if (!instructions) return "No instructions saved";
+
+  return instructions.replace(/Duration:\s*/i, "Duration in days: ");
 }
 
 function buildHealthSnapshotPayload(fields: {
@@ -2563,7 +2569,7 @@ export function PatientDashboardPage() {
                             {formatPrescriptionDosage(item.dosage, item.unit)} • Qty {item.quantity}
                           </p>
                           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                            {item.instructions || "No instructions saved"}
+                            {formatPrescriptionInstructions(item.instructions)}
                           </p>
                         </div>
 
@@ -2695,7 +2701,7 @@ export function PatientDashboardPage() {
                                   {lineItem.quantity_dispensed}
                                 </p>
                                 <p className="mt-1 text-slate-500 dark:text-slate-400">
-                                  {lineItem.instructions || "No instructions saved"}
+                                  {formatPrescriptionInstructions(lineItem.instructions)}
                                 </p>
                               </div>
                             ))
@@ -3232,7 +3238,7 @@ export function PatientDashboardPage() {
                         }}
                         className="rounded-full bg-primary px-4 py-2 text-xs font-bold text-white dark:bg-blue-600"
                       >
-                        Check First Prescription Cost
+                        Check Prescription Cost
                       </button>
                     ) : null}
                   </div>
@@ -3250,7 +3256,6 @@ export function PatientDashboardPage() {
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                             <div>
                               <p className="text-sm font-bold">
-                                Prescription #{prescription.id} •{" "}
                                 {formatStatusLabel(prescription.status)}
                               </p>
                               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -3284,11 +3289,11 @@ export function PatientDashboardPage() {
                                     {item.medicine_name}
                                   </p>
                                   <p className="mt-1 text-slate-500 dark:text-slate-400">
-                                    {formatPrescriptionDosage(item.dosage, item.unit)} • Qty{" "}
-                                    {item.quantity || "Not set"}
+                                    {formatPrescriptionDosage(item.dosage, item.unit)}
+                                    {item.quantity ? ` • Qty ${item.quantity}` : ""}
                                   </p>
                                   <p className="mt-1 text-slate-500 dark:text-slate-400">
-                                    {item.instructions || "No instructions saved"}
+                                    {formatPrescriptionInstructions(item.instructions)}
                                   </p>
                                 </div>
                               ))

@@ -2,6 +2,7 @@ import { apiRequest } from "../../../lib/api/client";
 import { endpoints } from "../../../lib/api/endpoints";
 import type {
   PharmacistDispenseHistoryEntry,
+  PharmacistInventoryItem,
   PharmacistPrescriptionDetail,
   PharmacistPrescriptionItem,
   PharmacistPrescriptionSummary,
@@ -14,6 +15,7 @@ interface RawPrescription {
   dhid?: string | null;
   patient_name?: string | null;
   doctor_name?: string | null;
+  encounter_type?: string | null;
   created_at?: string | null;
   issued_at?: string | null;
   expires_at?: string | null;
@@ -52,6 +54,20 @@ interface RawHistoryEntry {
   doctor_name?: string | null;
   item_count?: number | string | null;
   estimated_total?: number | string | null;
+}
+
+interface RawInventoryItem {
+  id?: string | number | null;
+  pharmacy_id?: string | number | null;
+  pharmacy_name?: string | null;
+  medicine_id?: string | number | null;
+  medicine_name?: string | null;
+  drug_name?: string | null;
+  medicine_unit?: string | null;
+  stock_quantity?: number | string | null;
+  unit_price?: number | string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 interface RawPrescriptionDetail {
@@ -122,6 +138,7 @@ function normalizePrescription(raw: RawPrescription): PharmacistPrescriptionSumm
     patientDhid: raw.patient_dhid ?? raw.dhid ?? null,
     patientName: raw.patient_name ?? null,
     doctorName: raw.doctor_name ?? null,
+    encounterType: raw.encounter_type ?? null,
     issuedAt: raw.issued_at ?? raw.created_at ?? null,
     expiresAt: raw.expires_at ?? null,
     totalItems: asNumber(raw.total_items),
@@ -167,6 +184,21 @@ function normalizeHistory(raw: RawHistoryEntry): PharmacistDispenseHistoryEntry 
   };
 }
 
+function normalizeInventoryItem(raw: RawInventoryItem): PharmacistInventoryItem {
+  return {
+    id: asString(raw.id) ?? buildFallbackId("inventory", raw),
+    pharmacyId: asString(raw.pharmacy_id),
+    pharmacyName: raw.pharmacy_name ?? null,
+    medicineId: asNumber(raw.medicine_id),
+    medicineName: raw.medicine_name ?? raw.drug_name ?? "Unnamed medicine",
+    medicineUnit: raw.medicine_unit ?? null,
+    stockQuantity: asNumber(raw.stock_quantity),
+    unitPrice: asNumber(raw.unit_price),
+    createdAt: raw.created_at ?? null,
+    updatedAt: raw.updated_at ?? null,
+  };
+}
+
 export async function listPharmacistPrescriptions() {
   const response = await apiRequest<RawPrescription[]>(endpoints.pharmacist.prescriptions);
   return response.map((item) => normalizePrescription(item));
@@ -187,6 +219,11 @@ export async function getPharmacistPrescriptionDetail(prescriptionId: string) {
 export async function listPharmacistHistory() {
   const response = await apiRequest<RawHistoryEntry[]>(endpoints.pharmacist.history);
   return response.map((item) => normalizeHistory(item));
+}
+
+export async function listPharmacistInventory() {
+  const response = await apiRequest<RawInventoryItem[]>(endpoints.pharmacist.inventory);
+  return response.map((item) => normalizeInventoryItem(item));
 }
 
 export async function dispensePrescription(

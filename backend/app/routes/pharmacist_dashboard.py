@@ -127,7 +127,7 @@ def _user_map(user_ids) -> dict:
     rows = execute_with_retry(
         lambda: (
             supabase_admin.table("users")
-            .select("id, name, email")
+            .select("id, name, email, pref_name")
             .in_("id", ids)
             .execute()
             .data
@@ -161,7 +161,8 @@ def _patient_map(patient_ids) -> dict:
         user = user_lookup.get(row.get("user_id"), {})
         mapped[row["id"]] = {
             **row,
-            "name": user.get("name"),
+            "name": user.get("pref_name") or user.get("name"),
+            "preferred_name": user.get("pref_name"),
             "email": user.get("email"),
         }
     return mapped
@@ -190,7 +191,8 @@ def _doctor_map(doctor_ids) -> dict:
         user = user_lookup.get(row.get("user_id"), {})
         mapped[row["id"]] = {
             **row,
-            "name": user.get("name"),
+            "name": user.get("pref_name") or user.get("name"),
+            "preferred_name": user.get("pref_name"),
             "email": user.get("email"),
         }
     return mapped
@@ -307,7 +309,7 @@ def _encounter_map(encounter_ids) -> dict:
     rows = execute_with_retry(
         lambda: (
             supabase_admin.table("encounters")
-            .select("id, appointment_id")
+            .select("id, appointment_id, encounter_type, notes")
             .in_("id", ids)
             .execute()
             .data
@@ -316,6 +318,89 @@ def _encounter_map(encounter_ids) -> dict:
         default=list,
     )
     return {row["id"]: row for row in rows}
+
+
+def _doctor_primary_organisation_map(doctor_ids) -> dict:
+    ids = _sorted_unique(doctor_ids)
+    if not ids:
+        return {}
+
+    affiliation_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("doctor_affiliations")
+            .select("doctor_id, hospital_id, status, created_at")
+            .in_("doctor_id", ids)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+    approved_rows = [
+        row for row in affiliation_rows if (row.get("status") or "").lower() in {"approved", "active"}
+    ]
+    hospital_ids = {
+        row.get("hospital_id") for row in approved_rows if row.get("hospital_id") is not None
+    }
+    if not hospital_ids:
+        return {}
+
+    hospital_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("hospitals")
+            .select("id, organisation_id")
+            .in_("id", list(hospital_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+    hospital_lookup = {row["id"]: row for row in hospital_rows if row.get("id") is not None}
+    organisation_lookup = _organisation_map(
+        {
+            row.get("organisation_id")
+            for row in hospital_rows
+            if row.get("organisation_id") is not None
+        }
+    )
+
+    primary_by_doctor = {}
+    for row in approved_rows:
+        doctor_id = row.get("doctor_id")
+        hospital = hospital_lookup.get(row.get("hospital_id"))
+        organisation = organisation_lookup.get(hospital.get("organisation_id"), {}) if hospital else {}
+        if doctor_id is not None and doctor_id not in primary_by_doctor and organisation:
+            primary_by_doctor[doctor_id] = organisation
+
+    return primary_by_doctor
+
+
+def _encounter_type_from_row(encounter: dict | None) -> str | None:
+    encounter = encounter or {}
+    direct = encounter.get("encounter_type")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+
+    notes = encounter.get("notes")
+    if isinstance(notes, str):
+        match = re.search(r"Encounter Type:\s*(.+)", notes, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+    return None
+
+
+def _encounter_type_from_prescription_items(items: list[dict] | None) -> str | None:
+    for item in items or []:
+      instructions = item.get("instructions")
+      if isinstance(instructions, str):
+          match = re.search(r"Encounter type:\s*([^|,\n]+)", instructions, re.IGNORECASE)
+          if match:
+              return match.group(1).strip()
+
+    return None
 
 
 def _appointment_map(appointment_ids) -> dict:
@@ -449,6 +534,21 @@ def _inventory_map_for_pharmacy(pharmacy_id: int | None, medicine_ids) -> dict:
     }
 
 
+def _inventory_rows_for_pharmacy(pharmacy_id: int):
+    return execute_with_retry(
+        lambda: (
+            supabase_admin.table("inventory")
+            .select("*")
+            .eq("pharmacy_id", pharmacy_id)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+
+
 def _build_prescription_context(prescriptions: list[dict]) -> dict:
     encounter_lookup = _encounter_map(
         {row.get("encounter_id") for row in prescriptions if row.get("encounter_id")}
@@ -471,6 +571,9 @@ def _build_prescription_context(prescriptions: list[dict]) -> dict:
     return {
         "patient_lookup": _patient_map({row.get("patient_id") for row in prescriptions if row.get("patient_id")}),
         "doctor_lookup": _doctor_map({row.get("doctor_id") for row in prescriptions if row.get("doctor_id")}),
+        "doctor_organisation_lookup": _doctor_primary_organisation_map(
+            {row.get("doctor_id") for row in prescriptions if row.get("doctor_id")}
+        ),
         "encounter_lookup": encounter_lookup,
         "appointment_lookup": appointment_lookup,
         "organisation_lookup": organisation_lookup,
@@ -485,6 +588,7 @@ def _serialize_prescription_summary(
     *,
     patient_lookup: dict,
     doctor_lookup: dict,
+    doctor_organisation_lookup: dict,
     encounter_lookup: dict,
     appointment_lookup: dict,
     organisation_lookup: dict,
@@ -494,7 +598,11 @@ def _serialize_prescription_summary(
     doctor = doctor_lookup.get(row.get("doctor_id"), {})
     encounter = encounter_lookup.get(row.get("encounter_id"), {})
     appointment = appointment_lookup.get(encounter.get("appointment_id"), {})
-    organisation = organisation_lookup.get(appointment.get("organisation_id"), {})
+    organisation = organisation_lookup.get(appointment.get("organisation_id"), {}) or doctor_organisation_lookup.get(
+        row.get("doctor_id"),
+        {},
+    )
+    prescription_items = prescription_items_lookup.get(row.get("id"), [])
 
     organisation_name = organisation.get("name")
     return {
@@ -505,12 +613,14 @@ def _serialize_prescription_summary(
         "created_at": row.get("created_at"),
         "issued_at": row.get("created_at"),
         "patient_dhid": patient.get("dhid"),
-        "patient_name": patient.get("name"),
-        "doctor_name": doctor.get("name"),
+        "patient_name": patient.get("preferred_name") or patient.get("name"),
+        "doctor_name": doctor.get("preferred_name") or doctor.get("name"),
+        "encounter_type": _encounter_type_from_row(encounter)
+        or _encounter_type_from_prescription_items(prescription_items),
         "hospital_name": organisation_name,
         "organisation_name": organisation_name,
         "expires_at": _resolve_prescription_expiry(row),
-        "total_items": len(prescription_items_lookup.get(row.get("id"), [])),
+        "total_items": len(prescription_items),
         "signature_valid": None,
     }
 
@@ -591,8 +701,8 @@ def _dispensing_history_entries(dispensing_rows: list[dict]) -> list[dict]:
                 "dispensed_at": row.get("created_at") or row.get("dispensed_at"),
                 "pharmacist_id": row.get("pharmacist_id"),
                 "patient_dhid": patient.get("dhid"),
-                "patient_name": patient.get("name"),
-                "doctor_name": doctor.get("name"),
+                "patient_name": patient.get("preferred_name") or patient.get("name"),
+                "doctor_name": doctor.get("preferred_name") or doctor.get("name"),
                 "item_count": item_count_lookup.get(row.get("id"), 0),
                 "estimated_total": billing.get("total_amount") or row.get("total_price") or 0,
             }
@@ -1016,6 +1126,30 @@ def get_dispense_history(user: dict = Depends(PharmacistOnly)):
         default=list,
     )
     return _dispensing_history_entries(dispensing_rows)
+
+
+@router.get("/inventory", dependencies=[Depends(PharmacistOnly)])
+def get_pharmacist_inventory(user: dict = Depends(PharmacistOnly)):
+    pharmacy = _resolve_pharmacist_pharmacy(user)
+    rows = _inventory_rows_for_pharmacy(pharmacy["id"])
+    medicine_lookup = _medicine_map(
+        {row.get("medicine_id") for row in rows if row.get("medicine_id") is not None}
+    )
+    organisation = _organisation_map({pharmacy.get("organisation_id")}).get(
+        pharmacy.get("organisation_id"),
+        {},
+    )
+
+    return [
+        {
+            **row,
+            "pharmacy_id": pharmacy.get("organisation_id"),
+            "pharmacy_name": organisation.get("name"),
+            "medicine_name": _inventory_display_name(row, medicine_lookup),
+            "medicine_unit": medicine_lookup.get(row.get("medicine_id"), {}).get("unit"),
+        }
+        for row in rows
+    ]
 
 # ── Bill Generation (Bihanga B-5.2.1) ────────────────────────────────────────
 # unitPrice MUST come from server-side DB — never from client request

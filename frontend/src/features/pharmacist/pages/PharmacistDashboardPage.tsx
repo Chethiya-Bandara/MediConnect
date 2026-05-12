@@ -76,6 +76,44 @@ function formatStatusLabel(value: string | null | undefined) {
   return value.replaceAll("_", " ");
 }
 
+function formatDosagePerDay(dosage: string | null | undefined, unit?: string | null) {
+  if (!dosage) {
+    return "Dosage not supplied";
+  }
+
+  return `Dosage: ${dosage}${unit ? ` ${unit}` : ""} per day`;
+}
+
+function formatPrescriptionInstructionSummary(
+  instructions: string | null | undefined,
+  unit?: string | null,
+) {
+  const normalized = (instructions ?? "").trim();
+  const dosageMatch = normalized.match(/(\d+(?:\.\d+)?)\s*per\s*day/i);
+  const durationMatch = normalized.match(/Duration:\s*(\d+)/i);
+  const extras = normalized
+    .replace(/(\d+(?:\.\d+)?)\s*per\s*day/i, "")
+    .replace(/Duration:\s*\d+/i, "")
+    .replace(/Encounter type:\s*[^|,]+/i, "")
+    .replace(/\s*\|\s*/g, " | ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(/^[|,\s-]+|[|,\s-]+$/g, "");
+
+  const parts: string[] = [];
+  if (dosageMatch) {
+    parts.push(`Dosage: ${dosageMatch[1]}${unit ? ` ${unit}` : ""} per day`);
+  }
+  if (durationMatch) {
+    parts.push(`Duration: ${durationMatch[1]} Days`);
+  }
+  if (extras) {
+    parts.push(extras);
+  }
+
+  return parts.join(", ") || "No extra instructions from backend.";
+}
+
 function noticeClassName(tone: "error" | "info" | "success") {
   if (tone === "success") {
     return "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300";
@@ -285,8 +323,11 @@ export function PharmacistDashboardPage() {
   const [isLight, setIsLight] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
   const [historyStatusFilter, setHistoryStatusFilter] = useState("ALL");
+  const [stockSearch, setStockSearch] = useState("");
+  const [stockStatusFilter, setStockStatusFilter] = useState("ALL");
   const dashboard = usePharmacistDashboard(user?.id, user?.organisationId ?? null);
   const deferredHistorySearch = useDeferredValue(historySearch.trim().toLowerCase());
+  const deferredStockSearch = useDeferredValue(stockSearch.trim().toLowerCase());
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("theme");
@@ -347,6 +388,44 @@ export function PharmacistDashboardPage() {
       return matchesSearch && matchesStatus;
     });
   }, [dashboard.history, deferredHistorySearch, historyStatusFilter]);
+  const filteredInventory = useMemo(() => {
+    return dashboard.inventory.filter((item) => {
+      const quantity = item.stockQuantity ?? 0;
+      const stockState =
+        quantity <= 0 ? "OUT" : quantity <= 25 ? "LOW" : "HEALTHY";
+      const matchesSearch =
+        !deferredStockSearch ||
+        [item.medicineName, item.medicineUnit ?? "", item.id]
+          .join(" ")
+          .toLowerCase()
+          .includes(deferredStockSearch);
+      const matchesStatus = stockStatusFilter === "ALL" || stockState === stockStatusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [dashboard.inventory, deferredStockSearch, stockStatusFilter]);
+  const inventoryStats = useMemo(() => {
+    const totalItems = dashboard.inventory.length;
+    const outOfStockItems = dashboard.inventory.filter((item) => (item.stockQuantity ?? 0) <= 0).length;
+    const lowStockItems = dashboard.inventory.filter((item) => {
+      const quantity = item.stockQuantity ?? 0;
+      return quantity > 0 && quantity <= 25;
+    }).length;
+    const totalStockValue = dashboard.inventory.reduce(
+      (sum, item) => sum + (item.stockQuantity ?? 0) * (item.unitPrice ?? 0),
+      0,
+    );
+
+    return {
+      totalItems,
+      lowStockItems,
+      outOfStockItems,
+      totalStockValue,
+    };
+  }, [dashboard.inventory]);
+  const stockPharmacyName =
+    dashboard.inventory[0]?.pharmacyName ??
+    selectedPrescription?.sourceName ??
+    "Affiliated pharmacy";
   const plannedUnits = useMemo(
     () =>
       dashboard.plannedItems.reduce((sum, { quantityToDispense }) => sum + quantityToDispense, 0),
@@ -476,6 +555,7 @@ export function PharmacistDashboardPage() {
         <nav className="flex-1 space-y-1 px-2">
           {[
             { id: "home" as const, label: "Home", icon: Home },
+            { id: "stock" as const, label: "Medicine Stock", icon: Package },
             { id: "dispensing" as const, label: "Prescription Dispensing", icon: Pill },
             { id: "history" as const, label: "Transaction History", icon: History },
           ].map((item) => {
@@ -1019,7 +1099,10 @@ export function PharmacistDashboardPage() {
                             </div>
                             <div className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
                               <p>Doctor: {result.doctorName ?? "Not provided"}</p>
-                              <p>Source: {result.sourceName ?? "Organisation unavailable"}</p>
+                              <p>Hospital: {result.sourceName ?? "Organisation unavailable"}</p>
+                              <p>
+                                Encounter type: {result.encounterType ?? "Not provided"}
+                              </p>
                               <p>Items: {result.totalItems ?? 0}</p>
                               <p>Issued: {result.issuedAt ? formatDate(result.issuedAt) : "Unknown"}</p>
                               <p>Valid until: {result.expiresAt ? formatDate(result.expiresAt) : "No expiry set"}</p>
@@ -1070,26 +1153,28 @@ export function PharmacistDashboardPage() {
                                   {item.medicineName}
                                 </p>
                                 <p className="mt-1 text-xs italic text-slate-500 dark:text-slate-400">
-                                  {item.dosage
-                                    ? `${item.dosage}${item.unit ? ` ${item.unit}` : ""} per day`
-                                    : "Dosage not supplied"}
+                                  {formatDosagePerDay(item.dosage, item.unit)}
                                 </p>
                                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                                  {item.instructions ?? "No extra instructions from backend."}
+                                  {formatPrescriptionInstructionSummary(
+                                    item.instructions,
+                                    item.unit,
+                                  )}
                                 </p>
                                 <div className="mt-2 space-y-1 text-xs">
+                                  {item.unitPrice !== null ? (
+                                    <p className="text-emerald-700 dark:text-emerald-300">
+                                      {`Price locked: ${formatLkr(item.unitPrice)}${item.catalogUnit ? ` per ${item.catalogUnit}` : ""}`}
+                                    </p>
+                                  ) : null}
                                   <p
                                     className={
-                                      item.unitPrice !== null
-                                        ? "text-emerald-700 dark:text-emerald-300"
-                                        : "text-red-600 dark:text-red-400"
+                                      item.availabilityMessage ===
+                                      "This medicine is not stocked in your pharmacy."
+                                        ? "text-red-600 dark:text-red-400"
+                                        : "text-slate-500 dark:text-slate-400"
                                     }
                                   >
-                                    {item.unitPrice !== null
-                                      ? `Price locked: ${formatLkr(item.unitPrice)}${item.catalogUnit ? ` per ${item.catalogUnit}` : ""}`
-                                      : "Not billable from this pharmacy right now"}
-                                  </p>
-                                  <p className="text-slate-500 dark:text-slate-400">
                                     {item.availabilityMessage ?? "Availability not confirmed yet."}
                                     {item.pharmacyStock !== null
                                       ? ` Stock on hand: ${item.pharmacyStock}.`
@@ -1097,9 +1182,6 @@ export function PharmacistDashboardPage() {
                                   </p>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
-                                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                    Current: {formatStatusLabel(selectedPrescription.status)}
-                                  </span>
                                   {metrics.remainingQuantity !== null &&
                                   metrics.remainingQuantity <= 0 ? (
                                     <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
@@ -1114,7 +1196,7 @@ export function PharmacistDashboardPage() {
                                     Prescribed: {metrics.prescribedQuantity ?? "N/A"} {metrics.quantityLabel}
                                   </p>
                                   <p className="text-slate-500 dark:text-slate-400">
-                                    Dispensed so far: {item.dispensedQuantity}
+                                    Dispensed so far: {metrics.dispensedQuantity} {metrics.quantityLabel}
                                   </p>
                                   <p
                                     className={cn(
@@ -1126,11 +1208,11 @@ export function PharmacistDashboardPage() {
                                   >
                                     Remaining: {metrics.remainingQuantity ?? "Unknown"} {metrics.quantityLabel}
                                   </p>
-                                  {item.unit === "ml" || item.unit === "drops" ? (
+                                  {metrics.unitKind === "ml" || metrics.unitKind === "drops" ? (
                                     <p className="text-slate-500 dark:text-slate-400">
                                       {metrics.dailyDose && metrics.durationDays
-                                        ? `${metrics.dailyDose} ${item.unit} x ${metrics.durationDays} day(s)${
-                                            item.unit === "drops" ? " (20 drops = 1 mL)" : ""
+                                        ? `${metrics.dailyDose} ${item.unit ?? metrics.unitKind} x ${metrics.durationDays} day(s)${
+                                            metrics.unitKind === "drops" ? " (20 drops = 1 mL)" : ""
                                           }${
                                             metrics.packageCapacity
                                               ? ` -> ${metrics.quantityLabel} from ${metrics.packageCapacity} capacity`
@@ -1178,10 +1260,10 @@ export function PharmacistDashboardPage() {
                                     <option value="PARTIALLY_DISPENSED">PARTIALLY_DISPENSED</option>
                                     <option value="DISPENSED">DISPENSED</option>
                                     <option disabled value="CANCELLED">
-                                      CANCELLED (unsupported)
+                                      CANCELLED
                                     </option>
                                     <option disabled value="EXPIRED">
-                                      EXPIRED (unsupported)
+                                      EXPIRED
                                     </option>
                                   </select>
 
@@ -1398,6 +1480,189 @@ export function PharmacistDashboardPage() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {section === "stock" ? (
+          <div className="transition-opacity duration-300">
+            <header className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h1 className="text-3xl font-extrabold tracking-tight">Medicine Stock</h1>
+                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                  Pharmacy: <span className="font-semibold text-slate-800 dark:text-slate-200">{stockPharmacyName}</span>
+                  {" • "}ID:{" "}
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {dashboard.pharmacyId || "Not set"}
+                  </span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void dashboard.refresh()}
+                className="inline-flex items-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                <RefreshCcw size={16} />
+                Refresh stock
+              </button>
+            </header>
+
+            <div className="mb-6 grid gap-4 lg:grid-cols-4">
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Medicines listed
+                </p>
+                <p className="mt-3 text-3xl font-extrabold">{inventoryStats.totalItems}</p>
+              </div>
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Low stock
+                </p>
+                <p className="mt-3 text-3xl font-extrabold text-amber-600 dark:text-amber-300">
+                  {inventoryStats.lowStockItems}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Out of stock
+                </p>
+                <p className="mt-3 text-3xl font-extrabold text-red-600 dark:text-red-300">
+                  {inventoryStats.outOfStockItems}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Visible stock value
+                </p>
+                <p className="mt-3 text-2xl font-extrabold">{formatLkr(inventoryStats.totalStockValue)}</p>
+              </div>
+            </div>
+
+            <div className="mb-6 grid gap-4 lg:grid-cols-[1.4fr,0.8fr,0.8fr]">
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <label className="block text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Search medicine
+                </label>
+                <div className="relative mt-2">
+                  <Search
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    size={16}
+                  />
+                  <input
+                    value={stockSearch}
+                    onChange={(event) => setStockSearch(event.target.value)}
+                    placeholder="Medicine name, unit, row ID"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    type="text"
+                  />
+                </div>
+              </div>
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <label className="block text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Stock filter
+                </label>
+                <select
+                  value={stockStatusFilter}
+                  onChange={(event) => setStockStatusFilter(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                >
+                  <option value="ALL">All stock states</option>
+                  <option value="HEALTHY">Healthy</option>
+                  <option value="LOW">Low stock</option>
+                  <option value="OUT">Out of stock</option>
+                </select>
+              </div>
+              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  Visible rows
+                </p>
+                <p className="mt-3 text-3xl font-extrabold">{filteredInventory.length}</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  Filtered from your pharmacy inventory only
+                </p>
+              </div>
+            </div>
+
+            {dashboard.inventoryError ? (
+              <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+                {dashboard.inventoryError}
+              </div>
+            ) : null}
+
+            <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              {dashboard.isLoadingInventory ? (
+                <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                  Loading live inventory rows...
+                </div>
+              ) : filteredInventory.length === 0 ? (
+                <div className="flex min-h-[320px] flex-col items-center justify-center px-6 text-center">
+                  <Package className="mb-4 text-slate-300 dark:text-slate-700" size={52} />
+                  <p className="font-medium text-slate-400">
+                    {dashboard.inventory.length === 0
+                      ? "No inventory rows were returned for this pharmacy yet."
+                      : "No medicines matched the current stock search and filters."}
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+                      <tr>
+                        <th className="px-6 py-4 font-semibold">Medicine</th>
+                        <th className="px-6 py-4 font-semibold">Unit</th>
+                        <th className="px-6 py-4 font-semibold">Stock</th>
+                        <th className="px-6 py-4 font-semibold">Unit Price</th>
+                        <th className="px-6 py-4 font-semibold">Status</th>
+                        <th className="px-6 py-4 font-semibold">Updated</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredInventory.map((item) => {
+                        const quantity = item.stockQuantity ?? 0;
+                        const isOut = quantity <= 0;
+                        const isLow = quantity > 0 && quantity <= 25;
+
+                        return (
+                          <tr
+                            key={item.id}
+                            className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                          >
+                            <td className="px-6 py-4">
+                              <p className="font-bold">{item.medicineName}</p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                Row ID {item.id}
+                              </p>
+                            </td>
+                            <td className="px-6 py-4">{item.medicineUnit ?? "Not set"}</td>
+                            <td className="px-6 py-4 font-semibold">{quantity}</td>
+                            <td className="px-6 py-4">{formatLkr(item.unitPrice)}</td>
+                            <td className="px-6 py-4">
+                              <span
+                                className={cn(
+                                  "inline-flex rounded-full px-3 py-1 text-xs font-bold",
+                                  isOut &&
+                                    "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300",
+                                  !isOut &&
+                                    isLow &&
+                                    "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+                                  !isOut &&
+                                    !isLow &&
+                                    "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+                                )}
+                              >
+                                {isOut ? "Out of stock" : isLow ? "Low stock" : "Healthy"}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-xs text-slate-500 dark:text-slate-400">
+                              {formatDateTime(item.updatedAt ?? item.createdAt)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         ) : null}
