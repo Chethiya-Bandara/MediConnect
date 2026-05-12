@@ -571,7 +571,7 @@ export function PharmacistDashboardPage() {
               {/* Content Layer */}
               <div className="relative z-10 max-w-4xl px-6 text-center text-white">
                 <span className="mb-4 inline-block rounded-full bg-blue-500/20 px-4 py-1.5 text-xs font-bold tracking-[0.2em] uppercase text-blue-100 backdrop-blur-md border border-blue-400/30">
-                  State Hospital Dispensing Portal
+                  State Pharmacy Dispensing Portal
                 </span>
                 <h1 className="font-headline text-5xl font-extrabold tracking-tight sm:text-7xl drop-shadow-2xl">
                   Welcome, <span className="text-blue-400">{user?.name}</span>
@@ -1046,15 +1046,6 @@ export function PharmacistDashboardPage() {
                         Item data from the selected prescription.
                       </p>
                     </div>
-                    {dashboard.isLoadingList ? (
-                      <span className="text-sm text-slate-500 dark:text-slate-400">
-                        Loading queue...
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        {dashboard.filteredPrescriptions.length} results in queue
-                      </span>
-                    )}
                   </div>
 
                   {selectedPrescription && dashboard.selectedDetail ? (
@@ -1498,7 +1489,6 @@ export function PharmacistDashboardPage() {
                         <th className="px-6 py-4 font-semibold">Items</th>
                         <th className="px-6 py-4 font-semibold">Value</th>
                         <th className="px-6 py-4 font-semibold">Status</th>
-                        <th className="px-6 py-4 font-semibold">Backend-safe detail</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1524,10 +1514,6 @@ export function PharmacistDashboardPage() {
                           <td className="px-6 py-4">
                             <PrescriptionStatusBadge status={entry.status} />
                           </td>
-                          <td className="px-6 py-4 text-xs text-slate-500 dark:text-slate-400">
-                            Medicine count, DHID, and billing metadata only. Diagnosis and encounter
-                            notes stay blocked.
-                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1541,13 +1527,7 @@ export function PharmacistDashboardPage() {
 
       <footer className="ml-64 border-t border-slate-100 bg-slate-50 transition-colors dark:border-slate-800 dark:bg-slate-900">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-8 py-12 text-xs uppercase tracking-widest text-slate-500 md:flex-row">
-          <p className="font-bold">© 2026 National Health Portal</p>
-          <div className="flex gap-8">
-            <span className="cursor-default transition-colors hover:text-primary">Security</span>
-            <span className="cursor-default transition-colors hover:text-primary">
-              Privacy Policy
-            </span>
-          </div>
+          <p className="font-bold">© 2026 National Health Ministry</p>
         </div>
       </footer>
     </div>
