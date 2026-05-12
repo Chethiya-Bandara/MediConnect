@@ -128,6 +128,15 @@ export function useHospitalAdminDashboard() {
       const slots = await getDoctorAvailability(doctorId, slotDate);
       setAvailabilitySlots(slots);
       setActiveDoctorId(doctorId);
+      setDoctorsMessage(
+        slotDate
+          ? slots.length > 0
+            ? `Loaded ${slots.length} slot(s) for ${slotDate}.`
+            : `No slots found for ${slotDate} yet.`
+          : slots.length > 0
+            ? `Loaded ${slots.length} slot(s).`
+            : "No slots found yet.",
+      );
       return true;
     } catch (loadError) {
       setAvailabilitySlots([]);

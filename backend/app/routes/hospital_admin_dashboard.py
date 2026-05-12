@@ -111,6 +111,19 @@ def _insert_availability_rows(rows: list[dict]):
     )
 
 
+def _log_audit_action(user_id: str, action: str, entity: str, entity_id: int | str):
+    now = datetime.now(SRI_LANKA_TZ).isoformat()
+    supabase_admin.table("audit_logs").insert(
+        {
+            "action": action,
+            "entity": entity,
+            "entity_id": entity_id,
+            "timestamp": now,
+            "user_id": user_id,
+        }
+    ).execute()
+
+
 def _approved_hospital_affiliation(doctor_id: int | str, hospital_id: int | str) -> Optional[dict]:
     rows = (
         supabase_admin.table("doctor_affiliations")
@@ -205,7 +218,7 @@ def _doctor_details_map(doctor_ids: set[int]):
     user_ids = [row["user_id"] for row in doctors if row.get("user_id")]
     users = (
         supabase_admin.table("users")
-        .select("id, name, email")
+        .select("id, name, pref_name, email")
         .in_("id", user_ids)
         .execute()
         .data
@@ -218,7 +231,7 @@ def _doctor_details_map(doctor_ids: set[int]):
         linked_user = user_map.get(doctor.get("user_id"), {})
         result[doctor["id"]] = {
             "doctor_id": doctor["id"],
-            "doctor_name": linked_user.get("name") or linked_user.get("email") or f"Doctor #{doctor['id']}",
+            "doctor_name": linked_user.get("pref_name") or linked_user.get("name") or linked_user.get("email") or f"Doctor #{doctor['id']}",
             "doctor_email": linked_user.get("email"),
             "specialization": doctor.get("specialization"),
             "slmc_number": doctor.get("slmc_number"),
@@ -226,12 +239,12 @@ def _doctor_details_map(doctor_ids: set[int]):
     return result
 
 
-def _recent_audit_logs(current_user_id: str, affiliation_ids: set[int]):
+def _recent_audit_logs(current_user_id: str):
     logs = (
         supabase_admin.table("audit_logs")
         .select("*")
         .order("timestamp", desc=True)
-        .limit(50)
+        .limit(100)
         .execute()
         .data
         or []
@@ -241,10 +254,6 @@ def _recent_audit_logs(current_user_id: str, affiliation_ids: set[int]):
         row
         for row in logs
         if row.get("user_id") == current_user_id
-        or (
-            row.get("entity") == "doctor_affiliations"
-            and row.get("entity_id") in affiliation_ids
-        )
     ][:20]
 
     actor_ids = {row["user_id"] for row in relevant if row.get("user_id")}
@@ -385,7 +394,7 @@ def get_hospital_admin_dashboard(context=Depends(_hospital_admin_context)):
         "pending_affiliations": pending_affiliations,
         "pending_invitations": pending_invitations,
         "active_staff": active_staff,
-        "audit_logs": _recent_audit_logs(current_user["user_id"], affiliation_ids),
+        "audit_logs": _recent_audit_logs(current_user["user_id"]),
     }
 
 
@@ -414,6 +423,12 @@ def decide_affiliation(
     supabase_admin.table("doctor_affiliations").update(
         {"status": normalized_status}
     ).eq("id", data.affiliation_id).execute()
+    _log_audit_action(
+        context["user"]["user_id"],
+        f"AFFILIATION_{normalized_status.upper()}",
+        "doctor_affiliations",
+        data.affiliation_id,
+    )
 
     return {
         "message": f"Affiliation {normalized_status}.",
@@ -443,6 +458,12 @@ def revoke_affiliation(
     supabase_admin.table("doctor_affiliations").update(
         {"status": "revoked"}
     ).eq("id", data.affiliation_id).execute()
+    _log_audit_action(
+        context["user"]["user_id"],
+        "AFFILIATION_REVOKED",
+        "doctor_affiliations",
+        data.affiliation_id,
+    )
 
     return {"message": "Affiliation revoked"}
 
@@ -528,6 +549,13 @@ def create_availability(
         raise HTTPException(status_code=400, detail="No slots could be generated for the selected window")
 
     created = _insert_availability_rows(rows)
+    if created:
+        _log_audit_action(
+            context["user"]["user_id"],
+            "AVAILABILITY_CREATED",
+            "availability_slots",
+            created[0].get("id") or doctor_id,
+        )
 
     return {
         "message": f"Created {len(created)} availability slot(s).",
@@ -593,6 +621,12 @@ def update_availability(
         .data
         or []
     )
+    _log_audit_action(
+        context["user"]["user_id"],
+        "AVAILABILITY_UPDATED",
+        "availability_slots",
+        slot_id,
+    )
     return {"success": True, "slot": updated[0] if updated else None}
 
 
@@ -623,6 +657,12 @@ def delete_availability(
         raise HTTPException(status_code=400, detail="Booked slots cannot be deleted")
 
     supabase_admin.table("availability_slots").delete().eq("id", slot_id).execute()
+    _log_audit_action(
+        context["user"]["user_id"],
+        "AVAILABILITY_DELETED",
+        "availability_slots",
+        slot_id,
+    )
     return {"success": True}
 
 
@@ -655,6 +695,12 @@ def cancel_booked_appointment_for_slot(
     appointment = _active_slot_appointment(current, context["organisation"]["id"])
     if not appointment:
         supabase_admin.table("availability_slots").update({"is_booked": False}).eq("id", slot_id).execute()
+        _log_audit_action(
+            context["user"]["user_id"],
+            "AVAILABILITY_REOPENED",
+            "availability_slots",
+            slot_id,
+        )
         return {
             "success": True,
             "message": "Slot was marked booked without an active appointment. It has been reopened.",
@@ -663,6 +709,12 @@ def cancel_booked_appointment_for_slot(
 
     supabase_admin.table("appointments").update({"status": "cancelled"}).eq("id", appointment["id"]).execute()
     supabase_admin.table("availability_slots").update({"is_booked": False}).eq("id", slot_id).execute()
+    _log_audit_action(
+        context["user"]["user_id"],
+        "BOOKING_CANCELLED",
+        "appointments",
+        appointment["id"],
+    )
 
     return {
         "success": True,
@@ -677,6 +729,7 @@ def invite_doctor(
     context=Depends(_hospital_admin_context),
 ):
     hospital_id = context["hospital"]["id"]
+    normalized_email = str(data.doctor_email).strip().lower()
     if data.hospital_id:
         provided_value = str(data.hospital_id).strip()
         allowed_values = {
@@ -686,13 +739,36 @@ def invite_doctor(
         if provided_value not in allowed_values:
             raise HTTPException(status_code=403, detail="You can only invite for your own hospital")
 
-    supabase_admin.table("doctor_invitations").insert(
+    existing_pending = (
+        supabase_admin.table("doctor_invitations")
+        .select("id")
+        .eq("doctor_email", normalized_email)
+        .eq("hospital_id", hospital_id)
+        .eq("status", "PENDING")
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if existing_pending:
+        raise HTTPException(status_code=409, detail="A pending invitation already exists for this doctor.")
+
+    created = (
+        supabase_admin.table("doctor_invitations").insert(
         {
-            "doctor_email": data.doctor_email,
+            "doctor_email": normalized_email,
             "hospital_id": hospital_id,
             "status": "PENDING",
             "sent_at": datetime.utcnow().isoformat(),
         }
-    ).execute()
+    ).execute().data
+        or []
+    )
+    _log_audit_action(
+        context["user"]["user_id"],
+        "DOCTOR_INVITED",
+        "doctor_invitations",
+        created[0].get("id") if created else hospital_id,
+    )
 
     return {"message": "Invitation sent"}

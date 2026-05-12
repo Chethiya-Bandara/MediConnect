@@ -78,6 +78,15 @@ function buildSriLankaIso(slotDate: string, slotTime: string) {
   return `${slotDate}T${slotTime}:00+05:30`;
 }
 
+function getSriLankaTodayInputValue() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Colombo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 function buildInitials(name: string | null | undefined) {
   const safe = (name || "Hospital Admin").trim();
   const parts = safe.split(/\s+/).filter(Boolean);
@@ -143,6 +152,7 @@ function noticeTone(message: string | null | undefined) {
     lowered.includes("invalid") ||
     lowered.includes("could not") ||
     lowered.includes("not found") ||
+    lowered.includes("overlap") ||
     lowered.includes("unavailable")
   ) {
     return "error";
@@ -187,10 +197,9 @@ export function HospitalAdminDashboardPage() {
   const [view, setView] = useState<DashboardView>("overview");
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteHospitalId, setInviteHospitalId] = useState("");
   const [selectedAffiliationId, setSelectedAffiliationId] = useState("");
   const [selectedDoctorId, setSelectedDoctorId] = useState("");
-  const [slotDate, setSlotDate] = useState(new Date().toISOString().slice(0, 10));
+  const [slotDate, setSlotDate] = useState(getSriLankaTodayInputValue);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("12:00");
   const [slotDurationMinutes, setSlotDurationMinutes] = useState(15);
@@ -198,14 +207,17 @@ export function HospitalAdminDashboardPage() {
   const [editingStartTime, setEditingStartTime] = useState("");
   const [editingEndTime, setEditingEndTime] = useState("");
   const [auditSearch, setAuditSearch] = useState("");
+  const [appliedAuditSearch, setAppliedAuditSearch] = useState("");
   const [staffSearch, setStaffSearch] = useState("");
   const [staffFilter, setStaffFilter] = useState<StaffFilter>("all");
   const [auditActionFilter, setAuditActionFilter] = useState("ALL");
+  const [appliedAuditActionFilter, setAppliedAuditActionFilter] = useState("ALL");
   const [auditRoleFilter, setAuditRoleFilter] = useState("ALL");
+  const [appliedAuditRoleFilter, setAppliedAuditRoleFilter] = useState("ALL");
   const [slotSaveMessage, setSlotSaveMessage] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
 
-  const deferredAuditSearch = useDeferredValue(auditSearch.trim().toLowerCase());
+  const deferredAuditSearch = useDeferredValue(appliedAuditSearch.trim().toLowerCase());
   const deferredStaffSearch = useDeferredValue(staffSearch.trim().toLowerCase());
 
   const schedulingDoctors = useMemo(() => {
@@ -244,12 +256,6 @@ export function HospitalAdminDashboardPage() {
   }, [schedulingDoctors, selectedDoctorId]);
 
   useEffect(() => {
-    if (!inviteHospitalId) {
-      setInviteHospitalId(dashboard.hospital.id ?? String(user?.organisationId ?? ""));
-    }
-  }, [dashboard.hospital.id, inviteHospitalId, user?.organisationId]);
-
-  useEffect(() => {
     if (!selectedAffiliationId && dashboard.pendingAffiliations[0]?.affiliationId) {
       setSelectedAffiliationId(dashboard.pendingAffiliations[0].affiliationId);
     }
@@ -278,12 +284,14 @@ export function HospitalAdminDashboardPage() {
           .toLowerCase()
           .includes(deferredAuditSearch);
       const matchesAction =
-        auditActionFilter === "ALL" || (row.action ?? "UNKNOWN") === auditActionFilter;
+        appliedAuditActionFilter === "ALL" ||
+        (row.action ?? "UNKNOWN") === appliedAuditActionFilter;
       const matchesRole =
-        auditRoleFilter === "ALL" || (row.actorRole ?? "Unknown") === auditRoleFilter;
+        appliedAuditRoleFilter === "ALL" ||
+        (row.actorRole ?? "Unknown") === appliedAuditRoleFilter;
       return matchesSearch && matchesAction && matchesRole;
     });
-  }, [auditActionFilter, auditRoleFilter, dashboard.auditLogs, deferredAuditSearch]);
+  }, [appliedAuditActionFilter, appliedAuditRoleFilter, dashboard.auditLogs, deferredAuditSearch]);
 
   const filteredPendingAffiliations = useMemo(() => {
     return dashboard.pendingAffiliations.filter((row) => {
@@ -400,14 +408,12 @@ export function HospitalAdminDashboardPage() {
 
   const handleInviteDoctor = async () => {
     const normalizedEmail = inviteEmail.trim().toLowerCase();
-    const normalizedHospitalId = inviteHospitalId.trim();
-    if (!normalizedEmail || !normalizedHospitalId) {
+    if (!normalizedEmail) {
       return;
     }
 
     const success = await dashboard.sendInvite({
       doctorEmail: normalizedEmail,
-      hospitalId: normalizedHospitalId,
     });
 
     if (success) {
@@ -525,6 +531,12 @@ export function HospitalAdminDashboardPage() {
       ]),
     ]);
     setExportMessage(`Exported ${filteredAuditLogs.length} audit row(s) to CSV.`);
+  };
+
+  const applyAuditFilters = () => {
+    setAppliedAuditSearch(auditSearch);
+    setAppliedAuditRoleFilter(auditRoleFilter);
+    setAppliedAuditActionFilter(auditActionFilter);
   };
 
   return (
@@ -1058,7 +1070,7 @@ export function HospitalAdminDashboardPage() {
                 <aside className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <h2 className="font-headline text-lg font-bold">Invite Doctor</h2>
                   <p className="text-sm text-slate-500 dark:text-slate-400">
-                    Send an invite to a doctor to join the selected hospital.
+                    Send an invite to a doctor to join this hospital.
                   </p>
                   <div className="space-y-4">
                     <input
@@ -1067,20 +1079,10 @@ export function HospitalAdminDashboardPage() {
                       placeholder="doctor@hospital.lk"
                       className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
                     />
-                    <input
-                      value={inviteHospitalId}
-                      onChange={(event) => setInviteHospitalId(event.target.value)}
-                      placeholder="Organization ID"
-                      className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
-                    />
                     <button
                       type="button"
                       onClick={() => void handleInviteDoctor()}
-                      disabled={
-                        dashboard.isSubmittingDoctorAction ||
-                        !inviteEmail.trim() ||
-                        !inviteHospitalId.trim()
-                      }
+                      disabled={dashboard.isSubmittingDoctorAction || !inviteEmail.trim()}
                       className="w-full rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60"
                     >
                       {dashboard.isSubmittingDoctorAction ? "Sending..." : "Send Invite"}
@@ -1093,7 +1095,6 @@ export function HospitalAdminDashboardPage() {
                     </p>
                     <ul className="mt-3 space-y-2">
                       <li>Use the doctor&apos;s login email, not a personal alias.</li>
-                      <li>Organization ID must match the ID assigned to this hospital organisation.</li>
                       <li>
                         Pending invites will remain pending until the doctor accepts the invitation.
                         After which, the doctor will join the hospital.
@@ -1542,6 +1543,11 @@ export function HospitalAdminDashboardPage() {
                     type="text"
                     value={auditSearch}
                     onChange={(event) => setAuditSearch(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        applyAuditFilters();
+                      }
+                    }}
                     placeholder="Search actor, action, or detail"
                     className="rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-white"
                   />
@@ -1571,7 +1577,7 @@ export function HospitalAdminDashboardPage() {
                   </select>
                   <button
                     type="button"
-                    onClick={() => void dashboard.refreshDashboard()}
+                    onClick={applyAuditFilters}
                     className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:opacity-90 dark:bg-slate-700"
                   >
                     Search Local Logs
@@ -1580,8 +1586,11 @@ export function HospitalAdminDashboardPage() {
                     type="button"
                     onClick={() => {
                       setAuditSearch("");
+                      setAppliedAuditSearch("");
                       setAuditRoleFilter("ALL");
+                      setAppliedAuditRoleFilter("ALL");
                       setAuditActionFilter("ALL");
+                      setAppliedAuditActionFilter("ALL");
                     }}
                     className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
@@ -1593,14 +1602,14 @@ export function HospitalAdminDashboardPage() {
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                     {filteredAuditLogs.length} visible row(s)
                   </span>
-                  {auditRoleFilter !== "ALL" ? (
+                  {appliedAuditRoleFilter !== "ALL" ? (
                     <span className="rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                      Role: {auditRoleFilter}
+                      Role: {appliedAuditRoleFilter}
                     </span>
                   ) : null}
-                  {auditActionFilter !== "ALL" ? (
+                  {appliedAuditActionFilter !== "ALL" ? (
                     <span className="rounded-full bg-cyan-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
-                      Action: {formatStatusLabel(auditActionFilter)}
+                      Action: {formatStatusLabel(appliedAuditActionFilter)}
                     </span>
                   ) : null}
                 </div>

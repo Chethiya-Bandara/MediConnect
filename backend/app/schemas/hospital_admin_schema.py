@@ -1,5 +1,5 @@
 import re
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr, field_validator
 
@@ -44,4 +44,4 @@ class AvailabilitySlotRequest(BaseModel):
 # Invite doctor
 class InviteDoctorRequest(BaseModel):
     doctor_email: EmailStr
-    hospital_id: str
+    hospital_id: Optional[str] = None

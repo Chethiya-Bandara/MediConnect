@@ -36,7 +36,6 @@ export interface UpdateAvailabilityPayload {
 
 export interface InviteDoctorPayload {
   doctorEmail: string;
-  hospitalId: string;
 }
 
 export interface HospitalDashboardStats {

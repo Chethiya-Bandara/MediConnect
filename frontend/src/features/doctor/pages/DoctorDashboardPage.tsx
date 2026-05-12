@@ -45,10 +45,12 @@ import { ToastMessage } from "../../../components/feedback/ToastMessage";
 import { AppBrandMark, CustomSelectField } from "../../../components/ui";
 import { useAuth } from "../../auth/context/AuthContext";
 import {
+  acceptDoctorInvitation,
   askDoctorAssistant,
   createDoctorAvailability,
   deleteDoctorAvailability,
   getDoctorAffiliationHospitals,
+  getDoctorInvitations,
   searchDoctorDiseases,
   getDoctorAvailability,
   getDoctorDashboard,
@@ -67,6 +69,7 @@ import type {
   DoctorAvailabilitySlot,
   DoctorDashboardData,
   DoctorDiseaseCatalogItem,
+  DoctorInvitation,
   DoctorMedicineCatalogItem,
   DoctorPatientHistoryResponse,
   DoctorScheduleItem,
@@ -590,6 +593,7 @@ export function DoctorDashboardPage() {
   const [affiliationHospitals, setAffiliationHospitals] = useState<
     DoctorAffiliationHospitalOption[]
   >([]);
+  const [pendingInvitations, setPendingInvitations] = useState<DoctorInvitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
@@ -630,6 +634,7 @@ export function DoctorDashboardPage() {
   const [deletingAvailabilityId, setDeletingAvailabilityId] = useState<number | null>(null);
   const [requestingHospitalId, setRequestingHospitalId] = useState<number | null>(null);
   const [revokingAffiliationId, setRevokingAffiliationId] = useState<number | null>(null);
+  const [acceptingInvitationId, setAcceptingInvitationId] = useState<string | null>(null);
   const [selectedJoinHospitalId, setSelectedJoinHospitalId] = useState<number | "">("");
   const [profileName, setProfileName] = useState("");
   const [profileAddress, setProfileAddress] = useState("");
@@ -974,20 +979,23 @@ export function DoctorDashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [payload, slots, hospitals] = await Promise.all([
+      const [payload, slots, hospitals, invitations] = await Promise.all([
         getDoctorDashboard(nextActiveAppointmentId),
         getDoctorAvailability(availabilityDate, selectedAvailabilityHospitalId),
         getDoctorAffiliationHospitals(),
+        getDoctorInvitations(),
       ]);
       setDashboard(payload);
       setAvailabilitySlots(slots);
       setAffiliationHospitals(hospitals);
+      setPendingInvitations(invitations);
       setAvailabilityError(null);
       setProfileName(payload.user.name ?? "");
       setProfileAddress(payload.user.address ?? "");
       setProfileSpecialization(payload.doctor.specialization ?? "");
       setProfileSlmcNumber(payload.doctor.slmc_number ?? "");
     } catch (err) {
+      setPendingInvitations([]);
       setError(err instanceof Error ? err.message : "Doctor dashboard could not be loaded");
     } finally {
       setLoading(false);
@@ -1627,6 +1635,19 @@ export function DoctorDashboardPage() {
       showToast(err instanceof Error ? err.message : "Affiliation could not be updated", "error");
     } finally {
       setRevokingAffiliationId(null);
+    }
+  };
+
+  const acceptInvitation = async (invitationId: string) => {
+    setAcceptingInvitationId(invitationId);
+    try {
+      await acceptDoctorInvitation(invitationId);
+      showToast("Hospital invitation accepted.");
+      await loadDashboard();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Invitation could not be accepted", "error");
+    } finally {
+      setAcceptingInvitationId(null);
     }
   };
 
@@ -3285,6 +3306,50 @@ export function DoctorDashboardPage() {
                 </div>
 
                 <div className="space-y-6">
+                  <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
+                      Direct Invites
+                    </p>
+                    <h3 className="mt-2 text-2xl font-extrabold dark:text-white">
+                      Sent by hospital admins
+                    </h3>
+                    <div className="mt-6 space-y-3">
+                      {pendingInvitations.length ? (
+                        pendingInvitations.map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <p className="font-bold dark:text-slate-200">{item.hospital_name}</p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {item.sent_at
+                                    ? `Invited ${formatDate(item.sent_at)}`
+                                    : "Invitation pending"}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void acceptInvitation(item.id)}
+                                disabled={acceptingInvitationId === item.id}
+                                className="rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {acceptingInvitationId === item.id ? "Joining..." : "Accept Invite"}
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <EmptyState
+                          title="No direct invites"
+                          description="Hospital admin invites sent to your login email will appear here."
+                          className="rounded-2xl border-slate-200 bg-slate-50 p-5 text-left shadow-none dark:bg-slate-800/40"
+                        />
+                      )}
+                    </div>
+                  </div>
+
                   <div className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
                       Your Status

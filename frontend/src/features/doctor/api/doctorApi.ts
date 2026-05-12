@@ -4,6 +4,7 @@ import type {
   DoctorPatientHistoryResponse,
   DoctorAvailabilitySlot,
   DoctorDashboardData,
+  DoctorInvitation,
   DoctorDiseaseCatalogItem,
   DoctorMedicineCatalogItem,
 } from "../types";
@@ -199,6 +200,20 @@ export function revokeDoctorAffiliation(payload: { affiliation_id: number }) {
     {
       method: "PUT",
       body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function getDoctorInvitations() {
+  const response = await apiRequest<{ invitations?: DoctorInvitation[] }>(endpoints.doctor.invites);
+  return Array.isArray(response.invitations) ? response.invitations : [];
+}
+
+export function acceptDoctorInvitation(invitationId: string) {
+  return apiRequest<{ message: string }>(
+    `${endpoints.doctor.inviteAcceptBase}/${encodeURIComponent(invitationId)}`,
+    {
+      method: "PUT",
     },
   );
 }

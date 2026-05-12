@@ -166,6 +166,14 @@ export interface DoctorAffiliationHospitalOption {
   can_request: boolean;
 }
 
+export interface DoctorInvitation {
+  id: string;
+  hospital_id: number | null;
+  hospital_name: string;
+  status: string | null;
+  sent_at: string | null;
+}
+
 export interface DoctorAssistantReply {
   answer: string;
   source: "gemini_edge" | "doctor_fallback";

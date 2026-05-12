@@ -2033,6 +2033,51 @@ def accept_invitation(
 
     return {"message": "Joined hospital"}
 
+
+@router.get("/invitations")
+def list_doctor_invitations(authorization: Optional[str] = Header(None)):
+    context = _require_doctor_context(authorization)
+    doctor_email = (context["user"].get("email") or "").strip().lower()
+    if not doctor_email:
+        return {"invitations": []}
+
+    invitation_rows = (
+        supabase_admin.table("doctor_invitations")
+        .select("*")
+        .eq("doctor_email", doctor_email)
+        .eq("status", "PENDING")
+        .order("sent_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    hospital_lookup = _hospital_map(
+        {row.get("hospital_id") for row in invitation_rows if row.get("hospital_id")}
+    )
+    organisation_lookup = _organisation_map(
+        {
+            hospital.get("organisation_id")
+            for hospital in hospital_lookup.values()
+            if hospital.get("organisation_id")
+        }
+    )
+
+    invitations = []
+    for row in invitation_rows:
+        hospital = hospital_lookup.get(row.get("hospital_id"), {})
+        organisation = organisation_lookup.get(hospital.get("organisation_id"), {})
+        invitations.append(
+            {
+                "id": row.get("id"),
+                "hospital_id": row.get("hospital_id"),
+                "hospital_name": organisation.get("name") or hospital.get("name") or f"Hospital #{row.get('hospital_id')}",
+                "status": row.get("status"),
+                "sent_at": row.get("sent_at") or row.get("created_at"),
+            }
+        )
+
+    return {"invitations": invitations}
+
 @router.post("/upload-license")
 async def upload_license(
     file: UploadFile = File(...),

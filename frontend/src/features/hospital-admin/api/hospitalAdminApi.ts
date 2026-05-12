@@ -266,7 +266,6 @@ export async function inviteDoctor(payload: InviteDoctorPayload) {
     method: "POST",
     body: JSON.stringify({
       doctor_email: payload.doctorEmail,
-      hospital_id: payload.hospitalId,
     }),
   });
 }

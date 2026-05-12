@@ -28,6 +28,7 @@ export const endpoints = {
     assistant: "/doctor/dashboard/assistant/respond",
     availability: "/doctor/dashboard/availability",
     inviteAcceptBase: "/doctor/dashboard/invite/accept",
+    invites: "/doctor/dashboard/invitations",
     affiliationHospitals: "/doctor/dashboard/affiliations/hospitals",
     affiliationRequest: "/doctor/dashboard/affiliation/request",
     affiliationRevoke: "/doctor/dashboard/affiliation/revoke",

@@ -37,21 +37,26 @@ export function DoctorsSection({
   onCreateAvailability,
   onInviteDoctor,
 }: DoctorsSectionProps) {
+  const getSriLankaTodayInputValue = () =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Colombo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
   const [inviteDoctorEmail, setInviteDoctorEmail] = useState("");
-  const [inviteHospitalId, setInviteHospitalId] = useState("");
   const [availabilityDoctorId, setAvailabilityDoctorId] = useState("");
   const [availabilityHospitalId, setAvailabilityHospitalId] = useState("");
-  const [availabilityDate, setAvailabilityDate] = useState(new Date().toISOString().slice(0, 10));
+  const [availabilityDate, setAvailabilityDate] = useState(getSriLankaTodayInputValue);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("12:00");
 
   const handleInviteDoctor = async () => {
     const payload = {
       doctorEmail: inviteDoctorEmail.trim(),
-      hospitalId: inviteHospitalId.trim(),
     };
 
-    if (!payload.doctorEmail || !payload.hospitalId) {
+    if (!payload.doctorEmail) {
       return;
     }
 
@@ -91,7 +96,7 @@ export function DoctorsSection({
                 Invite Doctor
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Send a hospital invitation using doctor email and hospital ID.
+                Send a hospital invitation using the doctor's login email.
               </p>
             </div>
           </div>
@@ -110,22 +115,10 @@ export function DoctorsSection({
               />
             </label>
 
-            <label className="space-y-2">
-              <span className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
-                Hospital ID
-              </span>
-              <input
-                value={inviteHospitalId}
-                onChange={(event) => setInviteHospitalId(event.target.value)}
-                placeholder="Enter hospital ID"
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm focus:border-primary focus:ring-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-              />
-            </label>
-
             <Button
               type="button"
               isLoading={isSubmitting}
-              disabled={!inviteDoctorEmail.trim() || !inviteHospitalId.trim()}
+              disabled={!inviteDoctorEmail.trim()}
               onClick={() => void handleInviteDoctor()}
               className="bg-primary py-3 text-white dark:bg-blue-600"
             >
