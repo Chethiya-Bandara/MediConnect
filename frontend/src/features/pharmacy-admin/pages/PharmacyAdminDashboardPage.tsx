@@ -497,7 +497,12 @@ export function PharmacyAdminDashboardPage() {
                   Stock Alerts
                 </p>
                 <h3 className="text-3xl font-extrabold text-red-600 dark:text-red-400">
-                  {activeSummary?.inventorySummary.lowStockItems ?? dashboard.stats.lowStockItems}{" "}
+                  {/* Logic to sum low stock and out of stock items */}
+                  {activeSummary 
+                    ? (activeSummary.inventorySummary.lowStockItems + activeSummary.inventorySummary.outOfStockItems)
+                    : (dashboard.stats.lowStockItems ?? 0)
+                  }
+                  {" "}
                   Items
                 </h3>
                 <p className="mt-2 text-[10px] font-bold text-red-600 dark:text-red-500">
@@ -511,9 +516,10 @@ export function PharmacyAdminDashboardPage() {
                   Staff Active
                 </p>
                 <h3 className="text-3xl font-extrabold text-slate-900 dark:text-slate-200">
-                  {staff.length}
+                  {/* Filters the array to exclude 'suspended' members before counting */}
+                  {staff.filter(member => member.status !== 'suspended').length}
                 </h3>
-                <p className="mt-2 text-[10px] text-slate-400">Registered pharmacists</p>
+                <p className="mt-2 text-[10px] text-slate-400">Active pharmacists</p>
               </div>
 
               {/* Today's Revenue Card */}
@@ -626,8 +632,7 @@ export function PharmacyAdminDashboardPage() {
                     </span>
                   </div>
                   <div className="rounded-2xl bg-slate-50 px-4 py-4 dark:bg-slate-800/60">
-                    Staff action module: <span className="font-bold">Currently unavailable</span>,
-                    so permission updates remain disabled until support is available.
+                    Staff action module: <span className="font-bold">Available</span>
                   </div>
                 </div>
               </div>
@@ -832,7 +837,7 @@ export function PharmacyAdminDashboardPage() {
                       <th className="px-6 py-4">Current Stock</th>
                       <th className="px-6 py-4">Unit Price (LKR)</th>
                       <th className="px-6 py-4">Updated</th>
-                      <th className="px-6 py-4">Row State</th>
+                      <th className="px-6 py-4">Inventory State</th>
                       <th className="px-6 py-4 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -874,8 +879,10 @@ export function PharmacyAdminDashboardPage() {
                                     updateDraftField(item.id, "stockQuantity", event.target.value)
                                   }
                                   className={cn(
-                                    "w-20 rounded-lg border px-2 py-1 text-center text-sm font-bold",
-                                    lowStock
+                                    "w-20 rounded-lg border px-2 py-1 text-center text-sm font-bold transition-all",
+                                    outOfStock
+                                      ? "border-red-600 bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"
+                                      : lowStock
                                       ? "border-error/50 bg-white text-error dark:bg-slate-800"
                                       : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800",
                                   )}
@@ -883,11 +890,15 @@ export function PharmacyAdminDashboardPage() {
                                 />
                                 <span
                                   className={cn(
-                                    "text-[10px] font-bold",
-                                    lowStock ? "text-error" : "text-green-600 dark:text-green-400",
+                                    "text-[10px] font-bold uppercase tracking-wider",
+                                    outOfStock 
+                                      ? "text-red-700 dark:text-red-500" 
+                                      : lowStock 
+                                      ? "text-error" 
+                                      : "text-green-600 dark:text-green-400",
                                   )}
                                 >
-                                  {lowStock ? "REORDER" : "Safe"}
+                                  {outOfStock ? "REORDER" : lowStock ? "REORDER" : "Safe"}
                                 </span>
                               </div>
                             </td>
@@ -1000,7 +1011,7 @@ export function PharmacyAdminDashboardPage() {
                 <select
                   value={staffStatusFilter}
                   onChange={(event) => setStaffStatusFilter(event.target.value)}
-                  className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-bold dark:bg-slate-800 dark:text-slate-200"
+                  className="rounded-xl bg-slate-100 px-6 py-3 text-sm font-bold dark:bg-slate-800 dark:text-slate-200"
                 >
                   <option value="ALL">All staff statuses</option>
                   {staffStatusOptions.map((status) => (
@@ -1011,15 +1022,8 @@ export function PharmacyAdminDashboardPage() {
                 </select>
                 <button
                   type="button"
-                  onClick={() => setShowStaffCreateForm((current) => !current)}
-                  className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white dark:bg-slate-700"
-                >
-                  {showStaffCreateForm ? "Hide Registration" : "Register Pharmacist"}
-                </button>
-                <button
-                  type="button"
                   onClick={() => void dashboard.loadDashboardSummary()}
-                  className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-bold dark:bg-slate-800 dark:text-slate-200"
+                  className="rounded-xl bg-slate-100 px-6 py-3 text-sm font-bold dark:bg-slate-800 dark:text-slate-200"
                 >
                   Refresh Staff
                 </button>
