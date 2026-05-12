@@ -3,6 +3,7 @@
 # Signature verification added by Bihanga (B-4.1.2)
 
 from datetime import datetime, timedelta
+import math
 import re
 from typing import Optional
 
@@ -48,7 +49,195 @@ def _coerce_int(value) -> Optional[int]:
     return None
 
 
+def _parse_positive_integer(value) -> Optional[int]:
+    direct_value = _coerce_int(value)
+    if direct_value is not None and direct_value > 0:
+        return direct_value
+
+    if isinstance(value, str):
+        match = re.search(r"(\d+)", value)
+        if match:
+            parsed = _coerce_int(match.group(1))
+            if parsed is not None and parsed > 0:
+                return parsed
+
+    return None
+
+
+def _parse_duration_days(instructions: str | None) -> Optional[int]:
+    normalized = (instructions or "").strip()
+    if not normalized:
+        return None
+
+    match = re.search(r"Duration:\s*(\d+)", normalized, re.IGNORECASE)
+    if not match:
+        return None
+
+    parsed = _coerce_int(match.group(1))
+    return parsed if parsed is not None and parsed > 0 else None
+
+
+def _normalize_unit_kind_from_text(value: str | None) -> Optional[str]:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return None
+
+    if (
+        normalized in {"tablet", "tablets", "tab", "tabs", "cap", "caps", "capsule", "capsules"}
+        or re.search(r"\btab(?:let)?s?\b", normalized)
+        or re.search(r"\bcap(?:sule)?s?\b", normalized)
+    ):
+        return "tablets"
+
+    if (
+        normalized in {"drop", "drops", "gtt"}
+        or re.search(r"\b(drop|drops|gtt)\b", normalized)
+    ):
+        return "drops"
+
+    if (
+        normalized in {"ml", "milliliter", "milliliters"}
+        or re.search(r"\bml\b", normalized)
+        or re.search(r"\bmilliliters?\b", normalized)
+    ):
+        return "ml"
+
+    return None
+
+
+def _resolve_medicine_for_item(item: dict) -> Optional[dict]:
+    medicine_id = _coerce_int(item.get("medicine_id"))
+    if medicine_id is not None:
+        medicine = _medicine_by_id(medicine_id)
+        if medicine:
+            return medicine
+
+    medicine_name = item.get("medicine_name") or item.get("drug_name")
+    if isinstance(medicine_name, str) and medicine_name.strip():
+        return _medicine_by_name(medicine_name)
+
+    return None
+
+
+def _parse_package_capacity(item: dict, medicine: dict | None) -> Optional[float]:
+    candidates = [
+        (medicine or {}).get("unit"),
+        (medicine or {}).get("name"),
+        item.get("unit"),
+        item.get("medicine_name"),
+        item.get("drug_name"),
+    ]
+
+    for candidate in candidates:
+        normalized = (candidate or "").strip().lower() if isinstance(candidate, str) else ""
+        if not normalized:
+            continue
+
+        match = re.search(r"(\d+(?:\.\d+)?)\s*(ml|drops?|bottle|tab(?:let)?s?)", normalized, re.IGNORECASE)
+        if not match:
+            match = re.search(r"(\d+(?:\.\d+)?)", normalized)
+
+        if not match:
+            continue
+
+        try:
+            parsed = float(match.group(1))
+        except ValueError:
+            continue
+
+        if parsed > 0:
+            return parsed
+
+    return None
+
+
+def _parse_tablet_price_divisor(*candidates) -> Optional[int]:
+    for candidate in candidates:
+        normalized = (candidate or "").strip().lower() if isinstance(candidate, str) else ""
+        if not normalized:
+            continue
+
+        match = (
+            re.search(r"(\d+)\s*(t|tabs?|tablets?|c|caps?|capsules?)\b", normalized, re.IGNORECASE)
+            or re.search(r"\b(\d+)(t|c)\b", normalized, re.IGNORECASE)
+        )
+        if not match:
+            continue
+
+        parsed = _coerce_int(match.group(1))
+        if parsed is not None and parsed > 0:
+            return parsed
+
+    return None
+
+
+def _effective_server_unit_price(
+    base_price: float | int | None,
+    medicine: dict | None,
+    item: dict | None = None,
+) -> float:
+    normalized_price = float(base_price or 0)
+    if normalized_price <= 0:
+        return 0.0
+
+    item = item or {}
+    unit_kind = (
+        _normalize_unit_kind_from_text(item.get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("name"))
+        or _normalize_unit_kind_from_text(item.get("medicine_name"))
+        or _normalize_unit_kind_from_text(item.get("drug_name"))
+    )
+
+    if unit_kind == "tablets":
+        divisor = _parse_tablet_price_divisor(
+            (medicine or {}).get("unit"),
+            (medicine or {}).get("name"),
+            item.get("unit"),
+            item.get("medicine_name"),
+            item.get("drug_name"),
+        )
+        if divisor:
+            return normalized_price / divisor
+
+    return normalized_price
+
+
+def _computed_prescribed_quantity(item: dict) -> Optional[int]:
+    medicine = _resolve_medicine_for_item(item)
+    unit_kind = (
+        _normalize_unit_kind_from_text(item.get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("name"))
+        or _normalize_unit_kind_from_text(item.get("medicine_name"))
+        or _normalize_unit_kind_from_text(item.get("drug_name"))
+    )
+    daily_dose = _parse_positive_integer(item.get("dosage"))
+    duration_days = _parse_duration_days(item.get("instructions"))
+
+    if unit_kind is None or daily_dose is None or duration_days is None:
+        return None
+
+    if unit_kind == "tablets":
+        return daily_dose * duration_days
+
+    if unit_kind in {"ml", "drops"}:
+        package_capacity = _parse_package_capacity(item, medicine)
+        total_volume = (daily_dose * duration_days) / 20 if unit_kind == "drops" else daily_dose * duration_days
+        if total_volume <= 0:
+            return None
+        if package_capacity and package_capacity > 0:
+            return max(math.ceil(total_volume / package_capacity), 1)
+        return max(int(total_volume), 1)
+
+    return None
+
+
 def _prescribed_quantity(item: dict) -> int:
+    computed_quantity = _computed_prescribed_quantity(item)
+    if computed_quantity is not None and computed_quantity > 0:
+        return computed_quantity
+
     direct_quantity = _coerce_int(item.get("quantity"))
     if direct_quantity is not None and direct_quantity > 0:
         return direct_quantity
@@ -983,10 +1172,12 @@ def dispense_prescription(
         }).eq("id", item_id).execute()
 
         medicine = _medicine_by_id(medicine_id)
-        unit_price = float(
+        unit_price = _effective_server_unit_price(
             inventory_item.get("unit_price")
             or (medicine.get("retail_price") if medicine else 0)
-            or 0
+            or 0,
+            medicine,
+            db_item.data,
         )
         line_total = unit_price * qty
         total_price += line_total
@@ -1216,7 +1407,11 @@ def generate_bill(
 
         # ── Calculate line total using SERVER price ───────────────
         # unit_price comes from DB — client has NO input here
-        server_unit_price = float(inventory_item["unit_price"])
+        server_unit_price = _effective_server_unit_price(
+            inventory_item.get("unit_price"),
+            medicine_lookup.get(inventory_item.get("medicine_id")),
+            inventory_item,
+        )
         line_total        = server_unit_price * item.quantity
 
         bill_lines.append({

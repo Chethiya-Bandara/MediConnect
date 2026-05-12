@@ -1423,11 +1423,7 @@ export function PharmacistDashboardPage() {
                     <div className="mb-5 rounded-2xl border border-red-300/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
                       {dispenseGuardMessage}
                     </div>
-                  ) : (
-                    <div className="mb-5 rounded-2xl border border-emerald-300/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-                      Select Complete Dispense to Finish Prescription Handling.
-                    </div>
-                  )}
+                  ) : null}
 
                   <button
                     type="button"

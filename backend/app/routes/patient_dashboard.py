@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import uuid
@@ -403,6 +404,152 @@ def _coerce_positive_int(value) -> Optional[int]:
         except ValueError:
             return None
     return None
+
+
+def _parse_duration_days(instructions: Optional[str]) -> Optional[int]:
+    normalized = (instructions or "").strip()
+    if not normalized:
+        return None
+
+    match = re.search(r"Duration:\s*(\d+)", normalized, re.IGNORECASE)
+    if not match:
+        return None
+
+    return _coerce_positive_int(match.group(1))
+
+
+def _normalize_unit_kind_from_text(value: Optional[str]) -> Optional[str]:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return None
+
+    if (
+        normalized in {"tablet", "tablets", "tab", "tabs", "cap", "caps", "capsule", "capsules"}
+        or re.search(r"\btab(?:let)?s?\b", normalized)
+        or re.search(r"\bcap(?:sule)?s?\b", normalized)
+    ):
+        return "tablets"
+
+    if (
+        normalized in {"drop", "drops", "gtt"}
+        or re.search(r"\b(drop|drops|gtt)\b", normalized)
+    ):
+        return "drops"
+
+    if (
+        normalized in {"ml", "milliliter", "milliliters"}
+        or re.search(r"\bml\b", normalized)
+        or re.search(r"\bmilliliters?\b", normalized)
+    ):
+        return "ml"
+
+    return None
+
+
+def _parse_package_capacity(*candidates: Optional[str]) -> Optional[float]:
+    for candidate in candidates:
+        normalized = (candidate or "").strip().lower()
+        if not normalized:
+            continue
+
+        match = re.search(r"(\d+(?:\.\d+)?)\s*(ml|drops?|bottle|tab(?:let)?s?)", normalized, re.IGNORECASE)
+        if not match:
+            match = re.search(r"(\d+(?:\.\d+)?)", normalized)
+
+        if not match:
+            continue
+
+        try:
+            parsed = float(match.group(1))
+        except ValueError:
+            continue
+
+        if parsed > 0:
+            return parsed
+
+    return None
+
+
+def _parse_tablet_price_divisor(*candidates: Optional[str]) -> Optional[int]:
+    for candidate in candidates:
+        normalized = (candidate or "").strip().lower()
+        if not normalized:
+            continue
+
+        match = (
+            re.search(r"(\d+)\s*(t|tabs?|tablets?|c|caps?|capsules?)\b", normalized, re.IGNORECASE)
+            or re.search(r"\b(\d+)(t|c)\b", normalized, re.IGNORECASE)
+        )
+        if not match:
+            continue
+
+        parsed = _coerce_positive_int(match.group(1))
+        if parsed is not None:
+            return parsed
+
+    return None
+
+
+def _prescription_quantity_metrics(item: dict, medicine: Optional[dict]) -> tuple[int, str]:
+    unit_kind = (
+        _normalize_unit_kind_from_text(item.get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("name"))
+        or _normalize_unit_kind_from_text(item.get("medicine_name"))
+        or _normalize_unit_kind_from_text(item.get("drug_name"))
+    )
+    daily_dose = _coerce_positive_int(item.get("dosage"))
+    duration_days = _parse_duration_days(item.get("instructions"))
+
+    if unit_kind == "tablets" and daily_dose is not None and duration_days is not None:
+        quantity_value = daily_dose * duration_days
+        return quantity_value, f"{quantity_value} tablet(s)"
+
+    if unit_kind in {"ml", "drops"} and daily_dose is not None and duration_days is not None:
+        total_volume = (daily_dose * duration_days) / 20 if unit_kind == "drops" else daily_dose * duration_days
+        package_capacity = _parse_package_capacity(
+            (medicine or {}).get("unit"),
+            (medicine or {}).get("name"),
+            item.get("unit"),
+            item.get("medicine_name"),
+            item.get("drug_name"),
+        )
+        if package_capacity and package_capacity > 0:
+            quantity_value = max(math.ceil(total_volume / package_capacity), 1)
+            return quantity_value, f"{quantity_value} bottle(s)"
+
+    quantity_value = _prescription_quantity_value(item)
+    fallback_label = _prescription_quantity_label(item) or str(quantity_value)
+    return quantity_value, fallback_label
+
+
+def _effective_estimate_unit_price(
+    unit_price: Optional[float],
+    item: dict,
+    medicine: Optional[dict],
+) -> Optional[float]:
+    if unit_price is None:
+        return None
+
+    unit_kind = (
+        _normalize_unit_kind_from_text(item.get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("name"))
+        or _normalize_unit_kind_from_text(item.get("medicine_name"))
+        or _normalize_unit_kind_from_text(item.get("drug_name"))
+    )
+    if unit_kind == "tablets":
+        divisor = _parse_tablet_price_divisor(
+            (medicine or {}).get("unit"),
+            (medicine or {}).get("name"),
+            item.get("unit"),
+            item.get("medicine_name"),
+            item.get("drug_name"),
+        )
+        if divisor:
+            return unit_price / divisor
+
+    return unit_price
 
 
 def _prescription_quantity_value(item: dict) -> int:
@@ -2784,6 +2931,9 @@ def estimate_pharmacy_bill(
         inventory_rows,
         medicine_lookup,
     )
+    prescription_medicine_lookup = _medicine_map(
+        {row["medicine_id"] for row in prescription_items if row.get("medicine_id")}
+    )
 
     doctor_lookup = _doctor_map(
         {prescription["doctor_id"]} if prescription.get("doctor_id") else set()
@@ -2797,8 +2947,8 @@ def estimate_pharmacy_bill(
 
     for item in prescription_items:
         medicine_name = item.get("medicine_name") or f"Prescription item #{item['id']}"
-        quantity_value = _prescription_quantity_value(item)
-        quantity_label = _prescription_quantity_label(item) or str(quantity_value)
+        medicine = prescription_medicine_lookup.get(item.get("medicine_id"))
+        quantity_value, quantity_label = _prescription_quantity_metrics(item, medicine)
         inventory_entry = _match_inventory_entry(
             medicine_name,
             inventory_entries,
@@ -2827,10 +2977,18 @@ def estimate_pharmacy_bill(
             note = (
                 f"Only {stock_quantity} unit(s) are available, which is below the prescribed quantity."
             )
-            unit_price = inventory_entry.get("unit_price")
+            unit_price = _effective_estimate_unit_price(
+                float(inventory_entry.get("unit_price") or 0),
+                item,
+                medicine,
+            )
             matched_inventory_id = inventory_entry.get("id")
         else:
-            unit_price = float(inventory_entry.get("unit_price") or 0)
+            unit_price = _effective_estimate_unit_price(
+                float(inventory_entry.get("unit_price") or 0),
+                item,
+                medicine,
+            ) or 0
             line_total = round(unit_price * quantity_value, 2)
             estimated_total += line_total
             included_items += 1

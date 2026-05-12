@@ -2573,23 +2573,11 @@ export function PatientDashboardPage() {
 
                         <div className="min-w-[12rem] rounded-[1.2rem] bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800/60">
                           <p>
-                            Stock here:{" "}
-                            <span className="font-semibold">{item.stock_quantity}</span>
-                          </p>
-                          <p className="mt-1">
                             Unit price:{" "}
                             <span className="font-semibold">
                               {item.unit_price == null
                                 ? "Not priced"
                                 : formatLkr(item.unit_price)}
-                            </span>
-                          </p>
-                          <p className="mt-1">
-                            Bill line total:{" "}
-                            <span className="font-semibold">
-                              {item.estimated_total == null
-                                ? "Not included"
-                                : formatLkr(item.estimated_total)}
                             </span>
                           </p>
                         </div>
