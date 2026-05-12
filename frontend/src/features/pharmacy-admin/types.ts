@@ -47,12 +47,21 @@ export interface PharmacyAdminFastMovingItem {
   unitsDispensed: number;
 }
 
+export interface PharmacyAdminDispensedMedicine {
+  dispensingId: string | null;
+  medicineName: string;
+  quantityDispensed: number;
+  totalValue: number | null;
+  dispensedAt: string | null;
+}
+
 export interface PharmacyAdminReportSummary {
   todayRevenue: number | null;
   currentMonthRevenue: number | null;
   totalTrackedRevenue: number | null;
   dispenseEvents: number;
   fastMovingItems: PharmacyAdminFastMovingItem[];
+  dispensedMedicines: PharmacyAdminDispensedMedicine[];
   recentAdjustments: PharmacyAdminAdjustment[];
 }
 

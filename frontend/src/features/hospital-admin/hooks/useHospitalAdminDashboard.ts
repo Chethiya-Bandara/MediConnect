@@ -21,6 +21,7 @@ import type {
   InviteDoctorPayload,
   PendingAffiliationItem,
   PendingInvitationItem,
+  RevokedStaffMember,
   UpdateAvailabilityPayload,
 } from "../types";
 
@@ -65,6 +66,7 @@ export function useHospitalAdminDashboard() {
   const [pendingAffiliations, setPendingAffiliations] = useState<PendingAffiliationItem[]>([]);
   const [pendingInvitations, setPendingInvitations] = useState<PendingInvitationItem[]>([]);
   const [activeStaff, setActiveStaff] = useState<ActiveStaffMember[]>([]);
+  const [revokedStaff, setRevokedStaff] = useState<RevokedStaffMember[]>([]);
   const [auditLogs, setAuditLogs] = useState<HospitalAuditLog[]>([]);
   const [availabilityDoctorIdInput, setAvailabilityDoctorIdInput] = useState("");
   const [activeDoctorId, setActiveDoctorId] = useState<string | null>(null);
@@ -89,6 +91,7 @@ export function useHospitalAdminDashboard() {
       setPendingAffiliations(response.pendingAffiliations);
       setPendingInvitations(response.pendingInvitations);
       setActiveStaff(response.activeStaff);
+      setRevokedStaff(response.revokedStaff);
       setAuditLogs(response.auditLogs);
       return true;
     } catch (dashboardLoadError) {
@@ -97,6 +100,7 @@ export function useHospitalAdminDashboard() {
       setPendingAffiliations([]);
       setPendingInvitations([]);
       setActiveStaff([]);
+      setRevokedStaff([]);
       setAuditLogs([]);
       setDashboardError(
         dashboardLoadError instanceof Error
@@ -332,6 +336,7 @@ export function useHospitalAdminDashboard() {
     pendingAffiliations,
     pendingInvitations,
     activeStaff,
+    revokedStaff,
     auditLogs,
     availabilityDoctorIdInput,
     activeDoctorId,

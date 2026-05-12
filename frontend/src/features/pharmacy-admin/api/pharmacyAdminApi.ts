@@ -3,6 +3,7 @@ import { endpoints } from "../../../lib/api/endpoints";
 import type {
   PharmacyAdminAdjustment,
   PharmacyAdminDashboardSummary,
+  PharmacyAdminDispensedMedicine,
   PharmacyAdminFastMovingItem,
   PharmacyAdminStaffMember,
   PharmacyAdminStaffRegistrationPayload,
@@ -48,6 +49,14 @@ interface RawFastMovingItem {
   units_dispensed?: number | string | null;
 }
 
+interface RawDispensedMedicine {
+  dispensing_id?: string | number | null;
+  medicine_name?: string | null;
+  quantity_dispensed?: number | string | null;
+  total_value?: number | string | null;
+  dispensed_at?: string | null;
+}
+
 interface RawStaffMember {
   id?: string | number | null;
   user_id?: string | number | null;
@@ -74,6 +83,7 @@ interface RawDashboardSummary {
     total_tracked_revenue?: number | string | null;
     dispense_events?: number | string | null;
     fast_moving_items?: RawFastMovingItem[] | null;
+    dispensed_medicines?: RawDispensedMedicine[] | null;
     recent_adjustments?: RawAdjustment[] | null;
   } | null;
   staff?: RawStaffMember[] | null;
@@ -125,6 +135,16 @@ function normalizeFastMovingItem(raw: RawFastMovingItem): PharmacyAdminFastMovin
   };
 }
 
+function normalizeDispensedMedicine(raw: RawDispensedMedicine): PharmacyAdminDispensedMedicine {
+  return {
+    dispensingId: asString(raw.dispensing_id),
+    medicineName: raw.medicine_name ?? "Unnamed medicine",
+    quantityDispensed: asNumber(raw.quantity_dispensed) ?? 0,
+    totalValue: asNumber(raw.total_value),
+    dispensedAt: raw.dispensed_at ?? null,
+  };
+}
+
 function normalizeAdjustment(raw: RawAdjustment): PharmacyAdminAdjustment {
   return {
     id: asString(raw.id) ?? `adjustment-${Math.random().toString(36).slice(2, 8)}`,
@@ -170,6 +190,9 @@ export async function getDashboardSummary(pharmacyId: string) {
       dispenseEvents: asNumber(response.report_summary?.dispense_events) ?? 0,
       fastMovingItems: (response.report_summary?.fast_moving_items ?? []).map((item) =>
         normalizeFastMovingItem(item),
+      ),
+      dispensedMedicines: (response.report_summary?.dispensed_medicines ?? []).map((item) =>
+        normalizeDispensedMedicine(item),
       ),
       recentAdjustments: (response.report_summary?.recent_adjustments ?? []).map((item) =>
         normalizeAdjustment(item),

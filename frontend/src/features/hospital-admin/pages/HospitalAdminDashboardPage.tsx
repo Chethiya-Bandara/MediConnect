@@ -331,6 +331,24 @@ export function HospitalAdminDashboardPage() {
     });
   }, [dashboard.activeStaff, deferredStaffSearch, staffFilter]);
 
+  const filteredRevokedStaff = useMemo(() => {
+    return dashboard.revokedStaff.filter((row) => {
+      const matchesStatus = staffFilter === "revoked";
+      const haystack = [
+        row.doctorName,
+        row.doctorEmail,
+        row.doctorId,
+        row.specialization,
+        row.slmcNumber,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const matchesSearch = !deferredStaffSearch || haystack.includes(deferredStaffSearch);
+      return matchesStatus && matchesSearch;
+    });
+  }, [dashboard.revokedStaff, deferredStaffSearch, staffFilter]);
+
   const selectedDoctor = useMemo(
     () => schedulingDoctors.find((doctor) => doctor.doctorId === selectedDoctorId) ?? null,
     [schedulingDoctors, selectedDoctorId],
@@ -867,19 +885,16 @@ export function HospitalAdminDashboardPage() {
                   </div>
                   <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-800">
                     <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                      Approved visible
+                      {staffFilter === "revoked" ? "Revoked visible" : "Approved visible"}
                     </p>
-                    <p className="mt-2 text-2xl font-extrabold">{filteredActiveStaff.length}</p>
+                    <p className="mt-2 text-2xl font-extrabold">
+                      {staffFilter === "revoked"
+                        ? filteredRevokedStaff.length
+                        : filteredActiveStaff.length}
+                    </p>
                   </div>
                 </div>
               </section>
-
-              {staffFilter === "revoked" ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300">
-                  Revoked affiliation history is not included in the current backend dashboard
-                  payload yet, so this view only shows the live records currently available.
-                </div>
-              ) : null}
 
               <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1.6fr,0.9fr]">
                 <div className="space-y-8">
@@ -993,12 +1008,15 @@ export function HospitalAdminDashboardPage() {
                         </p>
                       </div>
                       <span className="rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        {filteredActiveStaff.length} visible
+                        {staffFilter === "revoked"
+                          ? filteredRevokedStaff.length
+                          : filteredActiveStaff.length} visible
                       </span>
                     </div>
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                      {filteredActiveStaff.length > 0 ? (
-                        filteredActiveStaff.map((doctor) => (
+                      {(staffFilter === "revoked" ? filteredRevokedStaff : filteredActiveStaff)
+                        .length > 0 ? (
+                        (staffFilter === "revoked" ? filteredRevokedStaff : filteredActiveStaff).map((doctor) => (
                           <article
                             key={doctor.affiliationId}
                             className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
@@ -1040,29 +1058,40 @@ export function HospitalAdminDashboardPage() {
                                   void handleLoadAvailability(doctor.doctorId);
                                   setView("scheduling");
                                 }}
+                                disabled={staffFilter === "revoked"}
                                 className="rounded-lg bg-slate-100 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                               >
                                 Schedule
                               </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void dashboard.submitAffiliationRevoke(doctor.affiliationId)
-                                }
-                                disabled={dashboard.isSubmittingAffiliationAction}
-                                className="flex items-center justify-center gap-1 rounded-lg bg-red-50 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"
-                              >
-                                <XCircle size={14} />
-                                Revoke
-                              </button>
+                              {staffFilter === "revoked" ? (
+                                <div className="flex items-center justify-center rounded-lg bg-slate-100 py-2 text-xs font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                  Revoked
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void dashboard.submitAffiliationRevoke(doctor.affiliationId)
+                                  }
+                                  disabled={dashboard.isSubmittingAffiliationAction}
+                                  className="flex items-center justify-center gap-1 rounded-lg bg-red-50 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"
+                                >
+                                  <XCircle size={14} />
+                                  Revoke
+                                </button>
+                              )}
                             </div>
                           </article>
                         ))
                       ) : (
                         <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 md:col-span-2">
                           {deferredStaffSearch
-                            ? "No approved staff matched your current doctor search."
-                            : "No approved doctors are attached to this hospital yet."}
+                            ? staffFilter === "revoked"
+                              ? "No revoked affiliations matched your current doctor search."
+                              : "No approved staff matched your current doctor search."
+                            : staffFilter === "revoked"
+                              ? "No revoked affiliations found for this hospital yet."
+                              : "No approved doctors are attached to this hospital yet."}
                         </div>
                       )}
                     </div>

@@ -264,10 +264,12 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
       ["Total Tracked Revenue", summary.reportSummary.totalTrackedRevenue ?? ""],
       ["Dispense Events", summary.reportSummary.dispenseEvents],
       [],
-      ["Fast Moving Item", "Units Dispensed"],
-      ...summary.reportSummary.fastMovingItems.map((item) => [
+      ["Dispensed Date", "Medicine", "Quantity Dispensed", "Value (LKR)"],
+      ...summary.reportSummary.dispensedMedicines.map((item) => [
+        item.dispensedAt ?? "",
         item.medicineName,
-        item.unitsDispensed,
+        item.quantityDispensed,
+        item.totalValue ?? "",
       ]),
     ];
     downloadCsv("pharmacy-revenue-report.csv", rows);

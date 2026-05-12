@@ -152,6 +152,14 @@ def _list_admin_approval_users() -> list[dict[str, Any]]:
     return items
 
 
+def _organization_admin_profiles(organisation_id: int | str) -> list[dict[str, Any]]:
+    return _fetch_rows_with_query(
+        lambda: supabase_admin.table("admin_profiles")
+        .select("id, user_id, admin_role, organisation_id")
+        .eq("organisation_id", organisation_id)
+    )
+
+
 def _build_organisation_lookup(
     organisation_ids: Iterable[int | str],
 ) -> dict[int, dict[str, Any]]:
@@ -935,6 +943,32 @@ def suspend_entity(
         .eq("id", entity_id)
         .execute()
     )
+
+    if data.target_type == "ORGANIZATION" and action == "suspend":
+        related_admin_profiles = [
+            row
+            for row in _organization_admin_profiles(entity_id)
+            if _normalize_status(row.get("admin_role")) in {"hospital_admin", "pharmacy_admin"}
+            and row.get("user_id")
+        ]
+        related_user_ids = [row["user_id"] for row in related_admin_profiles]
+        if related_user_ids:
+            execute_with_retry(
+                lambda: supabase_admin.table("users")
+                .update({"status": "suspended"})
+                .in_("id", related_user_ids)
+                .execute()
+            )
+            for row in related_admin_profiles:
+                profile_id = row.get("id")
+                if profile_id is None:
+                    continue
+                _log_audit_action(
+                    user_id=current_user["user_id"],
+                    action="ADMIN_USER_SUSPENDED",
+                    entity="admin_profiles",
+                    entity_id=int(profile_id),
+                )
 
     if str(entity_id).isdigit():
         _log_audit_action(

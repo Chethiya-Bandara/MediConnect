@@ -176,17 +176,12 @@ export function PharmacyAdminDashboardPage() {
         setCatalogSuggestions(items);
         const normalizedQuery = normalizeMedicineKey(createForm.medicineName);
         const matchedSuggestion =
-          items.find((item) => normalizeMedicineKey(item.name) === normalizedQuery) ??
-          (items.length === 1
-            ? items[0]
-            : items.find((item) => normalizeMedicineKey(item.name).startsWith(normalizedQuery))) ??
-          null;
+          items.find((item) => normalizeMedicineKey(item.name) === normalizedQuery) ?? null;
 
         if (matchedSuggestion) {
           setSelectedCatalogMedicine(matchedSuggestion);
           setCreateForm((current) => ({
             ...current,
-            medicineName: matchedSuggestion.name,
             unitPrice:
               matchedSuggestion.retailPrice !== null ? String(matchedSuggestion.retailPrice) : "",
           }));
@@ -328,18 +323,12 @@ export function PharmacyAdminDashboardPage() {
     const normalizedValue = normalizeMedicineKey(value);
     const matchedSuggestion =
       catalogSuggestions.find((item) => normalizeMedicineKey(item.name) === normalizedValue) ??
-      (catalogSuggestions.length === 1
-        ? catalogSuggestions[0]
-        : catalogSuggestions.find((item) =>
-            normalizeMedicineKey(item.name).startsWith(normalizedValue),
-          )) ??
       null;
 
     setSelectedCatalogMedicine(matchedSuggestion ?? null);
     if (matchedSuggestion) {
       setCreateForm((current) => ({
         ...current,
-        medicineName: matchedSuggestion.name,
         unitPrice:
           matchedSuggestion.retailPrice !== null ? String(matchedSuggestion.retailPrice) : "",
       }));
@@ -748,8 +737,8 @@ export function PharmacyAdminDashboardPage() {
                     </span>
                   ) : createForm.medicineName.trim().length >= 2 ? (
                     <span>
-                      Pick the catalog hit from the browser suggestion list. If one result only
-                      exists, the form now auto-locks it.
+                      Keep typing or pick the exact medicine from the browser suggestion list to
+                      lock the catalog price.
                     </span>
                   ) : (
                     <span>

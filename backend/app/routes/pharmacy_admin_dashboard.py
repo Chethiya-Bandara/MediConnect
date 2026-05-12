@@ -375,6 +375,82 @@ def _build_fast_moving_items(dispensing_rows: list[dict]):
     ]
 
 
+def _build_dispensed_medicine_report(dispensing_rows: list[dict]):
+    dispensing_lookup = {
+        row.get("id"): row
+        for row in dispensing_rows
+        if row.get("id") is not None
+    }
+    dispensing_ids = list(dispensing_lookup.keys())
+    if not dispensing_ids:
+        return []
+
+    dispensing_item_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("dispensing_items")
+            .select("*")
+            .in_("dispensing_id", dispensing_ids)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    prescription_item_ids = {
+        row.get("prescription_item_id")
+        for row in dispensing_item_rows
+        if row.get("prescription_item_id") is not None
+    }
+    prescription_item_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("prescription_items")
+            .select("id, medicine_name")
+            .in_("id", list(prescription_item_ids))
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    ) if prescription_item_ids else []
+    prescription_item_lookup = {
+        row.get("id"): row.get("medicine_name") or "Unnamed medicine"
+        for row in prescription_item_rows
+    }
+
+    report_rows = []
+    for row in dispensing_item_rows:
+        dispensing = dispensing_lookup.get(row.get("dispensing_id"), {})
+        quantity = _coerce_int(row.get("quantity_dispensed"))
+        total_value = round(_coerce_float(row.get("price")), 2)
+        if total_value <= 0:
+            total_value = round(_coerce_float(row.get("total_price")), 2)
+        if total_value <= 0:
+            unit_price = _coerce_float(row.get("price_per_unit"))
+            total_value = round(unit_price * quantity, 2)
+        report_rows.append(
+            {
+                "dispensing_id": row.get("dispensing_id"),
+                "medicine_name": prescription_item_lookup.get(
+                    row.get("prescription_item_id"),
+                    "Unnamed medicine",
+                ),
+                "quantity_dispensed": quantity,
+                "total_value": total_value,
+                "dispensed_at": (
+                    dispensing.get("dispensed_at")
+                    or dispensing.get("created_at")
+                    or row.get("created_at")
+                ),
+            }
+        )
+
+    report_rows.sort(
+        key=lambda row: _parse_datetime(row.get("dispensed_at")) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return report_rows
+
+
 def _build_staff_rows(pharmacy: dict):
     pharmacist_rows = execute_with_retry(
         lambda: (
@@ -468,6 +544,7 @@ def _build_dashboard_payload(pharmacy: dict):
             "total_tracked_revenue": round(total_tracked_revenue, 2),
             "dispense_events": len(dispensing_rows),
             "fast_moving_items": _build_fast_moving_items(dispensing_rows),
+            "dispensed_medicines": _build_dispensed_medicine_report(dispensing_rows),
             "recent_adjustments": _build_recent_adjustments(inventory_rows, medicine_lookup),
         },
         "staff": _build_staff_rows(pharmacy),

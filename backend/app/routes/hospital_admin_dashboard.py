@@ -305,6 +305,7 @@ def get_hospital_admin_dashboard(context=Depends(_hospital_admin_context)):
 
     pending_affiliations = []
     active_staff = []
+    revoked_staff = []
     affiliation_ids = set()
     active_doctor_ids = set()
     for row in affiliations:
@@ -328,6 +329,8 @@ def get_hospital_admin_dashboard(context=Depends(_hospital_admin_context)):
             active_staff.append(item)
             if row.get("doctor_id"):
                 active_doctor_ids.add(row["doctor_id"])
+        if normalized == "revoked":
+            revoked_staff.append(item)
 
     pending_invitations = (
         supabase_admin.table("doctor_invitations")
@@ -394,6 +397,7 @@ def get_hospital_admin_dashboard(context=Depends(_hospital_admin_context)):
         "pending_affiliations": pending_affiliations,
         "pending_invitations": pending_invitations,
         "active_staff": active_staff,
+        "revoked_staff": revoked_staff,
         "audit_logs": _recent_audit_logs(current_user["user_id"]),
     }
 

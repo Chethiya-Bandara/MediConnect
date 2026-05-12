@@ -10,6 +10,7 @@ import type {
   InviteDoctorPayload,
   PendingAffiliationItem,
   PendingInvitationItem,
+  RevokedStaffMember,
   UpdateAvailabilityPayload,
 } from "../types";
 
@@ -56,6 +57,16 @@ interface HospitalDashboardResponse {
     created_at?: string | null;
   }>;
   active_staff?: Array<{
+    affiliation_id?: string | number | null;
+    doctor_id?: string | number | null;
+    doctor_name?: string | null;
+    doctor_email?: string | null;
+    specialization?: string | null;
+    slmc_number?: string | null;
+    status?: string | null;
+    joined_at?: string | null;
+  }>;
+  revoked_staff?: Array<{
     affiliation_id?: string | number | null;
     doctor_id?: string | number | null;
     doctor_name?: string | null;
@@ -170,6 +181,25 @@ function normalizeActiveStaff(
   }));
 }
 
+function normalizeRevokedStaff(
+  payload: HospitalDashboardResponse["revoked_staff"],
+): RevokedStaffMember[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload.map((item) => ({
+    affiliationId: asString(item.affiliation_id) ?? "",
+    doctorId: asString(item.doctor_id) ?? "",
+    doctorName: item.doctor_name ?? null,
+    doctorEmail: item.doctor_email ?? null,
+    specialization: item.specialization ?? null,
+    slmcNumber: item.slmc_number ?? null,
+    status: item.status ?? null,
+    joinedAt: item.joined_at ?? null,
+  }));
+}
+
 function normalizeAuditLogs(payload: HospitalDashboardResponse["audit_logs"]): HospitalAuditLog[] {
   if (!Array.isArray(payload)) {
     return [];
@@ -200,6 +230,7 @@ export async function getHospitalAdminDashboard() {
     pendingAffiliations: normalizePendingAffiliations(response.pending_affiliations),
     pendingInvitations: normalizePendingInvitations(response.pending_invitations),
     activeStaff: normalizeActiveStaff(response.active_staff),
+    revokedStaff: normalizeRevokedStaff(response.revoked_staff),
     auditLogs: normalizeAuditLogs(response.audit_logs),
   };
 }

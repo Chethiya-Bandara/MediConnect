@@ -77,6 +77,8 @@ export interface ActiveStaffMember {
   joinedAt: string | null;
 }
 
+export type RevokedStaffMember = ActiveStaffMember;
+
 export interface HospitalAuditLog {
   id: number | string | null;
   timestamp: string | null;
