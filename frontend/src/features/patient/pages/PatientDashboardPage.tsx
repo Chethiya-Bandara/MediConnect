@@ -829,11 +829,6 @@ export function PatientDashboardPage() {
     return [...pharmacyOptionsList].sort((left, right) => left.name.localeCompare(right.name));
   }, [pharmacyOptionsList]);
 
-  const selectedPrescriptionMeta = useMemo(
-    () => prescriptionOptions.find((item) => String(item.id) === selectedPrescriptionId) ?? null,
-    [prescriptionOptions, selectedPrescriptionId],
-  );
-
   const selectedPharmacyMeta = useMemo(
     () => pharmacyOptions.find((item) => String(item.id) === selectedPharmacyId) ?? null,
     [pharmacyOptions, selectedPharmacyId],
@@ -2121,14 +2116,11 @@ export function PatientDashboardPage() {
 
               <div className="rounded-[1.7rem] border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-7">
                 <div className="flex flex-col gap-3 border-b border-slate-100 pb-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
-                      Latest saved values
-                    </p>
-                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                      This card mirrors the freshest snapshot saved from your medical record flow.
-                    </p>
-                  </div>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        Latest saved values
+                      </p>
+                    </div>
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-primary dark:bg-slate-800 dark:text-blue-300">
                     {latestHealthSnapshot
                       ? formatHealthCheckedDate(latestHealthSnapshot.checked_at)
@@ -2431,21 +2423,7 @@ export function PatientDashboardPage() {
                     ePrescription Cost Check
                   </h2>
                 </div>
-                {selectedPrescriptionMeta || selectedPharmacyMeta ? (
-                  <div className="rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-                    <p>
-                      {selectedPrescriptionMeta
-                        ? selectedPrescriptionMeta.label
-                        : "No prescription selected yet."}
-                    </p>
-                    <p className="mt-1">
-                      {selectedPharmacyMeta
-                        ? `${selectedPharmacyMeta.name} • ${selectedPharmacyMeta.indexed_items} indexed item(s)`
-                        : "No pharmacy selected yet."}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
+                </div>
 
               <div className="grid gap-4 xl:grid-cols-[1.1fr_1.1fr_auto]">
                 <label className="block rounded-[1.4rem] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -2768,14 +2746,11 @@ export function PatientDashboardPage() {
                               getInitials(displayName)
                             )}
                           </div>
-                          <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-                              Profile photo
-                            </p>
-                            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                              Upload a photo or keep the initials badge.
-                            </p>
-                          </div>
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                                Profile photo
+                              </p>
+                            </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <input

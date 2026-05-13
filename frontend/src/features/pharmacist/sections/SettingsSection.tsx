@@ -159,9 +159,6 @@ export function SettingsSection({
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-cyan-700 dark:text-blue-400">Profile</p>
               <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">Identity settings</h3>
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Update the pharmacist-facing profile details used across the dispensing workspace.
-              </p>
             </div>
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-50 text-cyan-700 shadow-sm dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
               <UserRound size={22} />
@@ -176,7 +173,6 @@ export function SettingsSection({
                 </div>
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Profile photo</p>
-                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Upload a photo or leave the initials badge.</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -291,7 +287,6 @@ export function SettingsSection({
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-500 dark:text-slate-400">Read Only</p>
                 <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">Pharmacist details</h3>
-                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Verified dispensing context already linked to this account.</p>
               </div>
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-50 text-cyan-700 shadow-sm dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
                 <ShieldCheck size={22} />

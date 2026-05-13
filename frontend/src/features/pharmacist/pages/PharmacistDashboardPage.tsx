@@ -908,10 +908,10 @@ export function PharmacistDashboardPage() {
             <section className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-r from-slate-900 to-blue-900 p-10 text-white shadow-xl shadow-blue-900/20">
               <div className="relative z-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-center">
                 <div className="max-w-md">
-                  <h2 className="text-3xl font-bold">State Hospital Network</h2>
+                  <h2 className="text-3xl font-bold">State Pharmacy Network</h2>
                   <p className="mt-2 text-blue-100/80 font-medium text-sm">
                     You are currently authenticated at{" "}
-                    <span className="text-blue-300 font-bold">National Hospital Sri Lanka</span>.
+                    <span className="text-blue-300 font-bold">National Health Portal in Sri Lanka</span>.
                     All dispensed items are logged directly to the central healthcare backbone.
                   </p>
                 </div>
@@ -1623,10 +1623,10 @@ export function PharmacistDashboardPage() {
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                     size={16}
                   />
-                  <input
-                    value={stockSearch}
-                    onChange={(event) => setStockSearch(event.target.value)}
-                    placeholder="Medicine name, unit, row ID"
+                    <input
+                      value={stockSearch}
+                      onChange={(event) => setStockSearch(event.target.value)}
+                      placeholder="Medicine name, unit"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     type="text"
                   />
@@ -1702,12 +1702,9 @@ export function PharmacistDashboardPage() {
                             key={item.id}
                             className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/40"
                           >
-                            <td className="px-6 py-4">
-                              <p className="font-bold">{item.medicineName}</p>
-                              <p className="text-xs text-slate-500 dark:text-slate-400">
-                                Row ID {item.id}
-                              </p>
-                            </td>
+                              <td className="px-6 py-4">
+                                <p className="font-bold">{item.medicineName}</p>
+                              </td>
                             <td className="px-6 py-4">{item.medicineUnit ?? "Not set"}</td>
                             <td className="px-6 py-4 font-semibold">{quantity}</td>
                             <td className="px-6 py-4">{formatLkr(item.unitPrice)}</td>
@@ -1824,7 +1821,7 @@ export function PharmacistDashboardPage() {
                     <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
                       <tr>
                         <th className="px-6 py-4 font-semibold">Timestamp</th>
-                        <th className="px-6 py-4 font-semibold">Prescription</th>
+                        <th className="px-6 py-4 font-semibold">Prescription ID</th>
                         <th className="px-6 py-4 font-semibold">Patient DHID</th>
                         <th className="px-6 py-4 font-semibold">Items</th>
                         <th className="px-6 py-4 font-semibold">Value</th>
@@ -1840,12 +1837,9 @@ export function PharmacistDashboardPage() {
                           <td className="px-6 py-4 font-mono text-xs">
                             {formatDateTime(entry.dispensedAt)}
                           </td>
-                          <td className="px-6 py-4">
-                            <p className="font-bold">{entry.prescriptionId}</p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">
-                              {entry.patientName ?? "Patient name unavailable"}
-                            </p>
-                          </td>
+                            <td className="px-6 py-4">
+                              <p className="font-bold">{entry.prescriptionId}</p>
+                            </td>
                           <td className="px-6 py-4 font-mono text-xs">
                             {entry.patientDhid ?? "Not supplied"}
                           </td>
@@ -1867,7 +1861,14 @@ export function PharmacistDashboardPage() {
 
       <footer className="ml-64 border-t border-slate-100 bg-slate-50 transition-colors dark:border-slate-800 dark:bg-slate-900">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-8 py-12 text-xs uppercase tracking-widest text-slate-500 md:flex-row">
-          <p className="font-bold">© 2026 National Health Ministry</p>
+          <div>
+              <p className="text-sm font-bold dark:text-slate-300">
+                National Health Integration System
+              </p>
+              <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">
+                © 2026 National Health Ministry
+              </p>
+            </div>
         </div>
       </footer>
     </div>

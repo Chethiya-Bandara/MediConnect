@@ -508,6 +508,10 @@ function formatTimeWindow(start: string | null | undefined, end: string | null |
   })}`;
 }
 
+function stripArchiveSequenceLabel(value: string | null | undefined) {
+  return (value || "").replace(/\s+#\d+\b/g, "").trim();
+}
+
 function affiliationTone(status: string) {
   const normalized = status.toLowerCase();
   if (normalized.includes("approved") || normalized.includes("active")) {
@@ -2954,10 +2958,9 @@ export function DoctorDashboardPage() {
                           </div>
                           <div>
                             <h2 className="text-xl font-bold">{activePatient.patient.name}</h2>
-                          <p className="text-xs opacity-70">
-                            {activePatient.patient.dhid ?? "DHID pending"} •{" "}
-                            {activePatient.patient.email ?? "No email saved"}
-                          </p>
+                            <p className="text-xs opacity-70">
+                              {activePatient.patient.dhid ?? "DHID pending"}
+                            </p>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
@@ -3174,10 +3177,8 @@ export function DoctorDashboardPage() {
                     <h3 className="mt-3 text-3xl font-black text-slate-900 dark:text-white">
                       Organisation access control
                     </h3>
-                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                      Track approvals, send join requests, and keep only ready hospitals in your
-                      scheduling flow.
-                    </p>
+                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                      </p>
                   </div>
                   <div className="min-w-[260px] rounded-[1.6rem] border border-white/70 bg-white/80 px-5 py-4 shadow-sm dark:border-white/10 dark:bg-white/5">
                     <div className="flex items-center justify-between gap-4">
@@ -3208,10 +3209,7 @@ export function DoctorDashboardPage() {
                         Request hospital access
                       </h3>
                     </div>
-                    <div className="rounded-2xl bg-blue-50 px-4 py-3 text-xs text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
-                      Pick one hospital from the dropdown, send the request, then wait for admin approval.
                     </div>
-                  </div>
 
                   <div className="rounded-3xl border border-slate-100 bg-slate-50 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-800/40">
                     {requestableHospitals.length ? (
@@ -3458,10 +3456,7 @@ export function DoctorDashboardPage() {
                       <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">
                         Identity settings
                       </h3>
-                      <p className="mt-2 text-sm text-slate-500 dark:text-sky-200/60">
-                        Update the doctor-facing profile details patients and hospitals see.
-                      </p>
-                    </div>
+                      </div>
                     <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-sky-200 bg-white text-sky-600 shadow-sm dark:border-sky-700 dark:bg-sky-900 dark:text-sky-300">
                       <UserRound size={22} />
                     </div>
@@ -3559,9 +3554,8 @@ export function DoctorDashboardPage() {
                       onChange={setProfileSpecialization}
                       options={specializationSelectOptions}
                       placeholder="Select specialization"
-                      helperText="Choose the closest official specialty label for the doctor profile."
-                      triggerClassName="shadow-inner dark:bg-slate-800"
-                    />
+                        triggerClassName="shadow-inner dark:bg-slate-800"
+                      />
                   </div>
 
                   <div className="mt-5 grid gap-5 md:grid-cols-[1fr_auto]">
@@ -3594,10 +3588,7 @@ export function DoctorDashboardPage() {
                         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
                           Workspace theme
                         </p>
-                        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                          Select preferred theme for your workspace.
-                        </p>
-                      </div>
+                        </div>
                       <div className="flex gap-2">
                         <button
                           type="button"
@@ -3658,10 +3649,7 @@ export function DoctorDashboardPage() {
                         <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">
                           Doctor details
                         </h3>
-                        <p className="mt-2 text-sm text-slate-500 dark:text-sky-200/60">
-                          Verified clinical identity from the National Health Registry.
-                        </p>
-                      </div>
+                        </div>
                       <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-sky-200 bg-white text-sky-600 shadow-sm dark:border-sky-700 dark:bg-sky-900 dark:text-sky-300">
                         <ShieldCheck size={22} />
                       </div>
@@ -3848,10 +3836,12 @@ export function DoctorDashboardPage() {
                                 <FileArchive size={18} />
                               )}
                             </div>
-                            <div>
-                              <p className="font-bold dark:text-slate-200">{item.title}</p>
-                              <p className="text-xs font-medium text-slate-500">{item.meta}</p>
-                            </div>
+                              <div>
+                                <p className="font-bold dark:text-slate-200">
+                                  {stripArchiveSequenceLabel(item.title)}
+                                </p>
+                                <p className="text-xs font-medium text-slate-500">{item.meta}</p>
+                              </div>
                           </div>
                           <div className="flex items-center gap-3">
                             <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
@@ -3890,9 +3880,9 @@ export function DoctorDashboardPage() {
                           <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
                             Encounter Record
                           </p>
-                          <h4 className="mt-2 text-xl font-bold dark:text-white">
-                            {selectedArchiveRecord.title}
-                          </h4>
+                            <h4 className="mt-2 text-xl font-bold dark:text-white">
+                              {stripArchiveSequenceLabel(selectedArchiveRecord.title)}
+                            </h4>
                           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                             {selectedArchiveRecord.meta}
                           </p>
@@ -3923,9 +3913,7 @@ export function DoctorDashboardPage() {
                                 className="rounded-2xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/70"
                               >
                                 <div className="flex items-center justify-between gap-3">
-                                  <p className="font-bold dark:text-slate-200">
-                                    Prescription #{prescription.id}
-                                  </p>
+                                    <p className="font-bold dark:text-slate-200">Prescription</p>
                                   <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                                     {formatStatusLabel(prescription.status)}
                                   </span>
@@ -3968,9 +3956,9 @@ export function DoctorDashboardPage() {
                           <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
                             Prescription
                           </p>
-                          <h4 className="mt-2 text-xl font-bold dark:text-white">
-                            {selectedArchiveRecord.title}
-                          </h4>
+                            <h4 className="mt-2 text-xl font-bold dark:text-white">
+                              {stripArchiveSequenceLabel(selectedArchiveRecord.title)}
+                            </h4>
                           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                             {selectedArchiveRecord.meta}
                           </p>
@@ -4016,14 +4004,12 @@ export function DoctorDashboardPage() {
                         </div>
                       </div>
 
-                      <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-                        Linked encounter:{" "}
-                        <span className="font-semibold text-slate-900 dark:text-slate-100">
-                          {selectedArchivePrescription.encounter_id
-                            ? `Encounter #${selectedArchivePrescription.encounter_id}`
-                            : "Not linked"}
-                        </span>
-                      </div>
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                          Linked encounter:{" "}
+                          <span className="font-semibold text-slate-900 dark:text-slate-100">
+                            {selectedArchivePrescription.encounter_id ? "Available" : "Not linked"}
+                          </span>
+                        </div>
                     </div>
                   ) : (
                     <EmptyState
