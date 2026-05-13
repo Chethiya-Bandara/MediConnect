@@ -19,11 +19,11 @@ import {
   RefreshCcw,
   Save,
   Search,
+  Settings,
   ShieldAlert,
   Stethoscope,
   Sun,
   Trash2,
-  UserCircle2,
   UserRoundCheck,
   Users,
   XCircle,
@@ -31,7 +31,9 @@ import {
 import { useNavigate } from "react-router-dom";
 import { AppBrandMark } from "../../../components/ui";
 import { useAuth } from "../../auth/context/AuthContext";
+import { updateHealthMinistryAdminProfile } from "../api/healthMinistryAdminApi";
 import { useHealthMinistryAdminDashboard } from "../hooks/useHealthMinistryAdminDashboard";
+import { SettingsSection } from "../sections/SettingsSection";
 import type {
   ApprovalStatus,
   DeletionEntityType,
@@ -46,6 +48,8 @@ import type {
 type DashboardView =
   | "overview"
   | "approvals"
+  | "people"
+  | "settings"
   | "organisations"
   | "medicines"
   | "analytics"
@@ -60,14 +64,16 @@ type ApprovalEntityFilter = "organisations" | "doctors" | "admins";
 const views = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "approvals", label: "Approvals", icon: UserRoundCheck },
+  { id: "people", label: "Doctors & Admins", icon: Users },
+  { id: "deletions", label: "Deletion Requests", icon: ShieldAlert },
   { id: "organisations", label: "Organisation Registry", icon: Building2 },
   { id: "medicines", label: "Medicine Registry", icon: Pill },
   { id: "analytics", label: "Analytics & Reports", icon: BarChart3 },
   { id: "audit", label: "Audit Logs", icon: ClipboardList },
-  { id: "deletions", label: "Deletion Requests", icon: ShieldAlert },
   { id: "anomalies", label: "Anomaly Flags", icon: AlertTriangle },
   { id: "performance", label: "Performance", icon: Clock },
   { id: "investigation", label: "Investigation Mode", icon: Search },
+  { id: "settings", label: "Settings", icon: Settings },
 ] satisfies Array<{
   id: DashboardView;
   label: string;
@@ -131,6 +137,17 @@ function noticeClassName(message: string | null | undefined) {
 function formatStatusLabel(value: string | null | undefined) {
   if (!value) return "Unknown";
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function buildInitials(name: string | null | undefined) {
+  const safe = (name || "Ministry Admin").trim();
+  const parts = safe.split(/\s+/).filter(Boolean);
+  return (
+    parts
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? "")
+      .join("") || "MA"
+  );
 }
 
 function StatCard({
@@ -262,6 +279,13 @@ function DeletionsView({
     if (personTab === "pharmacists") return "pharmacist";
     return "hospital_admin";
   })();
+
+  const resolveAdminDeletionType = (person: RegistryPersonItem): DeletionEntityType => {
+    const adminRole = (person.adminRole ?? "").trim().toLowerCase();
+    if (adminRole === "pharmacy_admin") return "pharmacy_admin";
+    if (adminRole === "health_ministry_admin") return "health_ministry_admin";
+    return "hospital_admin";
+  };
 
   const filtered = personList.filter((p) => {
     const q = personSearch.trim().toLowerCase();
@@ -510,7 +534,7 @@ function DeletionsView({
                   : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
               }`}
             >
-              {tab.replace("_", " ")}
+              {tab === "hospital_admins" ? "admin roles" : tab.replace("_", " ")}
             </button>
           ))}
           <div className="ml-auto pb-2">
@@ -597,7 +621,14 @@ function DeletionsView({
                         <button
                           type="button"
                           disabled={dashboard.isSubmittingDeletion || isDeactivated}
-                          onClick={() => onPersonDeleteRequest(person, entityTypeForTab)}
+                          onClick={() =>
+                            onPersonDeleteRequest(
+                              person,
+                              personTab === "hospital_admins"
+                                ? resolveAdminDeletionType(person)
+                                : entityTypeForTab,
+                            )
+                          }
                           title={isDeactivated ? "Already deactivated" : "Request deactivation"}
                           className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30"
                         >
@@ -618,7 +649,7 @@ function DeletionsView({
                       ? "Loading registry…"
                       : personSearch
                         ? "No records matched your search."
-                        : `No ${personTab.replace("_", " ")} found. Click Refresh to load.`}
+                        : `No ${personTab === "hospital_admins" ? "admin roles" : personTab.replace("_", " ")} found. Click Refresh to load.`}
                   </td>
                 </tr>
               )}
@@ -630,13 +661,379 @@ function DeletionsView({
   );
 }
 
+function roleLabel(value: string | null | undefined) {
+  if (!value) return "Unknown";
+  return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function PeopleManagementView({
+  dashboard,
+  doctors,
+  adminUsers,
+  onRefresh,
+  onDoctorDecision,
+  onAdminDecision,
+  onAdminDeleteRequest,
+  onDoctorDeleteRequest,
+  formatDisplayDate,
+}: {
+  dashboard: DashboardHook;
+  doctors: RegistryPersonItem[];
+  adminUsers: RegistryPersonItem[];
+  onRefresh: () => void;
+  onDoctorDecision: (status: ApprovalStatus, targetId: string) => void;
+  onAdminDecision: (status: ApprovalStatus, targetId: string, label?: string | null) => void;
+  onAdminDeleteRequest: (person: RegistryPersonItem) => void;
+  onDoctorDeleteRequest: (person: RegistryPersonItem) => void;
+  formatDisplayDate: (v: string | null | undefined) => string;
+}) {
+  const [doctorSearch, setDoctorSearch] = useState("");
+  const [adminSearch, setAdminSearch] = useState("");
+  const [adminRoleFilter, setAdminRoleFilter] = useState("ALL");
+
+  const filteredDoctors = useMemo(() => {
+    const q = doctorSearch.trim().toLowerCase();
+    return doctors.filter((row) => {
+      if (!q) return true;
+      return [row.name, row.email, row.id, row.specialization, row.slmcNumber, row.status]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [doctorSearch, doctors]);
+
+  const filteredAdminUsers = useMemo(() => {
+    const q = adminSearch.trim().toLowerCase();
+    return adminUsers.filter((row) => {
+      const matchesRole =
+        adminRoleFilter === "ALL" || (row.adminRole ?? "").toLowerCase() === adminRoleFilter;
+      if (!matchesRole) return false;
+      if (!q) return true;
+      return [
+        row.name,
+        row.email,
+        row.id,
+        row.adminRole,
+        row.organisationName,
+        row.organisationId,
+        row.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [adminRoleFilter, adminSearch, adminUsers]);
+
+  const doctorPendingCount = doctors.filter((row) => (row.status ?? "").toLowerCase() === "pending").length;
+  const adminPendingCount = adminUsers.filter((row) => (row.status ?? "").toLowerCase() === "pending").length;
+
+  return (
+    <section className="space-y-10">
+      <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="font-headline text-3xl font-extrabold tracking-tight">
+            Doctors & Admin Roles
+          </h1>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            Approve, suspend, reject, or send deletion requests for doctor accounts and Ministry-managed
+            admin roles.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:opacity-90 dark:bg-slate-700"
+        >
+          <RefreshCcw size={16} />
+          Refresh People
+        </button>
+      </header>
+
+      {dashboard.usersMessage ? (
+        <div className={`rounded-2xl border px-5 py-4 text-sm ${noticeClassName(dashboard.usersMessage)}`}>
+          {dashboard.usersMessage}
+        </div>
+      ) : null}
+      {dashboard.deletionMessage ? (
+        <div className={`rounded-2xl border px-5 py-4 text-sm ${noticeClassName(dashboard.deletionMessage)}`}>
+          {dashboard.deletionMessage}
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+            Doctors under review
+          </p>
+          <p className="mt-3 text-3xl font-extrabold">{doctorPendingCount.toLocaleString("en-LK")}</p>
+        </div>
+        <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+            Admin roles under review
+          </p>
+          <p className="mt-3 text-3xl font-extrabold">{adminPendingCount.toLocaleString("en-LK")}</p>
+        </div>
+      </div>
+
+      <div className="grid gap-8 xl:grid-cols-2">
+        <section className="rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-700 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="font-headline text-lg font-bold">Doctors</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Only approved doctors can log in. Pending, suspended, and rejected stay blocked.
+              </p>
+            </div>
+            <div className="relative w-full max-w-sm">
+              <input
+                type="text"
+                value={doctorSearch}
+                onChange={(event) => setDoctorSearch(event.target.value)}
+                placeholder="Search doctor, SLMC, email…"
+                className="w-full rounded-xl border-0 bg-slate-100 px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+              />
+              <Search className="absolute right-3 top-3 text-slate-400" size={16} />
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                <tr>
+                  <th className="px-5 py-4 font-semibold">Doctor</th>
+                  <th className="px-5 py-4 font-semibold">SLMC / Specialty</th>
+                  <th className="px-5 py-4 font-semibold">Status</th>
+                  <th className="px-5 py-4 font-semibold">Joined</th>
+                  <th className="px-5 py-4 text-right font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                {filteredDoctors.length > 0 ? (
+                  filteredDoctors.map((row) => {
+                    const statusLower = (row.status ?? "").toLowerCase();
+                    const isDeactivated = statusLower === "deactivated";
+                    const displayName = row.name ?? row.email ?? `Doctor ${row.id}`;
+                    return (
+                      <tr key={row.id} className={isDeactivated ? "opacity-60" : ""}>
+                        <td className="px-5 py-4">
+                          <div className="font-semibold">{displayName}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            {row.email ?? "No email"}
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-xs text-slate-500 dark:text-slate-400">
+                          <div>{row.slmcNumber ? `SLMC: ${row.slmcNumber}` : "SLMC not set"}</div>
+                          <div className="mt-1">{row.specialization ?? "Specialization not set"}</div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(row.status)}`}>
+                            {row.status ?? "unknown"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
+                          {formatDisplayDate(row.createdAt)}
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                              type="button"
+                              disabled={dashboard.isSubmittingApproval || isDeactivated || statusLower === "approved"}
+                              onClick={() => onDoctorDecision("approved", row.id)}
+                              className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:bg-emerald-900/20 dark:text-emerald-300"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              disabled={dashboard.isSubmittingApproval || isDeactivated || statusLower === "suspended"}
+                              onClick={() => onDoctorDecision("suspended", row.id)}
+                              className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-900/20 dark:text-amber-300"
+                            >
+                              Suspend
+                            </button>
+                            <button
+                              type="button"
+                              disabled={dashboard.isSubmittingApproval || isDeactivated || statusLower === "rejected"}
+                              onClick={() => onDoctorDecision("rejected", row.id)}
+                              className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50 dark:bg-rose-900/20 dark:text-rose-300"
+                            >
+                              Reject
+                            </button>
+                            <button
+                              type="button"
+                              disabled={dashboard.isSubmittingDeletion || isDeactivated}
+                              onClick={() => onDoctorDeleteRequest(row)}
+                              className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-10 text-center text-slate-500 dark:text-slate-400">
+                      {dashboard.isLoadingRegistry
+                        ? "Loading doctors…"
+                        : doctorSearch
+                          ? "No doctors matched the current search."
+                          : "No doctors available yet."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-700">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="font-headline text-lg font-bold">Admin Roles</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Manage health ministry, hospital admin, and pharmacy admin accounts from one place.
+                </p>
+              </div>
+              <div className="flex w-full max-w-md gap-3">
+                <select
+                  value={adminRoleFilter}
+                  onChange={(event) => setAdminRoleFilter(event.target.value)}
+                  className="rounded-xl border-0 bg-slate-100 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                >
+                  <option value="ALL">All roles</option>
+                  <option value="health_ministry_admin">MOH Admin</option>
+                  <option value="hospital_admin">Hospital Admin</option>
+                  <option value="pharmacy_admin">Pharmacy Admin</option>
+                </select>
+                <div className="relative w-full">
+                  <input
+                    type="text"
+                    value={adminSearch}
+                    onChange={(event) => setAdminSearch(event.target.value)}
+                    placeholder="Search admin, org, email…"
+                    className="w-full rounded-xl border-0 bg-slate-100 px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                  />
+                  <Search className="absolute right-3 top-3 text-slate-400" size={16} />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                <tr>
+                  <th className="px-5 py-4 font-semibold">Admin</th>
+                  <th className="px-5 py-4 font-semibold">Role</th>
+                  <th className="px-5 py-4 font-semibold">Organisation</th>
+                  <th className="px-5 py-4 font-semibold">Status</th>
+                  <th className="px-5 py-4 font-semibold">Joined</th>
+                  <th className="px-5 py-4 text-right font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                {filteredAdminUsers.length > 0 ? (
+                  filteredAdminUsers.map((row) => {
+                    const statusLower = (row.status ?? "").toLowerCase();
+                    const isDeactivated = statusLower === "deactivated";
+                    const displayName = row.name ?? row.email ?? `Admin ${row.id}`;
+                    return (
+                      <tr key={row.id} className={isDeactivated ? "opacity-60" : ""}>
+                        <td className="px-5 py-4">
+                          <div className="font-semibold">{displayName}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            {row.email ?? "No email"}
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-xs text-slate-500 dark:text-slate-400">
+                          {roleLabel(row.adminRole ?? row.id)}
+                        </td>
+                        <td className="px-5 py-4 text-xs text-slate-500 dark:text-slate-400">
+                          {row.organisationName
+                            ? `${row.organisationName}${row.organisationId ? ` (#${row.organisationId})` : ""}`
+                            : row.organisationId
+                              ? `Organisation #${row.organisationId}`
+                              : "National scope"}
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(row.status)}`}>
+                            {row.status ?? "unknown"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
+                          {formatDisplayDate(row.createdAt)}
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                              type="button"
+                              disabled={dashboard.isSubmittingApproval || isDeactivated || statusLower === "approved"}
+                              onClick={() => onAdminDecision("approved", row.id, displayName)}
+                              className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:bg-emerald-900/20 dark:text-emerald-300"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              disabled={dashboard.isSubmittingApproval || isDeactivated || statusLower === "suspended"}
+                              onClick={() => onAdminDecision("suspended", row.id, displayName)}
+                              className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-900/20 dark:text-amber-300"
+                            >
+                              Suspend
+                            </button>
+                            <button
+                              type="button"
+                              disabled={dashboard.isSubmittingApproval || isDeactivated || statusLower === "rejected"}
+                              onClick={() => onAdminDecision("rejected", row.id, displayName)}
+                              className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50 dark:bg-rose-900/20 dark:text-rose-300"
+                            >
+                              Reject
+                            </button>
+                            <button
+                              type="button"
+                              disabled={dashboard.isSubmittingDeletion || isDeactivated}
+                              onClick={() => onAdminDeleteRequest(row)}
+                              className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-10 text-center text-slate-500 dark:text-slate-400">
+                      {dashboard.isLoadingRegistry
+                        ? "Loading admin roles…"
+                        : adminSearch || adminRoleFilter !== "ALL"
+                          ? "No admin roles matched the current filters."
+                          : "No admin accounts available yet."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 export function HealthMinistryAdminDashboardPage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const dashboard = useHealthMinistryAdminDashboard();
 
   const [view, setView] = useState<DashboardView>("overview");
   const [theme, setTheme] = useState<ThemeMode>("light");
+  const [profileSaveMessage, setProfileSaveMessage] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [organisationSearch, setOrganisationSearch] = useState("");
   const [newOrganisationName, setNewOrganisationName] = useState("");
   const [newOrganisationType, setNewOrganisationType] = useState("hospital");
@@ -670,6 +1067,15 @@ export function HealthMinistryAdminDashboardPage() {
       }
     >
   >({});
+
+  useEffect(() => {
+    if (view === "people" || view === "deletions") {
+      void dashboard.refreshPeopleRegistries();
+    }
+    if (view === "deletions") {
+      void dashboard.refreshDeletionRequests();
+    }
+  }, [view]);
 
   const deferredAuditSearch = useDeferredValue(auditSearch.trim().toLowerCase());
   const deferredApprovalSearch = useDeferredValue(approvalsSearch.trim().toLowerCase());
@@ -706,6 +1112,8 @@ export function HealthMinistryAdminDashboardPage() {
   }, [dashboard.managedMedicines]);
 
   const topDiagnosis = dashboard.topDiagnoses[0]?.code ?? "No diagnosis feed yet";
+  const userDisplayName = user?.preferredName || "Ministry Admin";
+  const userInitials = buildInitials(user?.name ?? user?.preferredName ?? "Ministry Admin");
   const totalPendingApprovals =
     dashboard.dashboardStats.pendingDoctors +
     dashboard.dashboardStats.pendingOrganisations +
@@ -820,6 +1228,22 @@ export function HealthMinistryAdminDashboardPage() {
     });
   }, [dashboard.managedOrganisations, deferredOrganisationSearch]);
 
+  const filteredHospitalOrganisations = useMemo(
+    () =>
+      filteredManagedOrganisations.filter(
+        (row) => (row.type ?? "").trim().toLowerCase() === "hospital",
+      ),
+    [filteredManagedOrganisations],
+  );
+
+  const filteredPharmacyOrganisations = useMemo(
+    () =>
+      filteredManagedOrganisations.filter(
+        (row) => (row.type ?? "").trim().toLowerCase() === "pharmacy",
+      ),
+    [filteredManagedOrganisations],
+  );
+
   const filteredManagedMedicines = useMemo(() => {
     return dashboard.managedMedicines.filter((row) => {
       const haystack = [row.id, row.name, row.unit, row.wholesalePrice, row.retailPrice]
@@ -903,6 +1327,40 @@ export function HealthMinistryAdminDashboardPage() {
     navigate("/login");
   };
 
+  const handleProfileSave = async (payload: { preferredName: string; address: string }) => {
+    setIsSavingProfile(true);
+    setProfileSaveMessage(null);
+
+    try {
+      const response = await updateHealthMinistryAdminProfile({
+        preferred_name: payload.preferredName.trim(),
+        address: payload.address.trim(),
+      });
+      const nextUser = response.user;
+      if (nextUser) {
+        updateUser({
+          name: nextUser.name ?? user?.name ?? "Ministry Admin",
+          preferredName: nextUser.preferred_name ?? payload.preferredName.trim(),
+          legalName: nextUser.legal_name ?? user?.legalName ?? null,
+          address: nextUser.address ?? payload.address.trim(),
+          status: nextUser.status ?? user?.status ?? null,
+          organisationId: nextUser.organisation_id ?? user?.organisationId ?? null,
+          organisationName: nextUser.organisation_name ?? user?.organisationName ?? null,
+          organisationType: nextUser.organisation_type ?? user?.organisationType ?? null,
+          organisationStatus: nextUser.organisation_status ?? user?.organisationStatus ?? null,
+          adminRole: nextUser.admin_role ?? user?.adminRole ?? null,
+        });
+      }
+      setProfileSaveMessage(response.message ?? "Settings saved.");
+    } catch (error) {
+      setProfileSaveMessage(
+        error instanceof Error ? error.message : "Ministry admin settings could not be saved.",
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
   const handleOrganizationDecision = async (status: ApprovalStatus, targetId: string) => {
     const resolvedId = targetId.trim();
     if (!resolvedId) return;
@@ -916,8 +1374,16 @@ export function HealthMinistryAdminDashboardPage() {
   const handleDoctorDecision = async (status: ApprovalStatus, targetId: string) => {
     const resolvedId = targetId.trim();
     if (!resolvedId) return;
+    const actionLabel =
+      status === "approved"
+        ? "Approve"
+        : status === "rejected"
+          ? "Reject"
+          : status === "suspended"
+            ? "Suspend"
+            : "Move back to pending";
     const confirmed = window.confirm(
-      `${status === "approved" ? "Approve" : "Reject"} doctor ${resolvedId}?`,
+      `${actionLabel} doctor ${resolvedId}?`,
     );
     if (!confirmed) return;
     await dashboard.submitDoctorApproval(resolvedId, status);
@@ -1090,6 +1556,17 @@ export function HealthMinistryAdminDashboardPage() {
     void dashboard.refreshDeletionRequests();
   };
 
+  const handleAdminDeleteRequest = async (person: RegistryPersonItem) => {
+    const adminRole = (person.adminRole ?? "").trim().toLowerCase();
+    const entityType: DeletionEntityType =
+      adminRole === "pharmacy_admin"
+        ? "pharmacy_admin"
+        : adminRole === "health_ministry_admin"
+          ? "health_ministry_admin"
+          : "hospital_admin";
+    await handlePersonDeleteRequest(person, entityType);
+  };
+
   const exportAuditLogs = () => {
     if (filteredAuditLogs.length === 0) {
       setAuditExportMessage(
@@ -1192,9 +1669,6 @@ export function HealthMinistryAdminDashboardPage() {
             <span className="font-headline text-[1.45rem] font-extrabold uppercase tracking-[0.08em] text-blue-900 dark:text-blue-400 sm:text-[1.75rem]">
               National Health Portal
             </span>
-            <span className="hidden rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.28em] text-blue-900 md:inline-block dark:bg-blue-900/50 dark:text-blue-100">
-              Ministry of Health
-            </span>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -1205,12 +1679,19 @@ export function HealthMinistryAdminDashboardPage() {
             >
               {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
             </button>
-            <button
-              type="button"
-              className="rounded-full p-2 text-slate-500 transition-all hover:bg-slate-100 hover:text-blue-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-blue-300"
-            >
-              <UserCircle2 size={20} />
-            </button>
+            <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white/80 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900/70">
+              <div className="text-right">
+                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  {userDisplayName}
+                </p>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+                  Ministry Admin
+                </p>
+              </div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-blue-300 bg-blue-100 font-bold text-blue-700 dark:border-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                {userInitials}
+              </div>
+            </div>
           </div>
         </header>
 
@@ -1762,6 +2243,31 @@ export function HealthMinistryAdminDashboardPage() {
             </section>
           ) : null}
 
+          {view === "people" ? (
+            <PeopleManagementView
+              dashboard={dashboard}
+              doctors={dashboard.doctorsRegistry}
+              adminUsers={dashboard.hospitalAdminsRegistry}
+              onRefresh={() => {
+                void dashboard.refreshPeopleRegistries();
+                void dashboard.refreshDashboard();
+              }}
+              onDoctorDecision={(status, targetId) => {
+                void handleDoctorDecision(status, targetId);
+              }}
+              onAdminDecision={(status, targetId, label) => {
+                void handleAdminDecision(status, targetId, label);
+              }}
+              onAdminDeleteRequest={(person) => {
+                void handleAdminDeleteRequest(person);
+              }}
+              onDoctorDeleteRequest={(person) => {
+                void handlePersonDeleteRequest(person, "doctor");
+              }}
+              formatDisplayDate={formatDisplayDate}
+            />
+          ) : null}
+
           {view === "organisations" ? (
             <section className="space-y-8">
               <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -1819,7 +2325,7 @@ export function HealthMinistryAdminDashboardPage() {
                 </div>
               </div>
 
-              <div className="grid gap-8 xl:grid-cols-[0.95fr,1.35fr]">
+              <div className="space-y-8">
                 <section className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -1832,7 +2338,7 @@ export function HealthMinistryAdminDashboardPage() {
                     <Building2 className="text-blue-700 dark:text-blue-400" size={20} />
                   </div>
 
-                  <div className="mt-6 space-y-4">
+                  <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,2.1fr)_minmax(180px,0.9fr)_minmax(180px,0.9fr)_minmax(220px,1fr)] xl:items-end">
                     <label className="space-y-2">
                       <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
                         Organisation name
@@ -1846,42 +2352,40 @@ export function HealthMinistryAdminDashboardPage() {
                       />
                     </label>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <label className="space-y-2">
-                        <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                          Type
-                        </span>
-                        <select
-                          value={newOrganisationType}
-                          onChange={(event) => setNewOrganisationType(event.target.value)}
-                          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                        >
-                          <option value="hospital">Hospital</option>
-                          <option value="pharmacy">Pharmacy</option>
-                        </select>
-                      </label>
+                    <label className="space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Type
+                      </span>
+                      <select
+                        value={newOrganisationType}
+                        onChange={(event) => setNewOrganisationType(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                      >
+                        <option value="hospital">Hospital</option>
+                        <option value="pharmacy">Pharmacy</option>
+                      </select>
+                    </label>
 
-                      <label className="space-y-2">
-                        <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                          Initial status
-                        </span>
-                        <select
-                          value={newOrganisationStatus}
-                          onChange={(event) => setNewOrganisationStatus(event.target.value)}
-                          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                        >
-                          <option value="active">Active</option>
-                          <option value="approved">Approved</option>
-                          <option value="pending">Pending</option>
-                        </select>
-                      </label>
-                    </div>
+                    <label className="space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Initial status
+                      </span>
+                      <select
+                        value={newOrganisationStatus}
+                        onChange={(event) => setNewOrganisationStatus(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                      >
+                        <option value="active">Active</option>
+                        <option value="approved">Approved</option>
+                        <option value="pending">Pending</option>
+                      </select>
+                    </label>
 
                     <button
                       type="button"
                       onClick={() => void handleOrganisationCreate()}
                       disabled={dashboard.isCreatingOrganisation || !newOrganisationName.trim()}
-                      className="w-full rounded-2xl bg-blue-700 px-5 py-4 text-sm font-bold text-white shadow-md shadow-blue-900/15 transition-opacity hover:opacity-90 disabled:opacity-60 dark:bg-blue-600"
+                      className="w-full rounded-2xl bg-blue-700 px-5 py-4 text-sm font-bold text-white shadow-md shadow-blue-900/15 transition-opacity hover:opacity-90 disabled:opacity-60 dark:bg-blue-600 xl:self-end"
                     >
                       {dashboard.isCreatingOrganisation ? "Creating..." : "Create Organisation"}
                     </button>
@@ -1922,93 +2426,192 @@ export function HealthMinistryAdminDashboardPage() {
                     </div>
                   </div>
 
-                  <div className="mt-6 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                    <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                        <tr>
-                          <th className="px-4 py-3 font-semibold">Organisation</th>
-                          <th className="px-4 py-3 font-semibold">Type</th>
-                          <th className="px-4 py-3 font-semibold">Status</th>
-                          <th className="px-4 py-3 font-semibold">Linked facility</th>
-                          <th className="px-4 py-3 font-semibold">Created</th>
-                          <th className="px-4 py-3 text-right font-semibold">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {filteredManagedOrganisations.length > 0 ? (
-                          filteredManagedOrganisations.map((row) => {
-                            const statusLower = (row.status ?? "").toLowerCase();
-                            const actionLabel =
-                              statusLower === "suspended" ? "Set Active" : "Suspend";
-                            const actionClassName =
-                              statusLower === "suspended"
-                                ? "text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                                : "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20";
+                  <div className="mt-6 grid gap-6 xl:grid-cols-2">
+                    <section className="rounded-2xl border border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+                        <div>
+                          <h3 className="font-headline text-base font-bold">Hospitals</h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {filteredHospitalOrganisations.length.toLocaleString("en-LK")} matched
+                          </p>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                            <tr>
+                              <th className="px-4 py-3 font-semibold">Organisation</th>
+                              <th className="px-4 py-3 font-semibold">Status</th>
+                              <th className="px-4 py-3 font-semibold">Linked facility</th>
+                              <th className="px-4 py-3 font-semibold">Created</th>
+                              <th className="px-4 py-3 text-right font-semibold">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                            {filteredHospitalOrganisations.length > 0 ? (
+                              filteredHospitalOrganisations.map((row) => {
+                                const statusLower = (row.status ?? "").toLowerCase();
+                                const actionLabel =
+                                  statusLower === "suspended" ? "Set Active" : "Suspend";
+                                const actionClassName =
+                                  statusLower === "suspended"
+                                    ? "text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                                    : "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20";
 
-                            return (
-                              <tr key={row.id}>
-                                <td className="px-4 py-4">
-                                  <div className="font-semibold">
-                                    {row.name ?? `Organisation ${row.id}`}
-                                  </div>
-                                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                    ID: {row.id}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-4">
-                                  <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                                    {row.type ?? "unknown"}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
-                                  {formatStatusLabel(row.status)}
-                                </td>
-                                <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
-                                  {row.linkedTable
-                                    ? `${formatStatusLabel(row.linkedTable)} #${row.linkedRecordId ?? "?"}`
-                                    : "Organisation only"}
-                                </td>
-                                <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
-                                  {formatDisplayDate(row.createdAt)}
-                                </td>
-                                <td className="px-4 py-4">
-                                  <div className="flex justify-end gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleOrganisationStatusToggle(row)}
-                                      disabled={dashboard.isSubmittingUserAction}
-                                      className={`rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${actionClassName}`}
-                                    >
-                                      {actionLabel}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleOrganisationDeleteRequest(row)}
-                                      disabled={dashboard.isSubmittingDeletion}
-                                      title="Request deactivation (dual-admin approval)"
-                                      className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                                    >
-                                      <Trash2 size={15} />
-                                    </button>
-                                  </div>
+                                return (
+                                  <tr key={row.id}>
+                                    <td className="px-4 py-4">
+                                      <div className="font-semibold">
+                                        {row.name ?? `Organisation ${row.id}`}
+                                      </div>
+                                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                        ID: {row.id}
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                                      {formatStatusLabel(row.status)}
+                                    </td>
+                                    <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                                      {row.linkedTable
+                                        ? `${formatStatusLabel(row.linkedTable)} #${row.linkedRecordId ?? "?"}`
+                                        : "Organisation only"}
+                                    </td>
+                                    <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                                      {formatDisplayDate(row.createdAt)}
+                                    </td>
+                                    <td className="px-4 py-4">
+                                      <div className="flex justify-end gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleOrganisationStatusToggle(row)}
+                                          disabled={dashboard.isSubmittingUserAction}
+                                          className={`rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${actionClassName}`}
+                                        >
+                                          {actionLabel}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleOrganisationDeleteRequest(row)}
+                                          disabled={dashboard.isSubmittingDeletion}
+                                          title="Request deactivation (dual-admin approval)"
+                                          className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                                        >
+                                          <Trash2 size={15} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td
+                                  colSpan={5}
+                                  className="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
+                                >
+                                  {dashboard.isLoadingDashboard
+                                    ? "Refreshing hospital registry..."
+                                    : "No hospitals matched the current search."}
                                 </td>
                               </tr>
-                            );
-                          })
-                        ) : (
-                          <tr>
-                            <td
-                              colSpan={6}
-                              className="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
-                            >
-                              {dashboard.isLoadingDashboard
-                                ? "Refreshing organisation registry..."
-                                : "No organisations matched the current search."}
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+
+                    <section className="rounded-2xl border border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+                        <div>
+                          <h3 className="font-headline text-base font-bold">Pharmacies</h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {filteredPharmacyOrganisations.length.toLocaleString("en-LK")} matched
+                          </p>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                            <tr>
+                              <th className="px-4 py-3 font-semibold">Organisation</th>
+                              <th className="px-4 py-3 font-semibold">Status</th>
+                              <th className="px-4 py-3 font-semibold">Linked facility</th>
+                              <th className="px-4 py-3 font-semibold">Created</th>
+                              <th className="px-4 py-3 text-right font-semibold">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                            {filteredPharmacyOrganisations.length > 0 ? (
+                              filteredPharmacyOrganisations.map((row) => {
+                                const statusLower = (row.status ?? "").toLowerCase();
+                                const actionLabel =
+                                  statusLower === "suspended" ? "Set Active" : "Suspend";
+                                const actionClassName =
+                                  statusLower === "suspended"
+                                    ? "text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                                    : "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20";
+
+                                return (
+                                  <tr key={row.id}>
+                                    <td className="px-4 py-4">
+                                      <div className="font-semibold">
+                                        {row.name ?? `Organisation ${row.id}`}
+                                      </div>
+                                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                        ID: {row.id}
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                                      {formatStatusLabel(row.status)}
+                                    </td>
+                                    <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                                      {row.linkedTable
+                                        ? `${formatStatusLabel(row.linkedTable)} #${row.linkedRecordId ?? "?"}`
+                                        : "Organisation only"}
+                                    </td>
+                                    <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                                      {formatDisplayDate(row.createdAt)}
+                                    </td>
+                                    <td className="px-4 py-4">
+                                      <div className="flex justify-end gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleOrganisationStatusToggle(row)}
+                                          disabled={dashboard.isSubmittingUserAction}
+                                          className={`rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${actionClassName}`}
+                                        >
+                                          {actionLabel}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleOrganisationDeleteRequest(row)}
+                                          disabled={dashboard.isSubmittingDeletion}
+                                          title="Request deactivation (dual-admin approval)"
+                                          className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                                        >
+                                          <Trash2 size={15} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td
+                                  colSpan={5}
+                                  className="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
+                                >
+                                  {dashboard.isLoadingDashboard
+                                    ? "Refreshing pharmacy registry..."
+                                    : "No pharmacies matched the current search."}
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
                   </div>
                 </section>
               </div>
@@ -2064,7 +2667,7 @@ export function HealthMinistryAdminDashboardPage() {
                 </div>
               </div>
 
-              <div className="grid gap-8 xl:grid-cols-[0.95fr,1.35fr]">
+              <div className="space-y-8">
                 <section className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -2076,7 +2679,7 @@ export function HealthMinistryAdminDashboardPage() {
                     <PackagePlus className="text-blue-700 dark:text-blue-400" size={20} />
                   </div>
 
-                  <div className="mt-6 space-y-4">
+                  <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(140px,0.9fr)_minmax(150px,0.9fr)_minmax(150px,0.9fr)_minmax(220px,1fr)] xl:items-end">
                     <label className="space-y-2">
                       <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
                         Medicine name
@@ -2103,39 +2706,37 @@ export function HealthMinistryAdminDashboardPage() {
                       />
                     </label>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <label className="space-y-2">
-                        <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                          Wholesale price
-                        </span>
-                        <input
-                          value={newWholesalePrice}
-                          onChange={(event) => setNewWholesalePrice(event.target.value)}
-                          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                          placeholder="5100"
-                          inputMode="decimal"
-                          type="number"
-                          min="0"
-                          step="0.01"
-                        />
-                      </label>
+                    <label className="space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Wholesale price
+                      </span>
+                      <input
+                        value={newWholesalePrice}
+                        onChange={(event) => setNewWholesalePrice(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                        placeholder="5100"
+                        inputMode="decimal"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                      />
+                    </label>
 
-                      <label className="space-y-2">
-                        <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                          Retail price
-                        </span>
-                        <input
-                          value={newRetailPrice}
-                          onChange={(event) => setNewRetailPrice(event.target.value)}
-                          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                          placeholder="5750"
-                          inputMode="decimal"
-                          type="number"
-                          min="0"
-                          step="0.01"
-                        />
-                      </label>
-                    </div>
+                    <label className="space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Retail price
+                      </span>
+                      <input
+                        value={newRetailPrice}
+                        onChange={(event) => setNewRetailPrice(event.target.value)}
+                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                        placeholder="5750"
+                        inputMode="decimal"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                      />
+                    </label>
 
                     <button
                       type="button"
@@ -2147,7 +2748,7 @@ export function HealthMinistryAdminDashboardPage() {
                         !newWholesalePrice.trim() ||
                         !newRetailPrice.trim()
                       }
-                      className="w-full rounded-2xl bg-blue-700 px-5 py-4 text-sm font-bold text-white shadow-md shadow-blue-900/15 transition-opacity hover:opacity-90 disabled:opacity-60 dark:bg-blue-600"
+                      className="w-full rounded-2xl bg-blue-700 px-5 py-4 text-sm font-bold text-white shadow-md shadow-blue-900/15 transition-opacity hover:opacity-90 disabled:opacity-60 dark:bg-blue-600 xl:self-end"
                     >
                       {dashboard.isSubmittingMedicine ? "Saving..." : "Add Medicine"}
                     </button>
@@ -2549,6 +3150,18 @@ export function HealthMinistryAdminDashboardPage() {
                 ) : null}
               </div>
             </section>
+          ) : null}
+
+          {view === "settings" ? (
+            <SettingsSection
+              user={user}
+              theme={theme}
+              saveMessage={profileSaveMessage}
+              isSaving={isSavingProfile}
+              onThemeChange={setTheme}
+              onSave={handleProfileSave}
+              onLogout={handleLogout}
+            />
           ) : null}
 
           {view === "audit" ? (

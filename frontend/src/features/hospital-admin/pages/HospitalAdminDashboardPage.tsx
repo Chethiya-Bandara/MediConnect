@@ -22,7 +22,9 @@ import {
 import { useNavigate } from "react-router-dom";
 import { AppBrandMark } from "../../../components/ui";
 import { useAuth } from "../../auth/context/AuthContext";
+import { updateHospitalAdminProfile } from "../api/hospitalAdminApi";
 import { useHospitalAdminDashboard } from "../hooks/useHospitalAdminDashboard";
+import { SettingsSection } from "../sections/SettingsSection";
 import type { AffiliationDecisionStatus, CreateAvailabilityPayload } from "../types";
 
 type DashboardView = "overview" | "staffing" | "scheduling" | "audit" | "settings";
@@ -153,6 +155,7 @@ function noticeTone(message: string | null | undefined) {
     lowered.includes("error") ||
     lowered.includes("invalid") ||
     lowered.includes("could not") ||
+    lowered.includes("suspend") ||
     lowered.includes("not found") ||
     lowered.includes("overlap") ||
     lowered.includes("unavailable")
@@ -193,7 +196,7 @@ function getRelativeDayLabel(date: string) {
 
 export function HospitalAdminDashboardPage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const dashboard = useHospitalAdminDashboard();
 
   const [view, setView] = useState<DashboardView>("overview");
@@ -217,6 +220,8 @@ export function HospitalAdminDashboardPage() {
   const [auditRoleFilter, setAuditRoleFilter] = useState("ALL");
   const [appliedAuditRoleFilter, setAppliedAuditRoleFilter] = useState("ALL");
   const [slotSaveMessage, setSlotSaveMessage] = useState<string | null>(null);
+  const [profileSaveMessage, setProfileSaveMessage] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   const deferredAuditSearch = useDeferredValue(appliedAuditSearch.trim().toLowerCase());
@@ -424,6 +429,40 @@ export function HospitalAdminDashboardPage() {
   const handleLogout = () => {
     logout();
     navigate("/login");
+  };
+
+  const handleProfileSave = async (payload: { preferredName: string; address: string }) => {
+    setIsSavingProfile(true);
+    setProfileSaveMessage(null);
+
+    try {
+      const response = await updateHospitalAdminProfile({
+        preferred_name: payload.preferredName.trim(),
+        address: payload.address.trim(),
+      });
+      const nextUser = response.user;
+      if (nextUser) {
+        updateUser({
+          name: nextUser.name ?? user?.name ?? "Hospital Admin",
+          preferredName: nextUser.preferred_name ?? payload.preferredName.trim(),
+          legalName: nextUser.legal_name ?? user?.legalName ?? null,
+          address: nextUser.address ?? payload.address.trim(),
+          status: nextUser.status ?? user?.status ?? null,
+          organisationId: nextUser.organisation_id ?? user?.organisationId ?? null,
+          organisationName: nextUser.organisation_name ?? user?.organisationName ?? null,
+          organisationType: nextUser.organisation_type ?? user?.organisationType ?? null,
+          organisationStatus: nextUser.organisation_status ?? user?.organisationStatus ?? null,
+          adminRole: nextUser.admin_role ?? user?.adminRole ?? null,
+        });
+      }
+      setProfileSaveMessage(response.message ?? "Settings saved.");
+    } catch (error) {
+      setProfileSaveMessage(
+        error instanceof Error ? error.message : "Hospital admin settings could not be saved.",
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const handleInviteDoctor = async () => {
@@ -1542,9 +1581,6 @@ export function HospitalAdminDashboardPage() {
                 <div>
                   <h1 className="flex items-center gap-3 font-headline text-3xl font-extrabold tracking-tight">
                     Local Audit Logs
-                    <span className="rounded-full border border-cyan-200 bg-cyan-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-700 dark:border-cyan-900/40 dark:bg-cyan-900/20 dark:text-cyan-300">
-                      Scoped to {dashboard.hospital.id ?? "ORG"}
-                    </span>
                   </h1>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                     Search and export live audit records related to this hospital workspace.
@@ -1698,6 +1734,23 @@ export function HospitalAdminDashboardPage() {
                 ) : null}
               </div>
             </section>
+          ) : null}
+
+          {view === "settings" ? (
+            <SettingsSection
+              user={user}
+              hospitalId={dashboard.hospital.id}
+              hospitalName={dashboard.hospital.name}
+              hospitalType={dashboard.hospital.type}
+              hospitalStatus={dashboard.hospital.status}
+              activeDoctorId={dashboard.activeDoctorId}
+              theme={theme}
+              saveMessage={profileSaveMessage}
+              isSaving={isSavingProfile}
+              onThemeChange={setTheme}
+              onSave={handleProfileSave}
+              onLogout={handleLogout}
+            />
           ) : null}
         </main>
       </div>

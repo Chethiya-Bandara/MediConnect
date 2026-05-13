@@ -256,6 +256,33 @@ export async function getHealthMinistryDashboard() {
   };
 }
 
+export function updateHealthMinistryAdminProfile(payload: {
+  preferred_name: string;
+  address: string;
+}) {
+  return apiRequest<{
+    message?: string;
+    user?: {
+      id: string;
+      name?: string | null;
+      email: string;
+      role: string;
+      status?: string | null;
+      preferred_name?: string | null;
+      legal_name?: string | null;
+      address?: string | null;
+      organisation_id?: number | null;
+      organisation_name?: string | null;
+      organisation_type?: string | null;
+      organisation_status?: string | null;
+      admin_role?: string | null;
+    };
+  }>(endpoints.healthMinistryAdmin.profile, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getManagedOrganisations() {
   const response = await apiRequest<OrganisationRegistryResponse>(
     endpoints.healthMinistryAdmin.organisationsBase,

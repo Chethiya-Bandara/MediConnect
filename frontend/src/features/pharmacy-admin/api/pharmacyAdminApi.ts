@@ -61,6 +61,8 @@ interface RawStaffMember {
   id?: string | number | null;
   user_id?: string | number | null;
   name?: string | null;
+  full_name?: string | null;
+  preferred_name?: string | null;
   email?: string | null;
   license_no?: string | null;
   pharmacy_id?: string | number | null;
@@ -157,10 +159,14 @@ function normalizeAdjustment(raw: RawAdjustment): PharmacyAdminAdjustment {
 }
 
 function normalizeStaffMember(raw: RawStaffMember): PharmacyAdminStaffMember {
+  const fullName = raw.full_name ?? raw.name ?? null;
+  const preferredName = raw.preferred_name ?? raw.name ?? null;
   return {
     id: asString(raw.id) ?? `staff-${Math.random().toString(36).slice(2, 8)}`,
     userId: asString(raw.user_id),
-    name: raw.name ?? "Unnamed pharmacist",
+    name: preferredName ?? fullName ?? "Unnamed pharmacist",
+    fullName,
+    preferredName,
     email: raw.email ?? null,
     licenseNo: raw.license_no ?? null,
     pharmacyId: asString(raw.pharmacy_id),
@@ -200,6 +206,33 @@ export async function getDashboardSummary(pharmacyId: string) {
     },
     staff: (response.staff ?? []).map((item) => normalizeStaffMember(item)),
   } satisfies PharmacyAdminDashboardSummary;
+}
+
+export function updatePharmacyAdminProfile(payload: {
+  preferred_name: string;
+  address: string;
+}) {
+  return apiRequest<{
+    message?: string;
+    user?: {
+      id: string;
+      name?: string | null;
+      email: string;
+      role: string;
+      status?: string | null;
+      preferred_name?: string | null;
+      legal_name?: string | null;
+      address?: string | null;
+      organisation_id?: number | null;
+      organisation_name?: string | null;
+      organisation_type?: string | null;
+      organisation_status?: string | null;
+      admin_role?: string | null;
+    };
+  }>(endpoints.pharmacyAdmin.profile, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getInventory(pharmacyId: string) {

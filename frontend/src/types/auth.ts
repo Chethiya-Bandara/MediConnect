@@ -13,6 +13,7 @@ export interface AuthUser {
   name: string;
   email: string;
   role: UserRole;
+  status?: string | null;
   preferredName?: string | null;
   legalName?: string | null;
   address?: string | null;
@@ -20,10 +21,14 @@ export interface AuthUser {
   dob?: string;
   gender?: Gender;
   organisationId?: number | null;
+  organisationName?: string | null;
+  organisationType?: string | null;
+  organisationStatus?: string | null;
   adminRole?: string | null;
   doctorId?: number | null;
   patientId?: number | null;
   dhid?: string | null;
+  licenseNumber?: string | null;
 }
 
 export interface LoginFormValues {

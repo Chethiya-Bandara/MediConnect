@@ -27,11 +27,16 @@ export async function getCurrentUser(token: string) {
       preferred_name?: string | null;
       legal_name?: string | null;
       address?: string | null;
+      status?: string | null;
       organisation_id?: number | null;
+      organisation_name?: string | null;
+      organisation_type?: string | null;
+      organisation_status?: string | null;
       admin_role?: string | null;
       doctor_id?: number | null;
       patient_id?: number | null;
       dhid?: string | null;
+      license_number?: string | null;
     }
   >(
     endpoints.auth.me,

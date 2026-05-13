@@ -226,6 +226,33 @@ export async function listPharmacistInventory() {
   return response.map((item) => normalizeInventoryItem(item));
 }
 
+export function updatePharmacistProfile(payload: {
+  preferred_name: string;
+  address: string;
+}) {
+  return apiRequest<{
+    message?: string;
+    user?: {
+      id: string;
+      name?: string | null;
+      email: string;
+      role: string;
+      status?: string | null;
+      preferred_name?: string | null;
+      legal_name?: string | null;
+      address?: string | null;
+      organisation_id?: number | null;
+      organisation_name?: string | null;
+      organisation_type?: string | null;
+      organisation_status?: string | null;
+      license_number?: string | null;
+    };
+  }>(endpoints.pharmacist.profile, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function dispensePrescription(
   prescriptionId: string,
   payload: DispensePrescriptionPayload,

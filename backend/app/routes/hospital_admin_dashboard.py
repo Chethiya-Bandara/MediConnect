@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from app.config.supabase import supabase_admin
-from app.middleware.role_checker import RoleChecker
+from app.middleware.role_checker import RoleChecker, build_user_context
 from app.schemas.hospital_admin_schema import (
     AffiliationDecisionRequest,
     InviteDoctorRequest,
@@ -42,6 +42,19 @@ class UpdateAvailabilityRequest(BaseModel):
     end_time: str
 
     @field_validator("start_time", "end_time")
+    @classmethod
+    def validate_text(cls, value: str):
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field cannot be empty")
+        return cleaned
+
+
+class UpdateHospitalAdminProfileRequest(BaseModel):
+    preferred_name: str = Field(min_length=2, max_length=120)
+    address: str = Field(min_length=5, max_length=255)
+
+    @field_validator("preferred_name", "address")
     @classmethod
     def validate_text(cls, value: str):
         cleaned = value.strip()
@@ -399,6 +412,41 @@ def get_hospital_admin_dashboard(context=Depends(_hospital_admin_context)):
         "active_staff": active_staff,
         "revoked_staff": revoked_staff,
         "audit_logs": _recent_audit_logs(current_user["user_id"]),
+    }
+
+
+@router.patch("/profile")
+def update_hospital_admin_profile(
+    data: UpdateHospitalAdminProfileRequest,
+    context=Depends(_hospital_admin_context),
+):
+    current_user = context["user"]
+    updated_rows = (
+        supabase_admin.table("users")
+        .update(
+            {
+                "pref_name": data.preferred_name.strip(),
+                "address": data.address.strip(),
+            }
+        )
+        .eq("id", current_user["user_id"])
+        .execute()
+        .data
+        or []
+    )
+    if not updated_rows:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+
+    _log_audit_action(
+        current_user["user_id"],
+        "HOSPITAL_ADMIN_PROFILE_UPDATED",
+        "users",
+        current_user["user_id"],
+    )
+
+    return {
+        "message": "Settings saved.",
+        "user": build_user_context(current_user["user_id"], token=current_user.get("token")),
     }
 
 

@@ -148,6 +148,8 @@ export type DeletionEntityType =
   | "doctor"
   | "pharmacist"
   | "hospital_admin"
+  | "pharmacy_admin"
+  | "health_ministry_admin"
   | "medicine"
   | "hospital"
   | "pharmacy"
@@ -187,4 +189,5 @@ export interface RegistryPersonItem {
   // hospital admin-specific
   adminRole?: string | null;
   organisationId?: number | string | null;
+  organisationName?: string | null;
 }

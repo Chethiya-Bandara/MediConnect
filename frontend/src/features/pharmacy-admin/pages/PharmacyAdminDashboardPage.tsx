@@ -7,6 +7,7 @@ import {
   Moon,
   PackagePlus,
   Search,
+  Settings,
   Sun,
   Trash2,
   UserCog,
@@ -16,8 +17,9 @@ import { AppBrandMark } from "../../../components/ui";
 import { cn } from "../../../lib/utils/cn";
 import { formatDate } from "../../../lib/utils/formatDate";
 import { useAuth } from "../../auth/context/AuthContext";
-import { searchPharmacyCatalogMedicines } from "../api/pharmacyAdminApi";
+import { searchPharmacyCatalogMedicines, updatePharmacyAdminProfile } from "../api/pharmacyAdminApi";
 import { usePharmacyAdminDashboard } from "../hooks/usePharmacyAdminDashboard";
+import { SettingsSection } from "../sections/SettingsSection";
 import type {
   PharmacyAdminSection,
   PharmacyInventoryItem,
@@ -89,7 +91,7 @@ function normalizeMedicineKey(value: string | null | undefined) {
 
 export function PharmacyAdminDashboardPage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const [section, setSection] = useState<PharmacyAdminSection>("dashboard");
   const [isDark, setIsDark] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -98,6 +100,8 @@ export function PharmacyAdminDashboardPage() {
   const [inventoryFeedback, setInventoryFeedback] = useState<string | null>(null);
   const [reportFeedback, setReportFeedback] = useState<string | null>(null);
   const [staffFeedback, setStaffFeedback] = useState<string | null>(null);
+  const [profileSaveMessage, setProfileSaveMessage] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [createForm, setCreateForm] = useState({
     medicineName: "",
     stockQuantity: "",
@@ -217,6 +221,40 @@ export function PharmacyAdminDashboardPage() {
   const handleLogout = () => {
     logout();
     navigate("/login");
+  };
+
+  const handleProfileSave = async (payload: { preferredName: string; address: string }) => {
+    setIsSavingProfile(true);
+    setProfileSaveMessage(null);
+
+    try {
+      const response = await updatePharmacyAdminProfile({
+        preferred_name: payload.preferredName.trim(),
+        address: payload.address.trim(),
+      });
+      const nextUser = response.user;
+      if (nextUser) {
+        updateUser({
+          name: nextUser.name ?? user?.name ?? "Pharmacy Admin",
+          preferredName: nextUser.preferred_name ?? payload.preferredName.trim(),
+          legalName: nextUser.legal_name ?? user?.legalName ?? null,
+          address: nextUser.address ?? payload.address.trim(),
+          status: nextUser.status ?? user?.status ?? null,
+          organisationId: nextUser.organisation_id ?? user?.organisationId ?? null,
+          organisationName: nextUser.organisation_name ?? user?.organisationName ?? null,
+          organisationType: nextUser.organisation_type ?? user?.organisationType ?? null,
+          organisationStatus: nextUser.organisation_status ?? user?.organisationStatus ?? null,
+          adminRole: nextUser.admin_role ?? user?.adminRole ?? null,
+        });
+      }
+      setProfileSaveMessage(response.message ?? "Settings saved.");
+    } catch (error) {
+      setProfileSaveMessage(
+        error instanceof Error ? error.message : "Pharmacy admin settings could not be saved.",
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const activeSummary = dashboard.summary;
@@ -367,6 +405,7 @@ export function PharmacyAdminDashboardPage() {
             { id: "inventory" as const, label: "Stock Management", icon: Box },
             { id: "reports" as const, label: "Revenue Reports", icon: BarChart3 },
             { id: "staff" as const, label: "Staff Management", icon: UserCog },
+            { id: "settings" as const, label: "Settings", icon: Settings },
           ].map((item) => {
             const Icon = item.icon;
             const active = section === item.id;
@@ -1005,13 +1044,6 @@ export function PharmacyAdminDashboardPage() {
                     </option>
                   ))}
                 </select>
-                <button
-                  type="button"
-                  onClick={() => void dashboard.loadDashboardSummary()}
-                  className="rounded-xl bg-slate-100 px-6 py-3 text-sm font-bold dark:bg-slate-800 dark:text-slate-200"
-                >
-                  Refresh Staff
-                </button>
               </div>
             </header>
 
@@ -1401,6 +1433,24 @@ export function PharmacyAdminDashboardPage() {
               </div>
             </div>
           </div>
+        ) : null}
+
+        {section === "settings" ? (
+          <SettingsSection
+            user={user}
+            activePharmacyId={activeOrganizationId}
+            theme={isDark ? "dark" : "light"}
+            saveMessage={profileSaveMessage}
+            isSaving={isSavingProfile}
+            onThemeChange={(nextTheme) => {
+              const nextDark = nextTheme === "dark";
+              document.documentElement.classList.toggle("dark", nextDark);
+              window.localStorage.setItem("theme", nextDark ? "dark" : "light");
+              setIsDark(nextDark);
+            }}
+            onSave={handleProfileSave}
+            onLogout={handleLogout}
+          />
         ) : null}
       </main>
     </div>

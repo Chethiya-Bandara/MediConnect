@@ -8,10 +8,10 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config.supabase import execute_with_retry, supabase, supabase_admin
-from app.middleware.role_checker import RoleChecker, PharmacistOnly
+from app.middleware.role_checker import RoleChecker, PharmacistOnly, build_user_context
 from app.schemas.pharmacist_schema import DispenseRequest
 from app.utils.helpers import validate_dhid
 
@@ -30,6 +30,19 @@ class BillRequest(BaseModel):
     pharmacy_id:     int
     prescription_id: int
     items:           list[BillItem]
+
+
+class UpdatePharmacistProfileRequest(BaseModel):
+    preferred_name: str = Field(min_length=2, max_length=120)
+    address: str = Field(min_length=5, max_length=255)
+
+    @field_validator("preferred_name", "address")
+    @classmethod
+    def validate_text(cls, value: str):
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field cannot be empty")
+        return cleaned
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -1341,6 +1354,33 @@ def get_pharmacist_inventory(user: dict = Depends(PharmacistOnly)):
         }
         for row in rows
     ]
+
+
+@router.patch("/profile", dependencies=[Depends(PharmacistOnly)])
+def update_pharmacist_profile(
+    payload: UpdatePharmacistProfileRequest,
+    user: dict = Depends(PharmacistOnly),
+):
+    updated_rows = (
+        supabase_admin.table("users")
+        .update(
+            {
+                "pref_name": payload.preferred_name.strip(),
+                "address": payload.address.strip(),
+            }
+        )
+        .eq("id", user["user_id"])
+        .execute()
+        .data
+        or []
+    )
+    if not updated_rows:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+
+    return {
+        "message": "Settings saved.",
+        "user": build_user_context(user["user_id"], token=user.get("token")),
+    }
 
 # ── Bill Generation (Bihanga B-5.2.1) ────────────────────────────────────────
 # unitPrice MUST come from server-side DB — never from client request

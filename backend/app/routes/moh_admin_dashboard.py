@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.config.supabase import execute_with_retry, supabase_admin
-from app.middleware.role_checker import HealthMinistryOnly
+from app.middleware.role_checker import HealthMinistryOnly, build_user_context
 from app.middleware.performance import SLA_MS, get_slow_requests
 from app.utils.gemini_client import call_gemini_assistant
 from app.schemas.moh_admin_schema import (
@@ -445,6 +445,11 @@ def _generate_monthly_ai_report(report_input: dict[str, Any]) -> str | None:
     return None
 
 
+class UpdateHealthMinistryAdminProfileRequest(BaseModel):
+    preferred_name: str
+    address: str
+
+
 @router.get("/dashboard")
 def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
     organisations = _list_all_organisations()
@@ -559,6 +564,48 @@ def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
             "user_id": current_user.get("user_id"),
             "role": current_user.get("role"),
         },
+    }
+
+
+@router.patch("/profile")
+def update_health_ministry_admin_profile(
+    data: UpdateHealthMinistryAdminProfileRequest,
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    preferred_name = (data.preferred_name or "").strip()
+    address = (data.address or "").strip()
+    if len(preferred_name) < 2 or len(address) < 5:
+        raise HTTPException(status_code=400, detail="Preferred name and address are required.")
+
+    updated_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("users")
+            .update(
+                {
+                    "pref_name": preferred_name,
+                    "address": address,
+                }
+            )
+            .eq("id", current_user["user_id"])
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if not updated_rows:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+
+    _log_audit_action(
+        user_id=current_user["user_id"],
+        action="MINISTRY_ADMIN_PROFILE_UPDATED",
+        entity="users",
+        entity_id=0,
+    )
+
+    return {
+        "message": "Settings saved.",
+        "user": build_user_context(current_user["user_id"], token=current_user.get("token")),
     }
 
 
@@ -916,7 +963,7 @@ def suspend_entity(
     data: SuspendRequest,
     current_user: dict = Depends(HealthMinistryOnly),
 ):
-    action = _normalize_status(data.action)
+    action = (data.action or "").strip().lower()
     if action not in {"suspend", "activate"}:
         raise HTTPException(status_code=400, detail="Invalid action.")
 

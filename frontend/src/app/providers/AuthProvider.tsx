@@ -29,6 +29,7 @@ interface AuthContextValue {
   login: (payload: LoginFormValues, rememberDevice?: boolean) => Promise<AuthActionResult>;
   register: (payload: RegisterFormValues) => Promise<AuthActionResult>;
   requestPasswordReset: (email: string) => Promise<AuthActionResult>;
+  updateUser: (payload: Partial<AuthUser>) => void;
   logout: () => void;
 }
 
@@ -66,6 +67,46 @@ function shouldClearSession(error: unknown) {
   ].includes(normalized);
 }
 
+function mapAuthUser(userData: {
+  id: string;
+  name?: string | null;
+  email: string;
+  role: string;
+  status?: string | null;
+  preferred_name?: string | null;
+  legal_name?: string | null;
+  address?: string | null;
+  organisation_id?: number | null;
+  organisation_name?: string | null;
+  organisation_type?: string | null;
+  organisation_status?: string | null;
+  admin_role?: string | null;
+  doctor_id?: number | null;
+  patient_id?: number | null;
+  dhid?: string | null;
+  license_number?: string | null;
+}): AuthUser {
+  return {
+    id: userData.id,
+    name: userData.name || userData.email || "User",
+    email: userData.email,
+    role: normalizeRole(userData.role),
+    status: userData.status ?? null,
+    preferredName: userData.preferred_name ?? null,
+    legalName: userData.legal_name ?? null,
+    address: userData.address ?? null,
+    organisationId: userData.organisation_id ?? null,
+    organisationName: userData.organisation_name ?? null,
+    organisationType: userData.organisation_type ?? null,
+    organisationStatus: userData.organisation_status ?? null,
+    adminRole: userData.admin_role ?? null,
+    doctorId: userData.doctor_id ?? null,
+    patientId: userData.patient_id ?? null,
+    dhid: userData.dhid ?? null,
+    licenseNumber: userData.license_number ?? null,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const hasStoredToken = Boolean(getStoredToken());
   const [user, setUser] = useState<AuthUser | null>(() => {
@@ -97,20 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        const nextUser: AuthUser = {
-          id: userData.id,
-          name: userData.name || userData.email || "User",
-          email: userData.email,
-          role: normalizeRole(userData.role),
-          preferredName: userData.preferred_name ?? null,
-          legalName: userData.legal_name ?? null,
-          address: userData.address ?? null,
-          organisationId: userData.organisation_id ?? null,
-          adminRole: userData.admin_role ?? null,
-          doctorId: userData.doctor_id ?? null,
-          patientId: userData.patient_id ?? null,
-          dhid: userData.dhid ?? null,
-        };
+        const nextUser: AuthUser = mapAuthUser(userData);
 
         setUser(nextUser);
         setStoredJson("user", nextUser);
@@ -147,20 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStoredToken(token, rememberDevice);
       const userData = await getCurrentUser(token);
 
-      const loggedUser: AuthUser = {
-        id: userData.id,
-        name: userData.name || userData.email || "User",
-        email: userData.email,
-        role: normalizeRole(userData.role),
-        preferredName: userData.preferred_name ?? null,
-        legalName: userData.legal_name ?? null,
-        address: userData.address ?? null,
-        organisationId: userData.organisation_id ?? null,
-        adminRole: userData.admin_role ?? null,
-        doctorId: userData.doctor_id ?? null,
-        patientId: userData.patient_id ?? null,
-        dhid: userData.dhid ?? null,
-      };
+      const loggedUser: AuthUser = mapAuthUser(userData);
 
       setUser(loggedUser);
       setStoredJson("user", loggedUser);
@@ -196,6 +211,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateUser = (payload: Partial<AuthUser>) => {
+    setUser((current) => {
+      if (!current) {
+        return current;
+      }
+      const nextUser = {
+        ...current,
+        ...payload,
+      };
+      setStoredJson("user", nextUser);
+      return nextUser;
+    });
+  };
+
   const logout = () => {
     setUser(null);
     removeStoredToken();
@@ -210,6 +239,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       register,
       requestPasswordReset,
+      updateUser,
       logout,
     }),
     [isAuthResolved, user],

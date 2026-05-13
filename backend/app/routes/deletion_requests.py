@@ -11,7 +11,7 @@ from app.middleware.role_checker import HealthMinistryOnly
 router = APIRouter(prefix="/moh-admin", tags=["deletion-requests"])
 
 _ENTITY_TYPES = frozenset({
-    "patient", "doctor", "pharmacist", "hospital_admin",
+    "patient", "doctor", "pharmacist", "hospital_admin", "pharmacy_admin", "health_ministry_admin",
     "medicine", "hospital", "pharmacy", "organisation",
 })
 
@@ -98,6 +98,16 @@ def _execute_soft_delete(entity_type: str, entity_id: str) -> None:
 
     elif entity_type == "hospital_admin":
         # entity_id is the user UUID for hospital admins
+        execute_with_retry(
+            lambda: supabase_admin.table("users").update({"status": "deactivated"}).eq("id", entity_id).execute()
+        )
+
+    elif entity_type == "pharmacy_admin":
+        execute_with_retry(
+            lambda: supabase_admin.table("users").update({"status": "deactivated"}).eq("id", entity_id).execute()
+        )
+
+    elif entity_type == "health_ministry_admin":
         execute_with_retry(
             lambda: supabase_admin.table("users").update({"status": "deactivated"}).eq("id", entity_id).execute()
         )
@@ -470,23 +480,42 @@ def list_hospital_admins_registry(current_user: dict = Depends(HealthMinistryOnl
     )
     user_ids = [a["user_id"] for a in admins if a.get("user_id")]
     user_lookup: dict[str, dict] = {}
+    organisation_ids = [a["organisation_id"] for a in admins if a.get("organisation_id") is not None]
+    organisation_lookup: dict[int, dict] = {}
     if user_ids:
         users = execute_with_retry(
             lambda: supabase_admin.table("users")
             .select("id, name, email, role, status, created_at")
             .in_("id", user_ids)
-            .eq("role", "hospital_admin")
             .execute()
             .data,
             default=[],
         )
         user_lookup = {u["id"]: u for u in users}
+    if organisation_ids:
+        organisations = execute_with_retry(
+            lambda: supabase_admin.table("organisations")
+            .select("id, name")
+            .in_("id", organisation_ids)
+            .execute()
+            .data,
+            default=[],
+        )
+        organisation_lookup = {
+            int(org["id"]): org for org in organisations if org.get("id") is not None
+        }
 
     items = []
     for a in admins:
         u = user_lookup.get(a.get("user_id") or "") or {}
         if not u:
             continue
+        organisation = None
+        try:
+            if a.get("organisation_id") is not None:
+                organisation = organisation_lookup.get(int(a["organisation_id"]))
+        except (TypeError, ValueError):
+            organisation = None
         items.append({
             "id": str(u["id"]),  # user_id is the stable identifier for hospital admins
             "user_id": u["id"],
@@ -494,6 +523,7 @@ def list_hospital_admins_registry(current_user: dict = Depends(HealthMinistryOnl
             "email": u.get("email"),
             "admin_role": a.get("admin_role"),
             "organisation_id": a.get("organisation_id"),
+            "organisation_name": organisation.get("name") if organisation else None,
             "status": u.get("status", "active"),
             "created_at": u.get("created_at"),
         })

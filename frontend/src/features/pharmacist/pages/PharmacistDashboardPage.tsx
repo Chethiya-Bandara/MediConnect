@@ -24,14 +24,17 @@ import {
   Sun,
   Home,
   Activity,
+  Settings,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { AppBrandMark } from "../../../components/ui";
 import { cn } from "../../../lib/utils/cn";
 import { formatDate } from "../../../lib/utils/formatDate";
 import { useAuth } from "../../auth/context/AuthContext";
+import { updatePharmacistProfile } from "../api/pharmacistApi";
 import { PrescriptionStatusBadge } from "../components/PrescriptionStatusBadge";
 import { usePharmacistDashboard } from "../hooks/usePharmacistDashboard";
+import { SettingsSection } from "../sections/SettingsSection";
 import type { PharmacistSection } from "../types";
 
 import Pharmacist1 from "../../../assets/welcome/Pharmacist1.jpg";
@@ -335,13 +338,15 @@ export const QrScannerLane = ({ onScanSuccess }: QrScannerLaneProps) => {
 
 export function PharmacistDashboardPage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const [section, setSection] = useState<PharmacistSection>("home");
   const [isLight, setIsLight] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
   const [historyStatusFilter, setHistoryStatusFilter] = useState("ALL");
   const [stockSearch, setStockSearch] = useState("");
   const [stockStatusFilter, setStockStatusFilter] = useState("ALL");
+  const [profileSaveMessage, setProfileSaveMessage] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const dashboard = usePharmacistDashboard(user?.id, user?.organisationId ?? null);
   const deferredHistorySearch = useDeferredValue(historySearch.trim().toLowerCase());
   const deferredStockSearch = useDeferredValue(stockSearch.trim().toLowerCase());
@@ -372,6 +377,40 @@ export function PharmacistDashboardPage() {
   const handleLogout = () => {
     logout();
     navigate("/login");
+  };
+
+  const handleProfileSave = async (payload: { preferredName: string; address: string }) => {
+    setIsSavingProfile(true);
+    setProfileSaveMessage(null);
+
+    try {
+      const response = await updatePharmacistProfile({
+        preferred_name: payload.preferredName.trim(),
+        address: payload.address.trim(),
+      });
+      const nextUser = response.user;
+      if (nextUser) {
+        updateUser({
+          name: nextUser.name ?? user?.name ?? "Pharmacist",
+          preferredName: nextUser.preferred_name ?? payload.preferredName.trim(),
+          legalName: nextUser.legal_name ?? user?.legalName ?? null,
+          address: nextUser.address ?? payload.address.trim(),
+          status: nextUser.status ?? user?.status ?? null,
+          organisationId: nextUser.organisation_id ?? user?.organisationId ?? null,
+          organisationName: nextUser.organisation_name ?? user?.organisationName ?? null,
+          organisationType: nextUser.organisation_type ?? user?.organisationType ?? null,
+          organisationStatus: nextUser.organisation_status ?? user?.organisationStatus ?? null,
+          licenseNumber: nextUser.license_number ?? user?.licenseNumber ?? null,
+        });
+      }
+      setProfileSaveMessage(response.message ?? "Settings saved.");
+    } catch (error) {
+      setProfileSaveMessage(
+        error instanceof Error ? error.message : "Pharmacist settings could not be saved.",
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const selectedPrescription = dashboard.selectedDetail?.prescription ?? null;
@@ -576,6 +615,7 @@ export function PharmacistDashboardPage() {
             { id: "stock" as const, label: "Medicine Stock", icon: Package },
             { id: "dispensing" as const, label: "Prescription Dispensing", icon: Pill },
             { id: "history" as const, label: "Transaction History", icon: History },
+            { id: "settings" as const, label: "Settings", icon: Settings },
           ].map((item) => {
             const Icon = item.icon;
             const active = section === item.id;
@@ -1496,6 +1536,27 @@ export function PharmacistDashboardPage() {
               </div>
             </div>
           </div>
+        ) : null}
+
+        {section === "settings" ? (
+          <SettingsSection
+            user={user}
+            pharmacyName={stockPharmacyName}
+            pharmacyId={dashboard.pharmacyId}
+            dispensedToday={dashboard.stats.dispensedToday}
+            historyCount={dashboard.history.length}
+            theme={isLight ? "light" : "dark"}
+            saveMessage={profileSaveMessage}
+            isSaving={isSavingProfile}
+            onThemeChange={(nextTheme) => {
+              const nextLight = nextTheme === "light";
+              document.documentElement.classList.toggle("dark", !nextLight);
+              window.localStorage.setItem("theme", nextLight ? "light" : "dark");
+              setIsLight(nextLight);
+            }}
+            onSave={handleProfileSave}
+            onLogout={handleLogout}
+          />
         ) : null}
 
         {section === "stock" ? (

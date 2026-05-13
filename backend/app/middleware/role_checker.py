@@ -25,7 +25,7 @@ def _resolve_pharmacist_affiliation(user_id: str) -> Optional[dict]:
     pharmacist = execute_with_retry(
         lambda: (
             supabase_admin.table("pharmacists")
-            .select("pharmacy_id")
+            .select("pharmacy_id, license_no, status")
             .eq("user_id", user_id)
             .single()
             .execute()
@@ -57,11 +57,15 @@ def _resolve_pharmacist_affiliation(user_id: str) -> Optional[dict]:
         return {
             "pharmacy_id": pharmacy.get("id"),
             "organisation_id": pharmacy.get("organisation_id"),
+            "license_number": pharmacist.get("license_no"),
+            "pharmacist_status": pharmacist.get("status"),
         }
 
     return {
         "pharmacy_id": pharmacy_id,
         "organisation_id": None,
+        "license_number": pharmacist.get("license_no"),
+        "pharmacist_status": pharmacist.get("status"),
     }
 
 
@@ -172,6 +176,25 @@ def build_user_context(
             if pharmacist:
                 context["pharmacy_id"] = pharmacist.get("pharmacy_id")
                 context["organisation_id"] = pharmacist.get("organisation_id")
+                context["license_number"] = pharmacist.get("license_number")
+
+                organisation_id = pharmacist.get("organisation_id")
+                if organisation_id is not None:
+                    organisation = execute_with_retry(
+                        lambda: (
+                            supabase_admin.table("organisations")
+                            .select("id, name, type, status")
+                            .eq("id", organisation_id)
+                            .single()
+                            .execute()
+                            .data
+                        ),
+                        default=None,
+                    )
+                    if organisation:
+                        context["organisation_name"] = organisation.get("name")
+                        context["organisation_type"] = organisation.get("type")
+                        context["organisation_status"] = organisation.get("status")
 
         elif user_role == "doctor":
             doctor = execute_with_retry(
@@ -219,6 +242,23 @@ def build_user_context(
             if admin_profile:
                 context["admin_role"] = admin_profile.get("admin_role")
                 context["organisation_id"] = admin_profile.get("organisation_id")
+                organisation_id = admin_profile.get("organisation_id")
+                if organisation_id is not None:
+                    organisation = execute_with_retry(
+                        lambda: (
+                            supabase_admin.table("organisations")
+                            .select("id, name, type, status")
+                            .eq("id", organisation_id)
+                            .single()
+                            .execute()
+                            .data
+                        ),
+                        default=None,
+                    )
+                    if organisation:
+                        context["organisation_name"] = organisation.get("name")
+                        context["organisation_type"] = organisation.get("type")
+                        context["organisation_status"] = organisation.get("status")
     except Exception:
         # Missing role-specific rows should not block authentication.
         pass

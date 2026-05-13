@@ -235,6 +235,33 @@ export async function getHospitalAdminDashboard() {
   };
 }
 
+export function updateHospitalAdminProfile(payload: {
+  preferred_name: string;
+  address: string;
+}) {
+  return apiRequest<{
+    message?: string;
+    user?: {
+      id: string;
+      name?: string | null;
+      email: string;
+      role: string;
+      status?: string | null;
+      preferred_name?: string | null;
+      legal_name?: string | null;
+      address?: string | null;
+      organisation_id?: number | null;
+      organisation_name?: string | null;
+      organisation_type?: string | null;
+      organisation_status?: string | null;
+      admin_role?: string | null;
+    };
+  }>(endpoints.hospitalAdmin.profile, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getDoctorAvailability(doctorId: string, slotDate?: string) {
   const response = await apiRequest<RawAvailabilitySlot[] | { slots?: RawAvailabilitySlot[] }>(
     `${endpoints.hospitalAdmin.availabilityBase}/${encodeURIComponent(doctorId)}${

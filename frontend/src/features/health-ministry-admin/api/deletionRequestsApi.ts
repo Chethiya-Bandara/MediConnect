@@ -35,6 +35,7 @@ interface RawPersonItem {
   license_no?: string | null;
   admin_role?: string | null;
   organisation_id?: number | string | null;
+  organisation_name?: string | null;
 }
 
 function normalizeDeletionRequest(raw: RawDeletionRequest): DeletionRequest {
@@ -68,6 +69,7 @@ function normalizePersonItem(raw: RawPersonItem): RegistryPersonItem {
     licenseNo: raw.license_no ?? null,
     adminRole: raw.admin_role ?? null,
     organisationId: raw.organisation_id ?? null,
+    organisationName: raw.organisation_name ?? null,
   };
 }
 

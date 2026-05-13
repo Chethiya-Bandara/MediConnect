@@ -1,4 +1,4 @@
-export type PharmacyAdminSection = "dashboard" | "inventory" | "reports" | "staff";
+export type PharmacyAdminSection = "dashboard" | "inventory" | "reports" | "staff" | "settings";
 
 export interface PharmacyInventoryItem {
   id: string;
@@ -25,6 +25,8 @@ export interface PharmacyAdminStaffMember {
   id: string;
   userId: string | null;
   name: string;
+  fullName: string | null;
+  preferredName: string | null;
   email: string | null;
   licenseNo: string | null;
   pharmacyId: string | null;

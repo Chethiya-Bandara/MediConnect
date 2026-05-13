@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
 
 from app.config.supabase import execute_with_retry, supabase_admin
-from app.middleware.role_checker import RoleChecker
+from app.middleware.role_checker import RoleChecker, build_user_context
 from app.schemas.pharmacy_admin_schema import (
     CreateMedicineRequest,
     CreatePharmacyStaffRequest,
@@ -12,6 +13,19 @@ from app.schemas.pharmacy_admin_schema import (
 )
 
 router = APIRouter(prefix="/pharmacy-admin", tags=["pharmacy-admin-dashboard"])
+
+
+class UpdatePharmacyAdminProfileRequest(BaseModel):
+    preferred_name: str = Field(min_length=2, max_length=120)
+    address: str = Field(min_length=5, max_length=255)
+
+    @field_validator("preferred_name", "address")
+    @classmethod
+    def validate_text(cls, value: str):
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field cannot be empty")
+        return cleaned
 
 
 def _coerce_int(value, default: int = 0) -> int:
@@ -469,7 +483,7 @@ def _build_staff_rows(pharmacy: dict):
     user_rows = execute_with_retry(
         lambda: (
             supabase_admin.table("users")
-            .select("id, email, name, role, status")
+            .select("id, email, name, pref_name, role, status")
             .in_("id", user_ids)
             .execute()
             .data
@@ -500,7 +514,13 @@ def _build_staff_rows(pharmacy: dict):
         {
             "id": row.get("id"),
             "user_id": row.get("user_id"),
-            "name": user_lookup.get(row.get("user_id"), {}).get("name") or "Unnamed pharmacist",
+            "name": (
+                user_lookup.get(row.get("user_id"), {}).get("pref_name")
+                or user_lookup.get(row.get("user_id"), {}).get("name")
+                or "Unnamed pharmacist"
+            ),
+            "full_name": user_lookup.get(row.get("user_id"), {}).get("name"),
+            "preferred_name": user_lookup.get(row.get("user_id"), {}).get("pref_name"),
             "email": user_lookup.get(row.get("user_id"), {}).get("email"),
             "license_no": row.get("license_no"),
             "pharmacy_id": pharmacy.get("organisation_id"),
@@ -569,6 +589,33 @@ def dashboard(
     pharmacy = _resolve_pharmacy_record(pharmacy_id)
     _assert_admin_scope(current_user, pharmacy)
     return _build_dashboard_payload(pharmacy)
+
+
+@router.patch("/profile")
+def update_pharmacy_admin_profile(
+    data: UpdatePharmacyAdminProfileRequest,
+    current_user: dict = Depends(RoleChecker(["pharmacy_admin"])),
+):
+    updated_rows = (
+        supabase_admin.table("users")
+        .update(
+            {
+                "pref_name": data.preferred_name.strip(),
+                "address": data.address.strip(),
+            }
+        )
+        .eq("id", current_user["user_id"])
+        .execute()
+        .data
+        or []
+    )
+    if not updated_rows:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+
+    return {
+        "message": "Settings saved.",
+        "user": build_user_context(current_user["user_id"], token=current_user.get("token")),
+    }
 
 
 @router.post("/inventory")

@@ -87,6 +87,19 @@ def _get_user_row(user_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def _get_doctor_row(user_id: str) -> dict | None:
+    rows = (
+        supabase_admin.table("doctors")
+        .select("id, user_id, status")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
+
+
 def _parse_organisation_id(raw_value: str | None) -> int | None:
     if raw_value is None or not str(raw_value).strip():
         return None
@@ -140,8 +153,22 @@ def _resolve_linked_record_by_organisation(table_name: str, organisation_id: int
 
 
 def _get_login_block_message(user_row: dict) -> str | None:
+    user_id = str(user_row.get("id") or "").strip()
     role = str(user_row.get("role") or "").strip().lower()
     status_value = _normalize_admin_status(user_row.get("status"))
+
+    if role == "doctor":
+        doctor_row = _get_doctor_row(user_id) if user_id else None
+        doctor_status = _normalize_admin_status((doctor_row or {}).get("status"))
+        if doctor_status == "approved":
+            return None
+        if doctor_status == "pending":
+            return "Pending approval from the Health Ministry. Your doctor login will work after approval."
+        if doctor_status == "suspended":
+            return "Your doctor account is suspended. Contact the Health Ministry."
+        if doctor_status == "rejected":
+            return "Your doctor registration was rejected by the Health Ministry."
+        return "Your doctor account is not approved for login yet."
 
     if role == "pharmacist":
         if status_value == "approved":

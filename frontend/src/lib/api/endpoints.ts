@@ -38,12 +38,14 @@ export const endpoints = {
     dispense: "/pharmacist/dashboard/dispense",
     history: "/pharmacist/dashboard/history",
     inventory: "/pharmacist/dashboard/inventory",
+    profile: "/pharmacist/dashboard/profile",
   },
   pharmacyAdmin: {
     inventoryBase: "/pharmacy-admin/inventory",
     dashboardBase: "/pharmacy-admin/dashboard",
     medicinesSearch: "/pharmacy-admin/medicines/search",
     staffBase: "/pharmacy-admin/staff",
+    profile: "/pharmacy-admin/profile",
   },
   hospitalAdmin: {
     dashboard: "/hospital-admin/dashboard",
@@ -52,9 +54,11 @@ export const endpoints = {
     availabilityBase: "/hospital-admin/availability",
     availabilityCancelBooking: "/hospital-admin/availability",
     invite: "/hospital-admin/invite",
+    profile: "/hospital-admin/profile",
   },
   healthMinistryAdmin: {
     dashboard: "/moh-admin/dashboard",
+    profile: "/moh-admin/profile",
     organisationsBase: "/moh-admin/organisations",
     medicinesBase: "/moh-admin/medicines",
     approveOrganization: "/moh-admin/organizations/approve",
