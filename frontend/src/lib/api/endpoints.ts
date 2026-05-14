@@ -75,6 +75,8 @@ export const endpoints = {
     doctorsRegistry: "/moh-admin/doctors-registry",
     pharmacistsRegistry: "/moh-admin/pharmacists-registry",
     hospitalAdminsRegistry: "/moh-admin/hospital-admins-registry",
+    patientRegistrySearch: "/moh-admin/patient-registry/search",
+    patientRegistryStatus: "/moh-admin/patient-registry/status",
     investigationLogs: "/admin/audit-logs",
   },
 } as const;

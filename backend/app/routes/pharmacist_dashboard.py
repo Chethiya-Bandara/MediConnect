@@ -170,6 +170,19 @@ def _parse_tablet_price_divisor(*candidates) -> Optional[int]:
         if not normalized:
             continue
 
+        pack_match = re.search(
+            r"(\d+)\s*(?:x|×|\*)\s*(\d+)(?:\s*(?:x|×|\*)\s*(\d+))?",
+            normalized,
+            re.IGNORECASE,
+        )
+        if pack_match:
+            factors = [_coerce_int(value) for value in pack_match.groups() if value]
+            if factors and all(value is not None and value > 0 for value in factors):
+                product = 1
+                for value in factors:
+                    product *= value
+                return product
+
         match = (
             re.search(r"(\d+)\s*(t|tabs?|tablets?|c|caps?|capsules?)\b", normalized, re.IGNORECASE)
             or re.search(r"\b(\d+)(t|c)\b", normalized, re.IGNORECASE)
@@ -182,6 +195,67 @@ def _parse_tablet_price_divisor(*candidates) -> Optional[int]:
             return parsed
 
     return None
+
+
+def _tablet_pack_size(medicine: dict | None, item: dict | None = None) -> Optional[int]:
+    item = item or {}
+    return _parse_tablet_price_divisor(
+        (medicine or {}).get("unit"),
+        (medicine or {}).get("name"),
+        item.get("unit"),
+        item.get("medicine_name"),
+        item.get("drug_name"),
+    )
+
+
+def _effective_inventory_stock_quantity(
+    stock_quantity: int | float | None,
+    medicine: dict | None,
+    item: dict | None = None,
+) -> int:
+    normalized_stock = _coerce_int(stock_quantity)
+    if normalized_stock is None or normalized_stock <= 0:
+        return 0
+
+    item = item or {}
+    unit_kind = (
+        _normalize_unit_kind_from_text(item.get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("name"))
+        or _normalize_unit_kind_from_text(item.get("medicine_name"))
+        or _normalize_unit_kind_from_text(item.get("drug_name"))
+    )
+    if unit_kind != "tablets":
+        return normalized_stock
+
+    pack_size = _tablet_pack_size(medicine, item)
+    if pack_size is None:
+        return normalized_stock
+
+    return normalized_stock * pack_size
+
+
+def _inventory_stock_decrement_quantity(
+    dispensed_quantity: int,
+    medicine: dict | None,
+    item: dict | None = None,
+) -> int:
+    item = item or {}
+    unit_kind = (
+        _normalize_unit_kind_from_text(item.get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("name"))
+        or _normalize_unit_kind_from_text(item.get("medicine_name"))
+        or _normalize_unit_kind_from_text(item.get("drug_name"))
+    )
+    if unit_kind != "tablets":
+        return dispensed_quantity
+
+    pack_size = _tablet_pack_size(medicine, item)
+    if pack_size is None or pack_size <= 0:
+        return dispensed_quantity
+
+    return max(math.ceil(dispensed_quantity / pack_size), 1)
 
 
 def _effective_server_unit_price(
@@ -932,21 +1006,25 @@ def reduce_stock(medicine_id: int, pharmacy_id: int, quantity: int) -> dict:
     if not item.data:
         raise HTTPException(404, f"Medicine ID {medicine_id} is not stocked in pharmacy {pharmacy_id}.")
 
-    current_stock = item.data.get("stock_quantity", 0)
-    if current_stock < quantity:
+    current_stock = _coerce_int(item.data.get("stock_quantity")) or 0
+    available_units = _effective_inventory_stock_quantity(current_stock, medicine, item.data)
+    quantity_to_reduce = _inventory_stock_decrement_quantity(quantity, medicine, item.data)
+
+    if available_units < quantity:
         raise HTTPException(
             400,
-            f"Not enough stock for {medicine.get('name') or f'Medicine ID {medicine_id}'}. Available: {current_stock}",
+            f"Not enough stock for {medicine.get('name') or f'Medicine ID {medicine_id}'}. Available: {available_units}",
         )
 
     supabase_admin.table("inventory").update({
-        "stock_quantity": current_stock - quantity,
+        "stock_quantity": max(current_stock - quantity_to_reduce, 0),
         "updated_at": datetime.utcnow().isoformat(),
     }).eq("id", item.data["id"]).execute()
     return {
         **item.data,
         "medicine_name": medicine.get("name") or f"Medicine ID {medicine_id}",
         "unit_price": item.data.get("unit_price") or medicine.get("retail_price") or 0,
+        "stock_quantity": max(current_stock - quantity_to_reduce, 0),
     }
 
 
@@ -1034,7 +1112,12 @@ def get_prescription_details(
         medicine_id = _coerce_int(item.get("medicine_id"))
         medicine = medicine_lookup.get(medicine_id, {})
         inventory_item = inventory_lookup.get(medicine_id) if medicine_id is not None else None
-        stock_quantity = _coerce_int(inventory_item.get("stock_quantity")) if inventory_item else None
+        raw_stock_quantity = _coerce_int(inventory_item.get("stock_quantity")) if inventory_item else None
+        stock_quantity = (
+            _effective_inventory_stock_quantity(raw_stock_quantity, medicine, item)
+            if inventory_item
+            else None
+        )
         has_stock = stock_quantity is not None and stock_quantity > 0
         enriched_items.append(
             {
@@ -1437,11 +1520,16 @@ def generate_bill(
         medicine_name = _inventory_display_name(inventory_item, medicine_lookup)
 
         # ── Validate stock availability ───────────────────────────
-        if inventory_item["stock_quantity"] < item.quantity:
+        available_units = _effective_inventory_stock_quantity(
+            inventory_item.get("stock_quantity"),
+            medicine_lookup.get(inventory_item.get("medicine_id")),
+            inventory_item,
+        )
+        if available_units < item.quantity:
             raise HTTPException(
                 status_code=400,
                 detail=f"Insufficient stock for {medicine_name}. "
-                       f"Available: {inventory_item['stock_quantity']}, "
+                       f"Available: {available_units}, "
                        f"Requested: {item.quantity}"
             )
 

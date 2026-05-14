@@ -10,6 +10,8 @@ import type {
   ManagedOrganisationItem,
   ManagedMedicineItem,
   ManagedMedicinePayload,
+  PatientRegistryItem,
+  PatientRegistryStatus,
   PendingAdminItem,
   PendingDoctorItem,
   PendingOrganisationItem,
@@ -101,6 +103,23 @@ interface MedicineRegistryResponse {
     retail_price?: number | string | null;
     created_at?: string | null;
     inventory_links?: number | string | null;
+  }>;
+}
+
+interface PatientRegistryResponse {
+  items?: Array<{
+    patient_id?: string | number | null;
+    user_id?: string | null;
+    dhid?: string | null;
+    name?: string | null;
+    preferred_name?: string | null;
+    legal_name?: string | null;
+    email?: string | null;
+    nic?: string | null;
+    address?: string | null;
+    role?: string | null;
+    status?: string | null;
+    created_at?: string | null;
   }>;
 }
 
@@ -241,6 +260,29 @@ function normalizeManagedMedicines(
       typeof item.retail_price === "number" ? item.retail_price : Number(item.retail_price ?? 0),
     createdAt: item.created_at ?? null,
     inventoryLinks: Number(item.inventory_links ?? 0),
+  }));
+}
+
+function normalizePatientRegistryItems(
+  payload: PatientRegistryResponse["items"],
+): PatientRegistryItem[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload.map((item) => ({
+    patientId: asString(item.patient_id) ?? "",
+    userId: asString(item.user_id) ?? "",
+    dhid: item.dhid ?? null,
+    name: item.name ?? null,
+    preferredName: item.preferred_name ?? item.name ?? null,
+    legalName: item.legal_name ?? item.name ?? null,
+    email: item.email ?? null,
+    nic: item.nic ?? null,
+    address: item.address ?? null,
+    role: item.role ?? null,
+    status: item.status ?? null,
+    createdAt: item.created_at ?? null,
   }));
 }
 
@@ -411,6 +453,27 @@ export async function approveDoctor(doctorId: string, status: ApprovalStatus) {
 
 export async function updateAdminUserStatus(userId: string, status: ApprovalStatus) {
   return apiRequest<{ message?: string }>(endpoints.healthMinistryAdmin.adminUserStatus, {
+    method: "PUT",
+    body: JSON.stringify({
+      user_id: userId,
+      status,
+    }),
+  });
+}
+
+export async function searchPatientRegistry(query: string) {
+  const response = await apiRequest<PatientRegistryResponse>(
+    `${endpoints.healthMinistryAdmin.patientRegistrySearch}?query=${encodeURIComponent(query.trim())}`,
+  );
+
+  return normalizePatientRegistryItems(response.items);
+}
+
+export async function updatePatientRegistryStatus(
+  userId: string,
+  status: PatientRegistryStatus,
+) {
+  return apiRequest<{ message?: string }>(endpoints.healthMinistryAdmin.patientRegistryStatus, {
     method: "PUT",
     body: JSON.stringify({
       user_id: userId,

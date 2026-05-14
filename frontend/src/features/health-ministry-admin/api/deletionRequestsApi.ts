@@ -11,6 +11,7 @@ interface RawDeletionRequest {
   id?: string | null;
   entity_type?: string | null;
   entity_id?: string | null;
+  organisation_id?: string | null;
   entity_display_name?: string | null;
   status?: string | null;
   reason?: string | null;
@@ -43,6 +44,7 @@ function normalizeDeletionRequest(raw: RawDeletionRequest): DeletionRequest {
     id: raw.id ?? "",
     entityType: (raw.entity_type ?? "patient") as DeletionEntityType,
     entityId: raw.entity_id ?? "",
+    organisationId: raw.organisation_id ?? null,
     entityDisplayName: raw.entity_display_name ?? null,
     status: (raw.status ?? "pending") as DeletionRequestStatus,
     reason: raw.reason ?? null,

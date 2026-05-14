@@ -188,7 +188,7 @@ export function InvestigationSection() {
             Investigation Mode
           </h1>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            Server-side filtered search across all audit logs (NFR-7.5). Filter by user,
+            Server-side filtered search across all audit logs. Filter by user,
             organisation, time range, and action type.
           </p>
         </div>

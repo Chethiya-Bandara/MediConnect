@@ -58,6 +58,37 @@ def _get_request_or_404(request_id: str) -> dict[str, Any]:
     return rows[0]
 
 
+def _resolve_request_organisation_id(entity_type: str, entity_id: str) -> str | None:
+    if entity_type == "organisation":
+        return str(entity_id)
+
+    if entity_type == "hospital":
+        rows = execute_with_retry(
+            lambda: supabase_admin.table("hospitals")
+            .select("organisation_id")
+            .eq("id", entity_id)
+            .execute()
+            .data,
+            default=[],
+        )
+        organisation_id = rows[0].get("organisation_id") if rows else None
+        return str(organisation_id) if organisation_id is not None else None
+
+    if entity_type == "pharmacy":
+        rows = execute_with_retry(
+            lambda: supabase_admin.table("pharmacies")
+            .select("organisation_id")
+            .eq("id", entity_id)
+            .execute()
+            .data,
+            default=[],
+        )
+        organisation_id = rows[0].get("organisation_id") if rows else None
+        return str(organisation_id) if organisation_id is not None else None
+
+    return None
+
+
 def _execute_soft_delete(entity_type: str, entity_id: str) -> None:
     """Revoke access by setting status to 'deactivated'. Records are never removed."""
     if entity_type == "patient":
@@ -259,10 +290,15 @@ def list_deletion_requests(current_user: dict = Depends(HealthMinistryOnly)):
     for row in rows:
         req_user = user_lookup.get(row.get("requested_by") or "") or {}
         apv_user = user_lookup.get(row.get("approved_by") or "") or {}
+        organisation_id = _resolve_request_organisation_id(
+            str(row.get("entity_type") or ""),
+            str(row.get("entity_id") or ""),
+        )
         items.append({
             "id": row.get("id"),
             "entity_type": row.get("entity_type"),
             "entity_id": row.get("entity_id"),
+            "organisation_id": organisation_id,
             "entity_display_name": row.get("entity_display_name"),
             "status": row.get("status"),
             "reason": row.get("reason"),
@@ -440,7 +476,7 @@ def list_doctors_registry(current_user: dict = Depends(HealthMinistryOnly)):
 def list_pharmacists_registry(current_user: dict = Depends(HealthMinistryOnly)):
     pharmacists = execute_with_retry(
         lambda: supabase_admin.table("pharmacists")
-        .select("id, user_id, license_no")
+        .select("id, user_id, license_no, status, created_at")
         .execute()
         .data,
         default=[],
@@ -463,8 +499,8 @@ def list_pharmacists_registry(current_user: dict = Depends(HealthMinistryOnly)):
             "license_no": p.get("license_no"),
             "name": u.get("name"),
             "email": u.get("email"),
-            "status": u.get("status", "active"),
-            "created_at": u.get("created_at"),
+            "status": p.get("status") or u.get("status", "active"),
+            "created_at": p.get("created_at"),
         })
     return {"items": items}
 
@@ -473,7 +509,8 @@ def list_pharmacists_registry(current_user: dict = Depends(HealthMinistryOnly)):
 def list_hospital_admins_registry(current_user: dict = Depends(HealthMinistryOnly)):
     admins = execute_with_retry(
         lambda: supabase_admin.table("admin_profiles")
-        .select("user_id, admin_role, organisation_id")
+        .select("id, created_at, user_id, admin_role, organisation_id, status")
+        .order("created_at", desc=True)
         .execute()
         .data,
         default=[],
@@ -485,7 +522,7 @@ def list_hospital_admins_registry(current_user: dict = Depends(HealthMinistryOnl
     if user_ids:
         users = execute_with_retry(
             lambda: supabase_admin.table("users")
-            .select("id, name, email, role, status, created_at")
+            .select("id, name, email, role, status")
             .in_("id", user_ids)
             .execute()
             .data,
@@ -524,7 +561,7 @@ def list_hospital_admins_registry(current_user: dict = Depends(HealthMinistryOnl
             "admin_role": a.get("admin_role"),
             "organisation_id": a.get("organisation_id"),
             "organisation_name": organisation.get("name") if organisation else None,
-            "status": u.get("status", "active"),
-            "created_at": u.get("created_at"),
+            "status": a.get("status") or u.get("status", "active"),
+            "created_at": a.get("created_at"),
         })
     return {"items": items}

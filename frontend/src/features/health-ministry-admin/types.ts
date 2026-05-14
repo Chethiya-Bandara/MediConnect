@@ -12,6 +12,7 @@ export type ApprovalStatus = "approved" | "rejected" | "pending" | "suspended";
 export type GovernanceTargetType = "USER" | "ORGANIZATION";
 
 export type GovernanceAction = "SUSPEND" | "ACTIVATE";
+export type PatientRegistryStatus = "active" | "deactivated";
 
 export interface DiagnosisMetric {
   code: string;
@@ -161,6 +162,7 @@ export interface DeletionRequest {
   id: string;
   entityType: DeletionEntityType;
   entityId: string;
+  organisationId: string | null;
   entityDisplayName: string | null;
   status: DeletionRequestStatus;
   reason: string | null;
@@ -190,4 +192,19 @@ export interface RegistryPersonItem {
   adminRole?: string | null;
   organisationId?: number | string | null;
   organisationName?: string | null;
+}
+
+export interface PatientRegistryItem {
+  patientId: string;
+  userId: string;
+  dhid: string | null;
+  name: string | null;
+  preferredName: string | null;
+  legalName: string | null;
+  email: string | null;
+  nic: string | null;
+  address: string | null;
+  role: string | null;
+  status: string | null;
+  createdAt: string | null;
 }

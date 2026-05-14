@@ -162,6 +162,19 @@ function parseTabletPriceDivisor(
       continue;
     }
 
+    const packMatch = normalized.match(
+      /(\d+)\s*(?:x|×|\*)\s*(\d+)(?:\s*(?:x|×|\*)\s*(\d+))?/i,
+    );
+    if (packMatch) {
+      const factors = packMatch
+        .slice(1)
+        .filter(Boolean)
+        .map((value) => Number.parseInt(value, 10));
+      if (factors.length > 1 && factors.every((value) => Number.isFinite(value) && value > 0)) {
+        return factors.reduce((product, value) => product * value, 1);
+      }
+    }
+
     const match =
       normalized.match(/(\d+)\s*(t|tabs?|tablets?|c|caps?|capsules?)\b/i) ??
       normalized.match(/\b(\d+)(t|c)\b/i);

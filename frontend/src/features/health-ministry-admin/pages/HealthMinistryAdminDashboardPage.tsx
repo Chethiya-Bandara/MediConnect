@@ -55,6 +55,7 @@ type DashboardView =
   | "analytics"
   | "audit"
   | "deletions"
+  | "patientRegistry"
   | "anomalies"
   | "performance"
   | "investigation";
@@ -65,6 +66,7 @@ const views = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "approvals", label: " User Approvals", icon: UserRoundCheck },
   { id: "deletions", label: "Deletion Requests", icon: ShieldAlert },
+  { id: "patientRegistry", label: "Patient Registry", icon: Search },
   { id: "people", label: "Doctors & Admins Registry", icon: Users },
   { id: "organisations", label: "Organisation Registry", icon: Building2 },
   { id: "medicines", label: "Medicine Registry", icon: Pill },
@@ -250,58 +252,14 @@ const approvalEntityOptions: Array<{
   { value: "admins", label: "Admin Roles" },
 ];
 
-type PersonTab = "patients" | "doctors" | "pharmacists" | "hospital_admins";
-
 function DeletionsView({
   dashboard,
-  onPersonDeleteRequest,
   formatDisplayDate,
 }: {
   dashboard: DashboardHook;
-  onPersonDeleteRequest: (person: RegistryPersonItem, entityType: DeletionEntityType) => void;
   formatDisplayDate: (v: string | null | undefined) => string;
 }) {
-  const [personTab, setPersonTab] = useState<PersonTab>("patients");
-  const [personSearch, setPersonSearch] = useState("");
   const [requestSearch, setRequestSearch] = useState("");
-
-  const personList: RegistryPersonItem[] = (() => {
-    if (personTab === "patients") return dashboard.patientsRegistry;
-    if (personTab === "doctors") return dashboard.doctorsRegistry;
-    if (personTab === "pharmacists") return dashboard.pharmacistsRegistry;
-    return dashboard.hospitalAdminsRegistry;
-  })();
-
-  const entityTypeForTab: DeletionEntityType = (() => {
-    if (personTab === "patients") return "patient";
-    if (personTab === "doctors") return "doctor";
-    if (personTab === "pharmacists") return "pharmacist";
-    return "hospital_admin";
-  })();
-
-  const resolveAdminDeletionType = (person: RegistryPersonItem): DeletionEntityType => {
-    const adminRole = (person.adminRole ?? "").trim().toLowerCase();
-    if (adminRole === "pharmacy_admin") return "pharmacy_admin";
-    if (adminRole === "health_ministry_admin") return "health_ministry_admin";
-    return "hospital_admin";
-  };
-
-  const filtered = personList.filter((p) => {
-    const q = personSearch.trim().toLowerCase();
-    if (!q) return true;
-    return [
-      p.name,
-      p.email,
-      p.id,
-      (p as RegistryPersonItem).dhid,
-      (p as RegistryPersonItem).slmcNumber,
-      (p as RegistryPersonItem).licenseNo,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-      .includes(q);
-  });
 
   const filteredRequests = dashboard.deletionRequests.filter((r) => {
     const q = requestSearch.trim().toLowerCase();
@@ -403,7 +361,14 @@ function DeletionsView({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
               {filteredRequests.length > 0 ? (
-                filteredRequests.map((req: DeletionRequest) => (
+                filteredRequests.map((req: DeletionRequest) => {
+                  const referenceId =
+                    req.entityType === "hospital"
+                    || req.entityType === "pharmacy"
+                    || req.entityType === "organisation"
+                      ? req.organisationId ?? req.entityId
+                      : req.entityId;
+                  return (
                   <tr key={req.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="px-5 py-4">
                       <div className="font-semibold">{req.entityDisplayName ?? req.entityId}</div>
@@ -411,7 +376,7 @@ function DeletionsView({
                         <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] uppercase dark:bg-slate-700">
                           {req.entityType}
                         </span>{" "}
-                        #{req.entityId}
+                        #{referenceId}
                       </div>
                       {req.reason ? (
                         <div className="mt-1 text-xs italic text-slate-500 dark:text-slate-400">
@@ -488,7 +453,8 @@ function DeletionsView({
                       )}
                     </td>
                   </tr>
-                ))
+                  );
+                })
               ) : (
                 <tr>
                   <td
@@ -508,153 +474,174 @@ function DeletionsView({
         </div>
       </section>
 
-      {/* People registry — request deletion of users */}
-      <section className="rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
-        <div className="border-b border-slate-200 px-6 py-5 dark:border-slate-700">
-          <h2 className="font-headline text-lg font-bold">Request Deactivation — People</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Select a person and click the trash icon to initiate a deletion request. Deactivated
-            users cannot log in but all their records remain intact.
+    </section>
+  );
+}
+
+function PatientRegistryView({
+  dashboard,
+  formatDisplayDate,
+}: {
+  dashboard: DashboardHook;
+  formatDisplayDate: (v: string | null | undefined) => string;
+}) {
+  const [query, setQuery] = useState("");
+
+  const handleSearch = async () => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    await dashboard.lookupPatientRegistry(trimmed);
+  };
+
+  return (
+    <section className="space-y-8">
+      <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="font-headline text-3xl font-extrabold tracking-tight">
+            Patient Registry
+          </h1>
+          <p className="mt-2 max-w-3xl text-sm text-slate-500 dark:text-slate-400">
+            Search by a full DHID or full NIC to find one patient record, then activate or
+            deactivate that patient account.
           </p>
         </div>
+      </header>
 
-        <div className="flex gap-1 border-b border-slate-200 px-6 pt-4 dark:border-slate-700">
-          {(["patients", "doctors", "pharmacists", "hospital_admins"] as PersonTab[]).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => {
-                setPersonTab(tab);
-                setPersonSearch("");
-              }}
-              className={`rounded-t-lg px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${
-                personTab === tab
-                  ? "bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200"
-                  : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-              }`}
-            >
-              {tab === "hospital_admins" ? "admin roles" : tab.replace("_", " ")}
-            </button>
-          ))}
-          <div className="ml-auto pb-2">
-            <button
-              type="button"
-              onClick={() => void dashboard.refreshPeopleRegistries()}
-              disabled={dashboard.isLoadingRegistry}
-              className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-300"
-            >
-              {dashboard.isLoadingRegistry ? "Loading…" : "Refresh"}
-            </button>
-          </div>
-        </div>
-
-        <div className="px-6 py-4">
-          <div className="relative w-full max-w-sm">
+      <section className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_auto]">
+          <label className="space-y-2">
+            <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+              <Search size={14} />
+              Patient Lookup
+            </span>
             <input
               type="text"
-              value={personSearch}
-              onChange={(e) => setPersonSearch(e.target.value)}
-              placeholder="Search name, email, ID…"
-              className="w-full rounded-xl border-0 bg-slate-100 px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleSearch();
+                }
+              }}
+              placeholder="Enter full DHID or NIC"
+              className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
             />
-            <Search className="absolute right-3 top-3 text-slate-400" size={16} />
-          </div>
+          </label>
+
+          <button
+            type="button"
+            onClick={() => void handleSearch()}
+            disabled={dashboard.isSearchingPatientRegistry || !query.trim()}
+            className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60 dark:bg-slate-700"
+          >
+            {dashboard.isSearchingPatientRegistry ? "Searching..." : "Search Patient"}
+          </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Name / Email</th>
-                <th className="px-5 py-3 font-semibold">ID</th>
-                <th className="px-5 py-3 font-semibold">Details</th>
-                <th className="px-5 py-3 font-semibold">Status</th>
-                <th className="px-5 py-3 font-semibold">Joined</th>
-                <th className="px-5 py-3 text-right font-semibold">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-              {filtered.length > 0 ? (
-                filtered.map((person) => {
-                  const isDeactivated = (person.status ?? "").toLowerCase() === "deactivated";
-                  return (
-                    <tr
-                      key={person.id}
-                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isDeactivated ? "opacity-60" : ""}`}
-                    >
-                      <td className="px-5 py-4">
-                        <div className="font-semibold">{person.name ?? "No name"}</div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
-                          {person.email ?? "—"}
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 font-mono text-xs text-slate-500 dark:text-slate-400">
-                        {person.id}
-                      </td>
-                      <td className="px-5 py-4 text-xs text-slate-500 dark:text-slate-400">
-                        {personTab === "patients" && person.dhid ? `DHID: ${person.dhid}` : null}
-                        {personTab === "doctors" ? (
-                          <>
-                            {person.specialization ?? "—"}
-                            {person.slmcNumber ? ` · SLMC: ${person.slmcNumber}` : ""}
-                          </>
-                        ) : null}
-                        {personTab === "pharmacists" && person.licenseNo
-                          ? `Lic: ${person.licenseNo}`
-                          : null}
-                        {personTab === "hospital_admins"
-                          ? `Role: ${person.adminRole ?? "—"}`
-                          : null}
-                      </td>
-                      <td className="px-5 py-4">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(person.status)}`}
-                        >
-                          {person.status ?? "active"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
-                        {formatDisplayDate(person.createdAt)}
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <button
-                          type="button"
-                          disabled={dashboard.isSubmittingDeletion || isDeactivated}
-                          onClick={() =>
-                            onPersonDeleteRequest(
-                              person,
-                              personTab === "hospital_admins"
-                                ? resolveAdminDeletionType(person)
-                                : entityTypeForTab,
-                            )
-                          }
-                          title={isDeactivated ? "Already deactivated" : "Request deactivation"}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30"
-                        >
-                          <Trash2 size={13} />
-                          {isDeactivated ? "Deactivated" : "Request Deletion"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-5 py-10 text-center text-slate-500 dark:text-slate-400"
-                  >
-                    {dashboard.isLoadingRegistry
-                      ? "Loading registry…"
-                      : personSearch
-                        ? "No records matched your search."
-                        : `No ${personTab === "hospital_admins" ? "admin roles" : personTab.replace("_", " ")} found. Click Refresh to load.`}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+          Full match only. Type the complete DHID or NIC.
+        </p>
+      </section>
+
+      {dashboard.patientRegistryMessage ? (
+        <div className={`rounded-2xl border px-5 py-4 text-sm ${noticeClassName(dashboard.patientRegistryMessage)}`}>
+          {dashboard.patientRegistryMessage}
         </div>
+      ) : null}
+
+      <section className="space-y-4">
+        {dashboard.patientRegistryResults.length > 0 ? (
+          dashboard.patientRegistryResults.map((patient) => {
+            const statusLower = (patient.status ?? "").toLowerCase();
+            const nextStatus = statusLower === "deactivated" ? "active" : "deactivated";
+
+            return (
+              <article
+                key={patient.patientId}
+                className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                        Matched Patient
+                      </p>
+                      <h2 className="mt-2 font-headline text-2xl font-extrabold">
+                        {patient.preferredName ?? patient.name ?? "Unnamed patient"}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        Legal name: {patient.legalName ?? "Not set"}
+                      </p>
+                    </div>
+
+                    <div className="grid gap-3 text-sm text-slate-600 dark:text-slate-300 md:grid-cols-2 xl:grid-cols-3">
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">DHID:</span>{" "}
+                        {patient.dhid ?? "Not set"}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">NIC:</span>{" "}
+                        {patient.nic ?? "Not set"}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">Email:</span>{" "}
+                        {patient.email ?? "Not set"}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">Role:</span>{" "}
+                        {formatStatusLabel(patient.role ?? "patient")}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">Address:</span>{" "}
+                        {patient.address ?? "Not set"}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">Joined:</span>{" "}
+                        {formatDisplayDate(patient.createdAt)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex min-w-[220px] flex-col items-start gap-3 lg:items-end">
+                    <span
+                      className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(patient.status)}`}
+                    >
+                      {formatStatusLabel(patient.status ?? "unknown")}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={dashboard.isSubmittingPatientRegistry}
+                      onClick={() =>
+                        void dashboard.submitPatientRegistryStatus(
+                          patient.userId,
+                          nextStatus,
+                          query.trim(),
+                        )
+                      }
+                      className={`rounded-xl px-4 py-2 text-sm font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-60 ${
+                        nextStatus === "active" ? "bg-emerald-600" : "bg-red-600"
+                      }`}
+                    >
+                      {dashboard.isSubmittingPatientRegistry
+                        ? "Applying..."
+                        : nextStatus === "active"
+                          ? "Activate Patient"
+                          : "Deactivate Patient"}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        ) : (
+          <div className="rounded-[1.75rem] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+            Search with a full DHID or NIC to load a patient record here.
+          </div>
+        )}
       </section>
     </section>
   );
@@ -693,6 +680,10 @@ function PeopleManagementView({
   const filteredDoctors = useMemo(() => {
     const q = doctorSearch.trim().toLowerCase();
     return doctors.filter((row) => {
+      const statusLower = (row.status ?? "").toLowerCase();
+      if (statusLower === "deactivated" || statusLower === "rejected") {
+        return false;
+      }
       if (!q) return true;
       return [row.name, row.email, row.id, row.specialization, row.slmcNumber, row.status]
         .filter(Boolean)
@@ -705,6 +696,10 @@ function PeopleManagementView({
   const filteredAdminUsers = useMemo(() => {
     const q = adminSearch.trim().toLowerCase();
     return adminUsers.filter((row) => {
+      const statusLower = (row.status ?? "").toLowerCase();
+      if (statusLower === "deactivated" || statusLower === "rejected") {
+        return false;
+      }
       const matchesRole =
         adminRoleFilter === "ALL" || (row.adminRole ?? "").toLowerCase() === adminRoleFilter;
       if (!matchesRole) return false;
@@ -929,7 +924,6 @@ function PeopleManagementView({
                   <th className="px-5 py-4 font-semibold">Role</th>
                   <th className="px-5 py-4 font-semibold">Organisation</th>
                   <th className="px-5 py-4 font-semibold">Status</th>
-                  <th className="px-5 py-4 font-semibold">Joined</th>
                   <th className="px-5 py-4 text-right font-semibold">Actions</th>
                 </tr>
               </thead>
@@ -961,9 +955,6 @@ function PeopleManagementView({
                           <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${statusBadge(row.status)}`}>
                             {row.status ?? "unknown"}
                           </span>
-                        </td>
-                        <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
-                          {formatDisplayDate(row.createdAt)}
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex flex-wrap justify-end gap-2">
@@ -1006,7 +997,7 @@ function PeopleManagementView({
                   })
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-5 py-10 text-center text-slate-500 dark:text-slate-400">
+                    <td colSpan={5} className="px-5 py-10 text-center text-slate-500 dark:text-slate-400">
                       {dashboard.isLoadingRegistry
                         ? "Loading admin roles…"
                         : adminSearch || adminRoleFilter !== "ALL"
@@ -1036,7 +1027,6 @@ export function HealthMinistryAdminDashboardPage() {
   const [organisationSearch, setOrganisationSearch] = useState("");
   const [newOrganisationName, setNewOrganisationName] = useState("");
   const [newOrganisationType, setNewOrganisationType] = useState("hospital");
-  const [newOrganisationStatus, setNewOrganisationStatus] = useState("active");
   const [governanceTargetId, setGovernanceTargetId] = useState("");
   const [governanceTargetType, setGovernanceTargetType] =
     useState<GovernanceTargetType>("ORGANIZATION");
@@ -1169,16 +1159,6 @@ export function HealthMinistryAdminDashboardPage() {
     });
   }, [auditActionFilter, auditRoleFilter, dashboard.auditLogs, deferredAuditSearch]);
 
-  const filteredPendingOrganisations = useMemo(() => {
-    return dashboard.pendingOrganisations.filter((row) => {
-      const haystack = [row.name, row.id, row.type, row.status]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return !deferredApprovalSearch || haystack.includes(deferredApprovalSearch);
-    });
-  }, [approvalEntityFilter, dashboard.pendingOrganisations, deferredApprovalSearch]);
-
   const filteredPendingDoctors = useMemo(() => {
     return dashboard.pendingDoctors.filter((row) => {
       const haystack = [
@@ -1223,6 +1203,10 @@ export function HealthMinistryAdminDashboardPage() {
 
   const filteredManagedOrganisations = useMemo(() => {
     return dashboard.managedOrganisations.filter((row) => {
+      const statusLower = (row.status ?? "").toLowerCase();
+      if (statusLower === "deactivated" || statusLower === "rejected") {
+        return false;
+      }
       const haystack = [row.name, row.id, row.type, row.status, row.linkedTable]
         .filter(Boolean)
         .join(" ")
@@ -1364,16 +1348,6 @@ export function HealthMinistryAdminDashboardPage() {
     }
   };
 
-  const handleOrganizationDecision = async (status: ApprovalStatus, targetId: string) => {
-    const resolvedId = targetId.trim();
-    if (!resolvedId) return;
-    const confirmed = window.confirm(
-      `${status === "approved" ? "Approve" : "Reject"} organisation ${resolvedId}?`,
-    );
-    if (!confirmed) return;
-    await dashboard.submitOrganizationApproval(resolvedId, status);
-  };
-
   const handleDoctorDecision = async (status: ApprovalStatus, targetId: string) => {
     const resolvedId = targetId.trim();
     if (!resolvedId) return;
@@ -1429,23 +1403,26 @@ export function HealthMinistryAdminDashboardPage() {
     const created = await dashboard.submitOrganisationCreate({
       name: trimmedName,
       type: newOrganisationType,
-      status: newOrganisationStatus,
+      status: "active",
     });
 
     if (created) {
       setNewOrganisationName("");
       setNewOrganisationType("hospital");
-      setNewOrganisationStatus("active");
     }
   };
 
-  const handleOrganisationStatusToggle = async (row: ManagedOrganisationItem) => {
-    const nextAction: GovernanceAction =
-      (row.status ?? "").toLowerCase() === "suspended" ? "ACTIVATE" : "SUSPEND";
-    const label = nextAction === "ACTIVATE" ? "set active" : "suspend";
-    const confirmed = window.confirm(`${label} ${row.name ?? `organisation ${row.id}`}?`);
+  const handleOrganisationRegistryAction = async (
+    row: ManagedOrganisationItem,
+    action: GovernanceAction,
+  ) => {
+    const actionLabel =
+      action === "ACTIVATE" ? "Active" : "Suspend";
+    const confirmed = window.confirm(
+      `${actionLabel} ${row.name ?? `organisation ${row.id}`}?`,
+    );
     if (!confirmed) return;
-    await dashboard.submitUserAction(row.id, "ORGANIZATION", nextAction);
+    await dashboard.submitUserAction(row.id, "ORGANIZATION", action);
   };
 
   const updateMedicineDraft = (
@@ -1865,7 +1842,7 @@ export function HealthMinistryAdminDashboardPage() {
                 </button>
               </header>
 
-              <section className="grid gap-4 rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.7fr)]">
+              <section className="grid gap-4 rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
                 <label className="space-y-2">
                   <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
                     <Search size={14} />
@@ -1903,25 +1880,6 @@ export function HealthMinistryAdminDashboardPage() {
                       );
                     })}
                   </div>
-                </div>
-                <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-900">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
-                    Visible results
-                  </p>
-                  <p className="mt-2 text-2xl font-extrabold">
-                    {approvalEntityFilter === "doctors"
-                      ? filteredPendingDoctors.length
-                      : approvalEntityFilter === "admins"
-                        ? filteredPendingAdmins.length
-                        : "Admin count not available right now"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {approvalEntityFilter === "doctors"
-                      ? "Doctor registrations awaiting review"
-                      : approvalEntityFilter === "admins"
-                        ? "Admin-role accounts under ministry control"
-                        : "Admin-role accounts under ministry control"}
-                  </p>
                 </div>
               </section>
 
@@ -2286,15 +2244,9 @@ export function HealthMinistryAdminDashboardPage() {
                       <span className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
                         Initial status
                       </span>
-                      <select
-                        value={newOrganisationStatus}
-                        onChange={(event) => setNewOrganisationStatus(event.target.value)}
-                        className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                      >
-                        <option value="active">Active</option>
-                        <option value="approved">Approved</option>
-                        <option value="pending">Pending</option>
-                      </select>
+                      <div className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                        Active
+                      </div>
                     </label>
 
                     <button
@@ -2366,12 +2318,6 @@ export function HealthMinistryAdminDashboardPage() {
                             {filteredHospitalOrganisations.length > 0 ? (
                               filteredHospitalOrganisations.map((row) => {
                                 const statusLower = (row.status ?? "").toLowerCase();
-                                const actionLabel =
-                                  statusLower === "suspended" ? "Set Active" : "Suspend";
-                                const actionClassName =
-                                  statusLower === "suspended"
-                                    ? "text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                                    : "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20";
 
                                 return (
                                   <tr key={row.id}>
@@ -2390,23 +2336,34 @@ export function HealthMinistryAdminDashboardPage() {
                                       {formatDisplayDate(row.createdAt)}
                                     </td>
                                     <td className="px-4 py-4">
-                                      <div className="flex justify-end gap-2">
+                                      <div className="flex flex-wrap justify-end gap-2">
                                         <button
                                           type="button"
-                                          onClick={() => void handleOrganisationStatusToggle(row)}
-                                          disabled={dashboard.isSubmittingUserAction}
-                                          className={`rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${actionClassName}`}
+                                          onClick={() => void handleOrganisationRegistryAction(row, "ACTIVATE")}
+                                          disabled={
+                                            dashboard.isSubmittingUserAction
+                                            || statusLower === "active"
+                                            || statusLower === "approved"
+                                          }
+                                          className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:bg-emerald-900/20 dark:text-emerald-300"
                                         >
-                                          {actionLabel}
+                                          Active
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleOrganisationRegistryAction(row, "SUSPEND")}
+                                          disabled={dashboard.isSubmittingUserAction || statusLower === "suspended"}
+                                          className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-900/20 dark:text-amber-300"
+                                        >
+                                          Suspend
                                         </button>
                                         <button
                                           type="button"
                                           onClick={() => void handleOrganisationDeleteRequest(row)}
                                           disabled={dashboard.isSubmittingDeletion}
-                                          title="Request deactivation (dual-admin approval)"
-                                          className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                                          className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300"
                                         >
-                                          <Trash2 size={15} />
+                                          Delete
                                         </button>
                                       </div>
                                     </td>
@@ -2453,12 +2410,6 @@ export function HealthMinistryAdminDashboardPage() {
                             {filteredPharmacyOrganisations.length > 0 ? (
                               filteredPharmacyOrganisations.map((row) => {
                                 const statusLower = (row.status ?? "").toLowerCase();
-                                const actionLabel =
-                                  statusLower === "suspended" ? "Set Active" : "Suspend";
-                                const actionClassName =
-                                  statusLower === "suspended"
-                                    ? "text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                                    : "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20";
 
                                 return (
                                   <tr key={row.id}>
@@ -2477,23 +2428,34 @@ export function HealthMinistryAdminDashboardPage() {
                                       {formatDisplayDate(row.createdAt)}
                                     </td>
                                     <td className="px-4 py-4">
-                                      <div className="flex justify-end gap-2">
+                                      <div className="flex flex-wrap justify-end gap-2">
                                         <button
                                           type="button"
-                                          onClick={() => void handleOrganisationStatusToggle(row)}
-                                          disabled={dashboard.isSubmittingUserAction}
-                                          className={`rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] transition-colors ${actionClassName}`}
+                                          onClick={() => void handleOrganisationRegistryAction(row, "ACTIVATE")}
+                                          disabled={
+                                            dashboard.isSubmittingUserAction
+                                            || statusLower === "active"
+                                            || statusLower === "approved"
+                                          }
+                                          className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:bg-emerald-900/20 dark:text-emerald-300"
                                         >
-                                          {actionLabel}
+                                          Active
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleOrganisationRegistryAction(row, "SUSPEND")}
+                                          disabled={dashboard.isSubmittingUserAction || statusLower === "suspended"}
+                                          className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-900/20 dark:text-amber-300"
+                                        >
+                                          Suspend
                                         </button>
                                         <button
                                           type="button"
                                           onClick={() => void handleOrganisationDeleteRequest(row)}
                                           disabled={dashboard.isSubmittingDeletion}
-                                          title="Request deactivation (dual-admin approval)"
-                                          className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                                          className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 dark:bg-red-900/20 dark:text-red-300"
                                         >
-                                          <Trash2 size={15} />
+                                          Delete
                                         </button>
                                       </div>
                                     </td>
@@ -3072,12 +3034,7 @@ export function HealthMinistryAdminDashboardPage() {
             <section className="space-y-8">
               <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                 <div>
-                  <h1 className="flex items-center gap-3 font-headline text-3xl font-extrabold tracking-tight">
-                    Investigation Mode
-                    <span className="rounded-full border border-red-200 bg-red-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
-                      High Privilege
-                    </span>
-                  </h1>
+                  <h1 className="font-headline text-3xl font-extrabold tracking-tight">Audit Logs</h1>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                     Search and export the live audit records currently available to the ministry
                     admin.
@@ -3241,7 +3198,13 @@ export function HealthMinistryAdminDashboardPage() {
           {view === "deletions" ? (
             <DeletionsView
               dashboard={dashboard}
-              onPersonDeleteRequest={handlePersonDeleteRequest}
+              formatDisplayDate={formatDisplayDate}
+            />
+          ) : null}
+
+          {view === "patientRegistry" ? (
+            <PatientRegistryView
+              dashboard={dashboard}
               formatDisplayDate={formatDisplayDate}
             />
           ) : null}

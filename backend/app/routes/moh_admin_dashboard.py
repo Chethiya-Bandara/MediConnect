@@ -10,6 +10,7 @@ from app.config.supabase import execute_with_retry, supabase_admin
 from app.middleware.role_checker import HealthMinistryOnly, build_user_context
 from app.middleware.performance import SLA_MS, get_slow_requests
 from app.utils.gemini_client import call_gemini_assistant
+from app.utils.helpers import hmac_nic, is_valid_nic, validate_dhid
 from app.schemas.moh_admin_schema import (
     AdminUserStatusRequest,
     AnalyticsRequest,
@@ -26,6 +27,12 @@ _ADMIN_APPROVAL_ROLES = {"hospital_admin", "pharmacy_admin", "health_ministry_ad
 _ADMIN_APPROVAL_STATUSES = {"approved", "rejected", "pending", "suspended"}
 
 _DIAGNOSIS_PATTERN = re.compile(r"Diagnosis:\s*(.+?)(?:\r?\n|$)", re.IGNORECASE)
+_FULL_DHID_PATTERN = re.compile(r"^DHID-\d{4}-\d{4,5}$", re.IGNORECASE)
+
+
+class PatientRegistryStatusRequest(BaseModel):
+    user_id: str
+    status: str
 
 
 def _fetch_rows(table: str, select_clause: str = "*") -> list[dict[str, Any]]:
@@ -74,6 +81,13 @@ def _title_status(value: str | None) -> str:
     return normalized.replace("_", " ").title()
 
 
+def _title_account_status(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return "Unknown"
+    return normalized.replace("_", " ").title()
+
+
 def _parse_diagnosis(notes: str | None) -> str | None:
     if not notes:
         return None
@@ -91,7 +105,7 @@ def _build_user_lookup(user_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
 
     rows = _fetch_rows_with_query(
         lambda: supabase_admin.table("users")
-        .select("id, email, role, name, pref_name, status")
+        .select("id, email, role, name, pref_name, address, nic, status")
         .in_("id", values)
     )
     return {str(row["id"]): row for row in rows if row.get("id") is not None}
@@ -254,6 +268,421 @@ def _build_organisation_lookup(
         .in_("id", ids)
     )
     return {int(row["id"]): row for row in rows if row.get("id") is not None}
+
+
+def _coerce_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _doctor_organisation_map_by_user(user_ids: Iterable[str]) -> dict[str, int]:
+    values = [value for value in {value for value in user_ids if value}]
+    if not values:
+        return {}
+
+    doctor_rows = _fetch_rows_with_query(
+        lambda: supabase_admin.table("doctors")
+        .select("id, user_id")
+        .in_("user_id", values)
+    )
+    doctor_ids = [_coerce_int(row.get("id")) for row in doctor_rows]
+    doctor_ids = [value for value in doctor_ids if value is not None]
+    if not doctor_ids:
+        return {}
+
+    affiliation_rows = _fetch_rows_with_query(
+        lambda: supabase_admin.table("doctor_affiliations")
+        .select("doctor_id, hospital_id, status, created_at")
+        .in_("doctor_id", doctor_ids)
+        .order("created_at", desc=True)
+    )
+    approved_affiliations = [
+        row for row in affiliation_rows if _normalize_status(row.get("status")) == "approved"
+    ]
+    hospital_ids = [
+        _coerce_int(row.get("hospital_id")) for row in approved_affiliations if row.get("hospital_id") is not None
+    ]
+    hospital_ids = [value for value in hospital_ids if value is not None]
+    if not hospital_ids:
+        return {}
+
+    hospital_rows = _fetch_rows_with_query(
+        lambda: supabase_admin.table("hospitals")
+        .select("id, organisation_id")
+        .in_("id", hospital_ids)
+    )
+    hospital_to_org = {
+        _coerce_int(row.get("id")): _coerce_int(row.get("organisation_id"))
+        for row in hospital_rows
+    }
+
+    doctor_org_map: dict[int, int] = {}
+    for row in approved_affiliations:
+        doctor_id = _coerce_int(row.get("doctor_id"))
+        hospital_id = _coerce_int(row.get("hospital_id"))
+        organisation_id = hospital_to_org.get(hospital_id)
+        if doctor_id is None or organisation_id is None or doctor_id in doctor_org_map:
+            continue
+        doctor_org_map[doctor_id] = organisation_id
+
+    return {
+        str(row["user_id"]): doctor_org_map[doctor_id]
+        for row in doctor_rows
+        if row.get("user_id") and (doctor_id := _coerce_int(row.get("id"))) in doctor_org_map
+    }
+
+
+def _pharmacist_organisation_map_by_user(user_ids: Iterable[str]) -> dict[str, int]:
+    values = [value for value in {value for value in user_ids if value}]
+    if not values:
+        return {}
+
+    pharmacist_rows = _fetch_rows_with_query(
+        lambda: supabase_admin.table("pharmacists")
+        .select("user_id, pharmacy_id")
+        .in_("user_id", values)
+    )
+    pharmacy_ids = [
+        _coerce_int(row.get("pharmacy_id")) for row in pharmacist_rows if row.get("pharmacy_id") is not None
+    ]
+    pharmacy_ids = [value for value in pharmacy_ids if value is not None]
+    if not pharmacy_ids:
+        return {}
+
+    pharmacy_rows = _fetch_rows_with_query(
+        lambda: supabase_admin.table("pharmacies")
+        .select("id, organisation_id")
+        .in_("id", pharmacy_ids)
+    )
+    pharmacy_to_org = {
+        _coerce_int(row.get("id")): _coerce_int(row.get("organisation_id"))
+        for row in pharmacy_rows
+    }
+    return {
+        str(row["user_id"]): pharmacy_to_org[pharmacy_id]
+        for row in pharmacist_rows
+        if row.get("user_id") and (pharmacy_id := _coerce_int(row.get("pharmacy_id"))) in pharmacy_to_org
+    }
+
+
+def _admin_organisation_map_by_user(user_ids: Iterable[str]) -> dict[str, int]:
+    values = [value for value in {value for value in user_ids if value}]
+    if not values:
+        return {}
+
+    admin_rows = _fetch_rows_with_query(
+        lambda: supabase_admin.table("admin_profiles")
+        .select("user_id, organisation_id, created_at")
+        .in_("user_id", values)
+        .order("created_at", desc=True)
+    )
+    resolved: dict[str, int] = {}
+    for row in admin_rows:
+        user_id = row.get("user_id")
+        organisation_id = _coerce_int(row.get("organisation_id"))
+        if not user_id or organisation_id is None or user_id in resolved:
+            continue
+        resolved[str(user_id)] = organisation_id
+    return resolved
+
+
+def _build_actor_organisation_map(
+    audit_rows: list[dict[str, Any]],
+    user_lookup: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    actor_ids = [str(row.get("user_id")) for row in audit_rows if row.get("user_id")]
+    doctor_map = _doctor_organisation_map_by_user(actor_ids)
+    pharmacist_map = _pharmacist_organisation_map_by_user(actor_ids)
+    admin_map = _admin_organisation_map_by_user(actor_ids)
+
+    resolved: dict[str, int] = {}
+    for actor_id in actor_ids:
+        actor = user_lookup.get(actor_id) or {}
+        role = _normalize_status(actor.get("role"))
+        organisation_id = (
+            doctor_map.get(actor_id)
+            if role == "doctor"
+            else pharmacist_map.get(actor_id)
+            if role == "pharmacist"
+            else admin_map.get(actor_id)
+            if role in _ADMIN_APPROVAL_ROLES
+            else None
+        )
+        if organisation_id is not None:
+            resolved[actor_id] = organisation_id
+    return resolved
+
+
+def _build_audit_entity_organisation_map(audit_rows: list[dict[str, Any]]) -> dict[tuple[str, int], int]:
+    entity_ids_by_type: dict[str, set[int]] = {}
+    for row in audit_rows:
+        entity = str(row.get("entity") or "").strip().lower()
+        entity_id = _coerce_int(row.get("entity_id"))
+        if not entity or entity_id is None:
+            continue
+        entity_ids_by_type.setdefault(entity, set()).add(entity_id)
+
+    resolved: dict[tuple[str, int], int] = {}
+
+    organisation_ids = entity_ids_by_type.get("organisations", set())
+    for organisation_id in organisation_ids:
+        resolved[("organisations", organisation_id)] = organisation_id
+
+    hospital_ids = entity_ids_by_type.get("hospitals", set())
+    if hospital_ids:
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("hospitals")
+            .select("id, organisation_id")
+            .in_("id", list(hospital_ids))
+        )
+        for row in rows:
+            hospital_id = _coerce_int(row.get("id"))
+            organisation_id = _coerce_int(row.get("organisation_id"))
+            if hospital_id is not None and organisation_id is not None:
+                resolved[("hospitals", hospital_id)] = organisation_id
+
+    pharmacy_ids = entity_ids_by_type.get("pharmacies", set())
+    if pharmacy_ids:
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("pharmacies")
+            .select("id, organisation_id")
+            .in_("id", list(pharmacy_ids))
+        )
+        for row in rows:
+            pharmacy_id = _coerce_int(row.get("id"))
+            organisation_id = _coerce_int(row.get("organisation_id"))
+            if pharmacy_id is not None and organisation_id is not None:
+                resolved[("pharmacies", pharmacy_id)] = organisation_id
+
+    appointment_ids = entity_ids_by_type.get("appointments", set())
+    if appointment_ids:
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("appointments")
+            .select("id, organisation_id")
+            .in_("id", list(appointment_ids))
+        )
+        for row in rows:
+            appointment_id = _coerce_int(row.get("id"))
+            organisation_id = _coerce_int(row.get("organisation_id"))
+            if appointment_id is not None and organisation_id is not None:
+                resolved[("appointments", appointment_id)] = organisation_id
+
+    encounter_ids = entity_ids_by_type.get("encounters", set())
+    encounter_to_appointment: dict[int, int] = {}
+    if encounter_ids:
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("encounters")
+            .select("id, appointment_id")
+            .in_("id", list(encounter_ids))
+        )
+        encounter_to_appointment = {
+            encounter_id: appointment_id
+            for row in rows
+            if (encounter_id := _coerce_int(row.get("id"))) is not None
+            and (appointment_id := _coerce_int(row.get("appointment_id"))) is not None
+        }
+        missing_appointments = {
+            appointment_id
+            for appointment_id in encounter_to_appointment.values()
+            if ("appointments", appointment_id) not in resolved
+        }
+        if missing_appointments:
+            rows = _fetch_rows_with_query(
+                lambda: supabase_admin.table("appointments")
+                .select("id, organisation_id")
+                .in_("id", list(missing_appointments))
+            )
+            for row in rows:
+                appointment_id = _coerce_int(row.get("id"))
+                organisation_id = _coerce_int(row.get("organisation_id"))
+                if appointment_id is not None and organisation_id is not None:
+                    resolved[("appointments", appointment_id)] = organisation_id
+        for encounter_id, appointment_id in encounter_to_appointment.items():
+            organisation_id = resolved.get(("appointments", appointment_id))
+            if organisation_id is not None:
+                resolved[("encounters", encounter_id)] = organisation_id
+
+    doctor_ids = entity_ids_by_type.get("doctors", set())
+    if doctor_ids:
+        doctor_rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("doctor_affiliations")
+            .select("doctor_id, hospital_id, status, created_at")
+            .in_("doctor_id", list(doctor_ids))
+            .order("created_at", desc=True)
+        )
+        approved_rows = [
+            row for row in doctor_rows if _normalize_status(row.get("status")) == "approved"
+        ]
+        hospital_ids = {
+            hospital_id
+            for row in approved_rows
+            if (hospital_id := _coerce_int(row.get("hospital_id"))) is not None
+        }
+        hospital_rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("hospitals")
+            .select("id, organisation_id")
+            .in_("id", list(hospital_ids))
+        ) if hospital_ids else []
+        hospital_to_org = {
+            _coerce_int(row.get("id")): _coerce_int(row.get("organisation_id"))
+            for row in hospital_rows
+        }
+        for row in approved_rows:
+            doctor_id = _coerce_int(row.get("doctor_id"))
+            hospital_id = _coerce_int(row.get("hospital_id"))
+            organisation_id = hospital_to_org.get(hospital_id)
+            if doctor_id is None or organisation_id is None or ("doctors", doctor_id) in resolved:
+                continue
+            resolved[("doctors", doctor_id)] = organisation_id
+
+    pharmacist_ids = entity_ids_by_type.get("pharmacists", set())
+    if pharmacist_ids:
+        pharmacist_rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("pharmacists")
+            .select("id, pharmacy_id")
+            .in_("id", list(pharmacist_ids))
+        )
+        pharmacy_ids = {
+            pharmacy_id
+            for row in pharmacist_rows
+            if (pharmacy_id := _coerce_int(row.get("pharmacy_id"))) is not None
+        }
+        pharmacy_rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("pharmacies")
+            .select("id, organisation_id")
+            .in_("id", list(pharmacy_ids))
+        ) if pharmacy_ids else []
+        pharmacy_to_org = {
+            _coerce_int(row.get("id")): _coerce_int(row.get("organisation_id"))
+            for row in pharmacy_rows
+        }
+        for row in pharmacist_rows:
+            pharmacist_id = _coerce_int(row.get("id"))
+            pharmacy_id = _coerce_int(row.get("pharmacy_id"))
+            organisation_id = pharmacy_to_org.get(pharmacy_id)
+            if pharmacist_id is not None and organisation_id is not None:
+                resolved[("pharmacists", pharmacist_id)] = organisation_id
+
+    admin_profile_ids = entity_ids_by_type.get("admin_profiles", set())
+    if admin_profile_ids:
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("admin_profiles")
+            .select("id, organisation_id")
+            .in_("id", list(admin_profile_ids))
+        )
+        for row in rows:
+            profile_id = _coerce_int(row.get("id"))
+            organisation_id = _coerce_int(row.get("organisation_id"))
+            if profile_id is not None and organisation_id is not None:
+                resolved[("admin_profiles", profile_id)] = organisation_id
+
+    prescription_ids = entity_ids_by_type.get("prescriptions", set())
+    prescription_to_encounter: dict[int, int] = {}
+    if prescription_ids:
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("prescriptions")
+            .select("id, encounter_id")
+            .in_("id", list(prescription_ids))
+        )
+        prescription_to_encounter = {
+            prescription_id: encounter_id
+            for row in rows
+            if (prescription_id := _coerce_int(row.get("id"))) is not None
+            and (encounter_id := _coerce_int(row.get("encounter_id"))) is not None
+        }
+
+    prescription_item_ids = entity_ids_by_type.get("prescription_items", set())
+    if prescription_item_ids:
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("prescription_items")
+            .select("id, prescription_id")
+            .in_("id", list(prescription_item_ids))
+        )
+        missing_prescriptions = set()
+        for row in rows:
+            item_id = _coerce_int(row.get("id"))
+            prescription_id = _coerce_int(row.get("prescription_id"))
+            if item_id is None or prescription_id is None:
+                continue
+            if prescription_id not in prescription_to_encounter:
+                missing_prescriptions.add(prescription_id)
+            resolved[("prescription_items", item_id)] = prescription_id
+        if missing_prescriptions:
+            rows = _fetch_rows_with_query(
+                lambda: supabase_admin.table("prescriptions")
+                .select("id, encounter_id")
+                .in_("id", list(missing_prescriptions))
+            )
+            for row in rows:
+                prescription_id = _coerce_int(row.get("id"))
+                encounter_id = _coerce_int(row.get("encounter_id"))
+                if prescription_id is not None and encounter_id is not None:
+                    prescription_to_encounter[prescription_id] = encounter_id
+
+    for prescription_id, encounter_id in prescription_to_encounter.items():
+        organisation_id = resolved.get(("encounters", encounter_id))
+        if organisation_id is not None:
+            resolved[("prescriptions", prescription_id)] = organisation_id
+
+    for key, value in list(resolved.items()):
+        if key[0] == "prescription_items" and isinstance(value, int):
+            organisation_id = resolved.get(("prescriptions", value))
+            if organisation_id is not None:
+                resolved[key] = organisation_id
+            else:
+                resolved.pop(key, None)
+
+    dispensing_ids = entity_ids_by_type.get("dispensing", set())
+    dispensing_to_org: dict[int, int] = {}
+    if dispensing_ids:
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("dispensing")
+            .select("id, pharmacy_id")
+            .in_("id", list(dispensing_ids))
+        )
+        pharmacy_ids = {
+            pharmacy_id
+            for row in rows
+            if (pharmacy_id := _coerce_int(row.get("pharmacy_id"))) is not None
+        }
+        pharmacy_rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("pharmacies")
+            .select("id, organisation_id")
+            .in_("id", list(pharmacy_ids))
+        ) if pharmacy_ids else []
+        pharmacy_to_org = {
+            _coerce_int(row.get("id")): _coerce_int(row.get("organisation_id"))
+            for row in pharmacy_rows
+        }
+        for row in rows:
+            dispensing_id = _coerce_int(row.get("id"))
+            pharmacy_id = _coerce_int(row.get("pharmacy_id"))
+            organisation_id = pharmacy_to_org.get(pharmacy_id)
+            if dispensing_id is not None and organisation_id is not None:
+                dispensing_to_org[dispensing_id] = organisation_id
+                resolved[("dispensing", dispensing_id)] = organisation_id
+
+    dispensing_item_ids = entity_ids_by_type.get("dispensing_items", set())
+    if dispensing_item_ids:
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("dispensing_items")
+            .select("id, dispensing_id")
+            .in_("id", list(dispensing_item_ids))
+        )
+        for row in rows:
+            item_id = _coerce_int(row.get("id"))
+            dispensing_id = _coerce_int(row.get("dispensing_id"))
+            organisation_id = dispensing_to_org.get(dispensing_id)
+            if item_id is not None and organisation_id is not None:
+                resolved[("dispensing_items", item_id)] = organisation_id
+
+    return {
+        key: organisation_id
+        for key, organisation_id in resolved.items()
+        if organisation_id is not None
+    }
 
 
 def _log_audit_action(
@@ -589,18 +1018,24 @@ def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
         1 for item in admin_approval_items if _normalize_status(item.get("status")) == "pending"
     )
 
+    actor_organisation_map = _build_actor_organisation_map(all_audit_rows, user_lookup)
+    entity_organisation_map = _build_audit_entity_organisation_map(all_audit_rows)
     organisation_lookup = _build_organisation_lookup(
-        [row.get("entity_id") for row in all_audit_rows if row.get("entity") == "organisations"]
+        list(actor_organisation_map.values()) + list(entity_organisation_map.values())
     )
     audit_logs: list[dict[str, Any]] = []
     for row in all_audit_rows:
         actor = user_lookup.get(str(row.get("user_id")))
-        organisation = None
-        if row.get("entity") == "organisations":
-            try:
-                organisation = organisation_lookup.get(int(row.get("entity_id")))
-            except (TypeError, ValueError):
-                organisation = None
+        entity = str(row.get("entity") or "").strip().lower()
+        entity_id = _coerce_int(row.get("entity_id"))
+        organisation_id = (
+            entity_organisation_map.get((entity, entity_id))
+            if entity_id is not None
+            else None
+        )
+        if organisation_id is None and row.get("user_id"):
+            organisation_id = actor_organisation_map.get(str(row.get("user_id")))
+        organisation = organisation_lookup.get(organisation_id) if organisation_id is not None else None
 
         audit_logs.append(
             {
@@ -609,7 +1044,7 @@ def get_dashboard(current_user: dict = Depends(HealthMinistryOnly)):
                 "actor_id": row.get("user_id"),
                 "actor_name": (actor.get("pref_name") or actor.get("name")) if actor else None,
                 "actor_role": actor.get("role") if actor else None,
-                "organisation_id": organisation.get("id") if organisation else None,
+                "organisation_id": organisation_id,
                 "organisation_name": organisation.get("name") if organisation else None,
                 "action": row.get("action"),
                 "details": (
@@ -1023,6 +1458,12 @@ def update_admin_user_status(
         .eq("id", data.user_id)
         .execute()
     )
+    execute_with_retry(
+        lambda: supabase_admin.table("admin_profiles")
+        .update({"status": next_status})
+        .eq("id", admin_profile["id"])
+        .execute()
+    )
 
     _log_audit_action(
         user_id=current_user["user_id"],
@@ -1033,6 +1474,113 @@ def update_admin_user_status(
 
     display_name = user.get("pref_name") or user.get("name") or user.get("email") or "Admin user"
     return {"message": f"{display_name} marked as {_title_status(next_status)}."}
+
+
+def _normalize_patient_lookup_query(query: str | None) -> str:
+    return " ".join((query or "").strip().upper().split())
+
+
+def _patient_registry_items(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    user_lookup = _build_user_lookup(row.get("user_id") for row in rows)
+
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        user = user_lookup.get(str(row.get("user_id")))
+        if not user:
+            continue
+        items.append(
+            {
+                "patient_id": row.get("id"),
+                "user_id": row.get("user_id"),
+                "dhid": row.get("dhid"),
+                "name": user.get("pref_name") or user.get("name"),
+                "preferred_name": user.get("pref_name"),
+                "legal_name": user.get("name"),
+                "email": user.get("email"),
+                "nic": user.get("nic"),
+                "address": user.get("address"),
+                "role": user.get("role"),
+                "status": user.get("status"),
+                "created_at": row.get("created_at"),
+            }
+        )
+
+    return items
+
+
+@router.get("/patient-registry/search")
+def search_patient_registry(
+    query: str = Query(..., min_length=1, description="Full DHID or NIC"),
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    _ = current_user
+    normalized_query = _normalize_patient_lookup_query(query)
+    if not normalized_query:
+        raise HTTPException(status_code=400, detail="Enter a full DHID or NIC.")
+
+    rows: list[dict[str, Any]]
+    if normalized_query.startswith("DHID-"):
+        if not _FULL_DHID_PATTERN.match(normalized_query) or not validate_dhid(normalized_query):
+            raise HTTPException(status_code=400, detail="Enter a full valid DHID.")
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("patients")
+            .select("id, user_id, dhid, created_at")
+            .eq("dhid", normalized_query)
+        )
+    else:
+        if not is_valid_nic(normalized_query):
+            raise HTTPException(status_code=400, detail="Enter a full valid NIC.")
+        nic_hash = hmac_nic(normalized_query)
+        rows = _fetch_rows_with_query(
+            lambda: supabase_admin.table("patients")
+            .select("id, user_id, dhid, created_at")
+            .eq("nic", nic_hash)
+        )
+
+    return {"items": _patient_registry_items(rows)}
+
+
+@router.put("/patient-registry/status")
+def update_patient_registry_status(
+    data: PatientRegistryStatusRequest,
+    current_user: dict = Depends(HealthMinistryOnly),
+):
+    next_status = (data.status or "").strip().lower()
+    if next_status not in {"active", "deactivated"}:
+        raise HTTPException(status_code=400, detail="Status must be active or deactivated.")
+
+    patient = _fetch_single_with_query(
+        lambda: supabase_admin.table("patients")
+        .select("id, user_id, dhid")
+        .eq("user_id", data.user_id)
+    )
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found.")
+
+    user = _fetch_single_with_query(
+        lambda: supabase_admin.table("users")
+        .select("id, email, name, pref_name, status")
+        .eq("id", data.user_id)
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Patient user not found.")
+
+    execute_with_retry(
+        lambda: supabase_admin.table("users")
+        .update({"status": next_status})
+        .eq("id", data.user_id)
+        .execute()
+    )
+
+    _log_audit_action(
+        user_id=current_user["user_id"],
+        action=f"PATIENT_{next_status.upper()}",
+        entity="patients",
+        entity_id=int(patient["id"]),
+    )
+
+    display_name = user.get("pref_name") or user.get("name") or user.get("email") or "Patient"
+    return {"message": f"{display_name} marked as {_title_account_status(next_status)}."}
 
 
 @router.put("/suspend")

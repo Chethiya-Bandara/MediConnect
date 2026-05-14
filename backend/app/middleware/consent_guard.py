@@ -73,6 +73,18 @@ def check_consent(doctor_id: int, appointment_id: int) -> bool:
             detail="Appointment not found or does not belong to this doctor."
         )
 
+    appointment_status = (appointment.get("status") or "").lower()
+    if appointment_status == "missed":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Missed appointments cannot be used to access patient history."
+        )
+    if appointment_status in {"completed", "cancelled"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. This appointment is no longer active."
+        )
+
     # ── Get latest consent action for this appointment ────────────
     try:
         consent_logs = (
@@ -237,7 +249,7 @@ def is_appointment_finalised(appointment_id: int) -> bool:
         if not appointment:
             return False
 
-        return (appointment.get("status") or "").lower() == "completed"
+        return (appointment.get("status") or "").lower() in {"completed", "missed"}
 
     except Exception:
         return False

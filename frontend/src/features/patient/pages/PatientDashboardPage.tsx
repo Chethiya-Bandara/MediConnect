@@ -2383,7 +2383,7 @@ export function PatientDashboardPage() {
                               </span>
                             </div>
                             <div className="mt-5 flex flex-wrap gap-2">
-                              {["cancelled", "completed"].includes(item.status.toLowerCase()) ? null : (
+                              {["cancelled", "completed", "missed"].includes(item.status.toLowerCase()) ? null : (
                                 <button
                                   type="button"
                                   onClick={() => void toggleConsent(item.id, !item.consent.granted)}
@@ -2396,14 +2396,15 @@ export function PatientDashboardPage() {
                                   {item.consent.granted ? "Revoke Consent" : "Grant Consent"}
                                 </button>
                               )}
-                              <button
-                                type="button"
-                                onClick={() => void cancelAppointment(item.id)}
-                                disabled={item.status.toLowerCase() === "cancelled"}
-                                className="rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 disabled:opacity-50 dark:bg-red-900/20 dark:text-red-400"
-                              >
-                                Cancel
-                              </button>
+                              {["cancelled", "completed", "missed"].includes(item.status.toLowerCase()) ? null : (
+                                <button
+                                  type="button"
+                                  onClick={() => void cancelAppointment(item.id)}
+                                  className="rounded-xl bg-red-50 px-4 py-2 text-xs font-bold text-red-600 dark:bg-red-900/20 dark:text-red-400"
+                                >
+                                  Cancel
+                                </button>
+                              )}
                             </div>
                           </article>
                         ))}

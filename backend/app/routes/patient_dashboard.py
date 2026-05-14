@@ -23,7 +23,7 @@ router = APIRouter(prefix="/patient/dashboard", tags=["patient-dashboard"])
 COLOMBO_TZ = ZoneInfo("Asia/Colombo")
 
 _ALLOWED_PATIENT_STATUS_UPDATES = {"cancelled"}
-_TERMINAL_APPOINTMENT_STATUSES = {"completed", "cancelled"}
+_TERMINAL_APPOINTMENT_STATUSES = {"completed", "cancelled", "missed"}
 
 
 class AppointmentCreateRequest(BaseModel):
@@ -476,6 +476,19 @@ def _parse_tablet_price_divisor(*candidates: Optional[str]) -> Optional[int]:
         if not normalized:
             continue
 
+        pack_match = re.search(
+            r"(\d+)\s*(?:x|×|\*)\s*(\d+)(?:\s*(?:x|×|\*)\s*(\d+))?",
+            normalized,
+            re.IGNORECASE,
+        )
+        if pack_match:
+            factors = [_coerce_positive_int(value) for value in pack_match.groups() if value]
+            if factors and all(value is not None and value > 0 for value in factors):
+                product = 1
+                for value in factors:
+                    product *= value
+                return product
+
         match = (
             re.search(r"(\d+)\s*(t|tabs?|tablets?|c|caps?|capsules?)\b", normalized, re.IGNORECASE)
             or re.search(r"\b(\d+)(t|c)\b", normalized, re.IGNORECASE)
@@ -488,6 +501,38 @@ def _parse_tablet_price_divisor(*candidates: Optional[str]) -> Optional[int]:
             return parsed
 
     return None
+
+
+def _effective_inventory_stock_quantity(
+    stock_quantity: Optional[int],
+    item: dict,
+    medicine: Optional[dict],
+) -> int:
+    normalized_stock = _coerce_positive_int(stock_quantity)
+    if normalized_stock is None:
+        return 0
+
+    unit_kind = (
+        _normalize_unit_kind_from_text(item.get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("unit"))
+        or _normalize_unit_kind_from_text((medicine or {}).get("name"))
+        or _normalize_unit_kind_from_text(item.get("medicine_name"))
+        or _normalize_unit_kind_from_text(item.get("drug_name"))
+    )
+    if unit_kind != "tablets":
+        return normalized_stock
+
+    pack_size = _parse_tablet_price_divisor(
+        (medicine or {}).get("unit"),
+        (medicine or {}).get("name"),
+        item.get("unit"),
+        item.get("medicine_name"),
+        item.get("drug_name"),
+    )
+    if not pack_size:
+        return normalized_stock
+
+    return normalized_stock * pack_size
 
 
 def _prescription_quantity_metrics(item: dict, medicine: Optional[dict]) -> tuple[int, str]:
@@ -754,7 +799,7 @@ def _format_appointment_with_consent(row, doctor_lookup, organisation_lookup, co
     organisation = organisation_lookup.get(row["organisation_id"], {})
     consent = consent_lookup.get(row["id"], {})
     appointment_status = _title_status(row.get("status"))
-    consent_granted = bool(consent.get("granted")) and appointment_status.lower() != "completed"
+    consent_granted = bool(consent.get("granted")) and appointment_status.lower() not in {"completed", "missed"}
     return {
         "id": row["id"],
         "status": appointment_status,
@@ -778,6 +823,8 @@ def _format_appointment_with_consent(row, doctor_lookup, organisation_lookup, co
             "status": (
                 "Completed"
                 if appointment_status.lower() == "completed"
+                else "Missed"
+                if appointment_status.lower() == "missed"
                 else "Granted"
                 if consent_granted
                 else "Revoked"
@@ -2534,7 +2581,7 @@ def update_consent(
 
     appointment = rows[0]
     status = (appointment.get("status") or "").lower()
-    if status in {"completed", "cancelled"}:
+    if status in {"completed", "cancelled", "missed"}:
         raise HTTPException(
             status_code=400,
             detail="Consent can only be changed for active appointments",
@@ -2961,7 +3008,11 @@ def estimate_pharmacy_bill(
         unit_price = None
         line_total = None
         matched_inventory_id = None
-        stock_quantity = inventory_entry.get("stock_quantity", 0) if inventory_entry else 0
+        stock_quantity = (
+            _effective_inventory_stock_quantity(inventory_entry.get("stock_quantity"), item, medicine)
+            if inventory_entry
+            else 0
+        )
 
         if not inventory_entry:
             availability_status = "not_listed"

@@ -11,7 +11,9 @@ import {
   getManagedMedicines,
   getManagedOrganisations,
   getTopDiagnoses,
+  searchPatientRegistry,
   suspendEntity,
+  updatePatientRegistryStatus,
   updateAdminUserStatus,
   updateManagedMedicine,
 } from "../api/healthMinistryAdminApi";
@@ -39,6 +41,8 @@ import type {
   ManagedMedicineItem,
   ManagedMedicinePayload,
   ManagedOrganisationItem,
+  PatientRegistryItem,
+  PatientRegistryStatus,
   PendingAdminItem,
   PendingDoctorItem,
   PendingOrganisationItem,
@@ -128,6 +132,10 @@ export function useHealthMinistryAdminDashboard() {
   const [pharmacistsRegistry, setPharmacistsRegistry] = useState<RegistryPersonItem[]>([]);
   const [hospitalAdminsRegistry, setHospitalAdminsRegistry] = useState<RegistryPersonItem[]>([]);
   const [isLoadingRegistry, setIsLoadingRegistry] = useState(false);
+  const [patientRegistryResults, setPatientRegistryResults] = useState<PatientRegistryItem[]>([]);
+  const [patientRegistryMessage, setPatientRegistryMessage] = useState<string | null>(null);
+  const [isSearchingPatientRegistry, setIsSearchingPatientRegistry] = useState(false);
+  const [isSubmittingPatientRegistry, setIsSubmittingPatientRegistry] = useState(false);
 
   const refreshDashboard = async () => {
     setIsLoadingDashboard(true);
@@ -233,14 +241,19 @@ export function useHealthMinistryAdminDashboard() {
   const submitDoctorApproval = async (doctorId: string, status: ApprovalStatus) => {
     setIsSubmittingApproval(true);
     setApprovalsMessage(null);
+    setUsersMessage(null);
 
     try {
       const response = await approveDoctor(doctorId, status);
-      setApprovalsMessage(response.message ?? `Doctor ${status}.`);
-      await refreshDashboard();
+      const message = response.message ?? `Doctor ${status}.`;
+      setApprovalsMessage(message);
+      setUsersMessage(message);
+      await Promise.all([refreshDashboard(), refreshPeopleRegistries()]);
       return true;
     } catch (error) {
-      setApprovalsMessage(error instanceof Error ? error.message : "Doctor approval failed.");
+      const message = error instanceof Error ? error.message : "Doctor approval failed.";
+      setApprovalsMessage(message);
+      setUsersMessage(message);
       return false;
     } finally {
       setIsSubmittingApproval(false);
@@ -250,14 +263,19 @@ export function useHealthMinistryAdminDashboard() {
   const submitAdminApproval = async (userId: string, status: ApprovalStatus) => {
     setIsSubmittingApproval(true);
     setApprovalsMessage(null);
+    setUsersMessage(null);
 
     try {
       const response = await updateAdminUserStatus(userId, status);
-      setApprovalsMessage(response.message ?? `Admin user ${status}.`);
-      await refreshDashboard();
+      const message = response.message ?? `Admin user ${status}.`;
+      setApprovalsMessage(message);
+      setUsersMessage(message);
+      await Promise.all([refreshDashboard(), refreshPeopleRegistries()]);
       return true;
     } catch (error) {
-      setApprovalsMessage(error instanceof Error ? error.message : "Admin approval failed.");
+      const message = error instanceof Error ? error.message : "Admin approval failed.";
+      setApprovalsMessage(message);
+      setUsersMessage(message);
       return false;
     } finally {
       setIsSubmittingApproval(false);
@@ -455,6 +473,51 @@ export function useHealthMinistryAdminDashboard() {
     }
   };
 
+  const lookupPatientRegistry = async (query: string) => {
+    setIsSearchingPatientRegistry(true);
+    setPatientRegistryMessage(null);
+
+    try {
+      const items = await searchPatientRegistry(query);
+      setPatientRegistryResults(items);
+      if (items.length === 0) {
+        setPatientRegistryMessage("No patient matched that full DHID or NIC.");
+      }
+      return items;
+    } catch (error) {
+      setPatientRegistryResults([]);
+      setPatientRegistryMessage(
+        error instanceof Error ? error.message : "Patient registry search failed.",
+      );
+      return [];
+    } finally {
+      setIsSearchingPatientRegistry(false);
+    }
+  };
+
+  const submitPatientRegistryStatus = async (
+    userId: string,
+    status: PatientRegistryStatus,
+    query: string,
+  ) => {
+    setIsSubmittingPatientRegistry(true);
+    setPatientRegistryMessage(null);
+
+    try {
+      const response = await updatePatientRegistryStatus(userId, status);
+      setPatientRegistryMessage(response.message ?? `Patient marked as ${status}.`);
+      await lookupPatientRegistry(query);
+      return true;
+    } catch (error) {
+      setPatientRegistryMessage(
+        error instanceof Error ? error.message : "Patient status update failed.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingPatientRegistry(false);
+    }
+  };
+
   const requestMonthlyReport = async () => {
     setIsGeneratingReport(true);
     setReportMessage(null);
@@ -515,15 +578,21 @@ export function useHealthMinistryAdminDashboard() {
     pharmacistsRegistry,
     hospitalAdminsRegistry,
     isLoadingRegistry,
+    patientRegistryResults,
+    patientRegistryMessage,
+    isSearchingPatientRegistry,
+    isSubmittingPatientRegistry,
     setFilters,
     refreshDashboard,
     refreshAnalytics,
     refreshMedicines,
     refreshDeletionRequests,
     refreshPeopleRegistries,
+    lookupPatientRegistry,
     submitOrganizationApproval,
     submitDoctorApproval,
     submitAdminApproval,
+    submitPatientRegistryStatus,
     submitUserAction,
     submitOrganisationCreate,
     submitMedicineCreate,
