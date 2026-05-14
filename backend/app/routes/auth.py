@@ -129,10 +129,7 @@ def _require_organisation_by_type(organisation_id: int | None, expected_type: st
     if actual_type != expected_type:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Organization ID {organisation_id} belongs to a {actual_type or 'different'} organisation, "
-                f"not a {expected_type} organisation."
-            ),
+            detail=f"This organization ID does not belong to a {expected_type} organisation.",
         )
     return organisation
 
