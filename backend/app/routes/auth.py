@@ -29,6 +29,8 @@ _STATUS_ALIASES = {
     "suspended": "suspended",
 }
 
+_BLOCKED_ORGANISATION_STATUSES = {"rejected", "suspended"}
+
 def _normalize_for_match(value: str) -> str:
     return "".join(ch.lower() for ch in value if ch.isalnum())
 
@@ -165,6 +167,12 @@ def _require_organisation_by_type(organisation_id: int | None, expected_type: st
             status_code=400,
             detail=f"This organization ID does not belong to a {expected_type} organisation.",
         )
+    organisation_status = _normalize_admin_status(organisation.get("status"))
+    if organisation_status in _BLOCKED_ORGANISATION_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This organization is {organisation_status}. Registration is not allowed for it.",
+        )
     return organisation
 
 
@@ -181,6 +189,64 @@ def _resolve_linked_record_by_organisation(table_name: str, organisation_id: int
     if not linked_rows:
         raise HTTPException(status_code=404, detail=not_found_detail)
     return linked_rows[0]
+
+
+def _get_blocking_organisation_status(user_id: str, role: str) -> str | None:
+    organisation_id = None
+
+    if role == "pharmacist":
+        pharmacist_rows = (
+            supabase_admin.table("pharmacists")
+            .select("pharmacy_id")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        pharmacy_id = pharmacist_rows[0].get("pharmacy_id") if pharmacist_rows else None
+        if pharmacy_id is not None:
+            pharmacy_rows = (
+                supabase_admin.table("pharmacies")
+                .select("organisation_id")
+                .eq("id", pharmacy_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            organisation_id = pharmacy_rows[0].get("organisation_id") if pharmacy_rows else None
+    elif role in _ADMIN_ROLES:
+        admin_rows = (
+            supabase_admin.table("admin_profiles")
+            .select("organisation_id")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        organisation_id = admin_rows[0].get("organisation_id") if admin_rows else None
+
+    if organisation_id is None:
+        return None
+
+    organisation_rows = (
+        supabase_admin.table("organisations")
+        .select("status")
+        .eq("id", organisation_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not organisation_rows:
+        return None
+
+    organisation_status = _normalize_admin_status(organisation_rows[0].get("status"))
+    if organisation_status in _BLOCKED_ORGANISATION_STATUSES:
+        return organisation_status
+    return None
 
 
 def _get_login_block_message(user_row: dict) -> str | None:
@@ -203,6 +269,11 @@ def _get_login_block_message(user_row: dict) -> str | None:
 
     if role == "pharmacist":
         if status_value == "approved":
+            organisation_status = _get_blocking_organisation_status(user_id, role)
+            if organisation_status == "suspended":
+                return "Your linked organisation is suspended. Login is blocked until it is reactivated."
+            if organisation_status == "rejected":
+                return "Your linked organisation was rejected. Login is blocked for this account."
             return None
         if status_value == "pending":
             return "Pending approval from your pharmacy admin. Your pharmacist login will work after approval."
@@ -215,6 +286,11 @@ def _get_login_block_message(user_row: dict) -> str | None:
     if role not in _ADMIN_ROLES:
         return None
     if status_value == "approved":
+        organisation_status = _get_blocking_organisation_status(user_id, role)
+        if organisation_status == "suspended":
+            return "Your linked organisation is suspended. Login is blocked until it is reactivated."
+        if organisation_status == "rejected":
+            return "Your linked organisation was rejected. Login is blocked for this account."
         return None
     if status_value == "pending":
         return "Pending approval from the Health Ministry. Your admin login will work after approval."

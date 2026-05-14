@@ -160,6 +160,80 @@ def _organization_admin_profiles(organisation_id: int | str) -> list[dict[str, A
     )
 
 
+def _organization_pharmacists(organisation_id: int | str) -> list[dict[str, Any]]:
+    pharmacies = _fetch_rows_with_query(
+        lambda: supabase_admin.table("pharmacies")
+        .select("id, organisation_id")
+        .eq("organisation_id", organisation_id)
+    )
+    pharmacy_ids = [row.get("id") for row in pharmacies if row.get("id") is not None]
+    if not pharmacy_ids:
+        return []
+
+    return _fetch_rows_with_query(
+        lambda: supabase_admin.table("pharmacists")
+        .select("id, user_id, pharmacy_id, status")
+        .in_("pharmacy_id", pharmacy_ids)
+    )
+
+
+def _cascade_organisation_lockdown(
+    organisation_id: int | str,
+    next_user_status: str,
+    current_user_id: str,
+) -> None:
+    related_admin_profiles = [
+        row
+        for row in _organization_admin_profiles(organisation_id)
+        if _normalize_status(row.get("admin_role")) in {"hospital_admin", "pharmacy_admin"}
+        and row.get("user_id")
+    ]
+    related_admin_user_ids = [row["user_id"] for row in related_admin_profiles]
+    if related_admin_user_ids:
+        execute_with_retry(
+            lambda: supabase_admin.table("users")
+            .update({"status": next_user_status})
+            .in_("id", related_admin_user_ids)
+            .execute()
+        )
+        for row in related_admin_profiles:
+            profile_id = row.get("id")
+            if profile_id is None:
+                continue
+            _log_audit_action(
+                user_id=current_user_id,
+                action=f"ADMIN_USER_{next_user_status.upper()}",
+                entity="admin_profiles",
+                entity_id=int(profile_id),
+            )
+
+    related_pharmacists = [row for row in _organization_pharmacists(organisation_id) if row.get("user_id")]
+    related_pharmacist_user_ids = [row["user_id"] for row in related_pharmacists]
+    if related_pharmacist_user_ids:
+        execute_with_retry(
+            lambda: supabase_admin.table("users")
+            .update({"status": next_user_status})
+            .in_("id", related_pharmacist_user_ids)
+            .execute()
+        )
+
+    pharmacist_ids = [row.get("id") for row in related_pharmacists if row.get("id") is not None]
+    if pharmacist_ids:
+        execute_with_retry(
+            lambda: supabase_admin.table("pharmacists")
+            .update({"status": "suspended"})
+            .in_("id", pharmacist_ids)
+            .execute()
+        )
+        for pharmacist_id in pharmacist_ids:
+            _log_audit_action(
+                user_id=current_user_id,
+                action=f"PHARMACIST_{next_user_status.upper()}",
+                entity="pharmacists",
+                entity_id=int(pharmacist_id),
+            )
+
+
 def _build_organisation_lookup(
     organisation_ids: Iterable[int | str],
 ) -> dict[int, dict[str, Any]]:
@@ -873,6 +947,9 @@ def approve_organization(
         .eq("id", data.id)
         .execute()
     )
+    normalized_status = _normalize_status(data.status)
+    if normalized_status in {"rejected", "suspended"}:
+        _cascade_organisation_lockdown(data.id, normalized_status, current_user["user_id"])
     _log_audit_action(
         user_id=current_user["user_id"],
         action=f"ORGANISATION_{data.status.upper()}",
@@ -992,30 +1069,7 @@ def suspend_entity(
     )
 
     if data.target_type == "ORGANIZATION" and action == "suspend":
-        related_admin_profiles = [
-            row
-            for row in _organization_admin_profiles(entity_id)
-            if _normalize_status(row.get("admin_role")) in {"hospital_admin", "pharmacy_admin"}
-            and row.get("user_id")
-        ]
-        related_user_ids = [row["user_id"] for row in related_admin_profiles]
-        if related_user_ids:
-            execute_with_retry(
-                lambda: supabase_admin.table("users")
-                .update({"status": "suspended"})
-                .in_("id", related_user_ids)
-                .execute()
-            )
-            for row in related_admin_profiles:
-                profile_id = row.get("id")
-                if profile_id is None:
-                    continue
-                _log_audit_action(
-                    user_id=current_user["user_id"],
-                    action="ADMIN_USER_SUSPENDED",
-                    entity="admin_profiles",
-                    entity_id=int(profile_id),
-                )
+        _cascade_organisation_lockdown(entity_id, "suspended", current_user["user_id"])
 
     if str(entity_id).isdigit():
         _log_audit_action(

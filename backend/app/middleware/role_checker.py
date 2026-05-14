@@ -263,6 +263,19 @@ def build_user_context(
         # Missing role-specific rows should not block authentication.
         pass
 
+    organisation_status = str(context.get("organisation_status") or "").strip().lower()
+    if user_role in {"pharmacist", "hospital_admin", "pharmacy_admin"}:
+        if organisation_status == "suspended":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your linked organisation is suspended. Access is blocked until it is reactivated.",
+            )
+        if organisation_status == "rejected":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your linked organisation was rejected. Access is blocked for this account.",
+            )
+
     return context
 
 def get_current_user(
