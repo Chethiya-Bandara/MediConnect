@@ -198,12 +198,10 @@ class RegisterRequest(BaseModel):
             if not NIC_PATTERN.match(self.nic):
                 raise ValueError("NIC format is invalid")
 
-        if should_validate_nic and self.nic and dob_value and self.gender:
+        if should_validate_nic and self.nic and self.gender:
             nic_details = _parse_nic_birth_details(self.nic)
             if nic_details is None:
                 raise ValueError("NIC contains an invalid birth-date sequence")
-            if nic_details["birth_date"] != dob_value:
-                raise ValueError("NIC does not match the supplied date of birth")
             if nic_details["gender"] != self.gender:
                 raise ValueError("NIC does not match the supplied gender")
 

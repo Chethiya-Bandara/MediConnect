@@ -68,6 +68,40 @@ def _verify_registration_nic_document(
             detail=issue or "NIC verification is unavailable right now",
         )
 
+    nic_match = bool(verification.get("matches_expected_nic"))
+    name_match = bool(verification.get("matches_expected_name"))
+    dob_match = bool(verification.get("matches_expected_dob"))
+    gender_match = bool(verification.get("matches_expected_gender"))
+    document_ok = bool(verification.get("is_identity_document"))
+    extracted_nic = _normalize_for_match(str(verification.get("nic_number") or ""))
+    expected_nic_normalized = _normalize_for_match(expected_nic)
+    extracted_gender = _normalize_gender(str(verification.get("gender") or ""))
+    expected_gender_normalized = _normalize_gender(expected_gender)
+    extracted_dob = str(verification.get("date_of_birth") or "").strip()
+
+    if extracted_nic and extracted_nic == expected_nic_normalized:
+        nic_match = True
+    if expected_dob and extracted_dob and extracted_dob == expected_dob:
+        dob_match = True
+    if expected_gender_normalized and extracted_gender and extracted_gender == expected_gender_normalized:
+        gender_match = True
+
+    if (
+        not document_ok
+        or not nic_match
+        or (require_name_match and not name_match)
+        or (require_dob_match and not dob_match)
+        or (require_gender_match and not gender_match)
+    ):
+        reason = str(verification.get("reason") or "").strip()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                reason
+                or "NIC image verification failed. Upload a clear NIC image that matches the registration details."
+            ),
+        )
+
 
 def _normalize_admin_status(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
@@ -190,40 +224,6 @@ def _get_login_block_message(user_row: dict) -> str | None:
         return "Your admin account is suspended. Contact the Health Ministry."
     return "Your admin account is not approved for login yet."
 
-    nic_match = bool(verification.get("matches_expected_nic"))
-    name_match = bool(verification.get("matches_expected_name"))
-    dob_match = bool(verification.get("matches_expected_dob"))
-    gender_match = bool(verification.get("matches_expected_gender"))
-    document_ok = bool(verification.get("is_identity_document"))
-    extracted_nic = _normalize_for_match(str(verification.get("nic_number") or ""))
-    expected_nic_normalized = _normalize_for_match(expected_nic)
-    extracted_gender = _normalize_gender(str(verification.get("gender") or ""))
-    expected_gender_normalized = _normalize_gender(expected_gender)
-    extracted_dob = str(verification.get("date_of_birth") or "").strip()
-
-    if extracted_nic and extracted_nic == expected_nic_normalized:
-        nic_match = True
-    if expected_dob and extracted_dob and extracted_dob == expected_dob:
-        dob_match = True
-    if expected_gender_normalized and extracted_gender and extracted_gender == expected_gender_normalized:
-        gender_match = True
-
-    if (
-        not document_ok
-        or not nic_match
-        or (require_name_match and not name_match)
-        or (require_dob_match and not dob_match)
-        or (require_gender_match and not gender_match)
-    ):
-        reason = str(verification.get("reason") or "").strip()
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                reason
-                or "NIC image verification failed. Upload a clear NIC image that matches the registration details."
-            ),
-        )
-
 
 @router.post("/register")
 async def register(
@@ -332,6 +332,7 @@ async def register(
                 "name": user.fullName,
                 "pref_name": user.preferredName,
                 "address": user.address,
+                "nic": user.nic,
                 "status": user_status,
             }
         ).execute()

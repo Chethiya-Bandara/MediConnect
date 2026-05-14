@@ -136,14 +136,6 @@ export const registrationSchema = z
       return;
     }
 
-    if (nicDetails.birthDate !== values.dob) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["nic"],
-        message: "NIC does not match the selected date of birth.",
-      });
-    }
-
     if (nicDetails.gender !== values.gender) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
