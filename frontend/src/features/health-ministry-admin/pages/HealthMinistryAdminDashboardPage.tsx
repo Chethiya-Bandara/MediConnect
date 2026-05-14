@@ -42,6 +42,7 @@ import type {
   GovernanceTargetType,
   ManagedMedicineItem,
   ManagedOrganisationItem,
+  MonthlyReport,
   RegistryPersonItem,
 } from "../types";
 
@@ -218,6 +219,138 @@ function downloadCsv(filename: string, rows: string[][]) {
   link.download = filename;
   link.click();
   window.URL.revokeObjectURL(url);
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildMonthlyReportDocument(report: MonthlyReport) {
+  const renderList = (items: string[]) =>
+    items.length > 0
+      ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+      : `<p class="muted">No items available.</p>`;
+
+  const renderMetricCards = report.keyMetrics
+    .map(
+      (item) => `
+        <div class="metric">
+          <div class="metric-label">${escapeHtml(item.label)}</div>
+          <div class="metric-value">${escapeHtml(item.value)}</div>
+        </div>
+      `,
+    )
+    .join("");
+
+  const renderDiagnosisRows = report.topDiagnoses.length
+    ? `
+      <table>
+        <thead><tr><th>Diagnosis</th><th>Count</th></tr></thead>
+        <tbody>
+          ${report.topDiagnoses
+            .map(
+              (item) => `
+                <tr>
+                  <td>${escapeHtml(item.label)}</td>
+                  <td>${item.count.toLocaleString("en-LK")}</td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `
+    : `<p class="muted">No diagnosis signal was available for this reporting window.</p>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(report.title)}</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; color: #172033; background: #eef4fb; }
+    .page { max-width: 980px; margin: 0 auto; padding: 40px 32px 56px; }
+    .sheet { background: #ffffff; border: 1px solid #d9e4f2; border-radius: 20px; padding: 32px; box-shadow: 0 18px 48px rgba(20, 38, 63, 0.08); }
+    h1 { margin: 0; font-size: 30px; }
+    h2 { margin: 0 0 12px; font-size: 17px; }
+    p { margin: 0; line-height: 1.7; }
+    .sub { margin-top: 8px; color: #5e6c84; }
+    .meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
+    .meta-card, .metric { background: #f7fafd; border: 1px solid #e3edf7; border-radius: 14px; padding: 14px 16px; }
+    .label, .metric-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: #6d7d96; font-weight: 700; }
+    .value, .metric-value { margin-top: 8px; font-size: 18px; font-weight: 800; color: #18253b; }
+    .grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; margin-top: 24px; }
+    .section { border: 1px solid #e3edf7; border-radius: 16px; padding: 20px; background: #fff; }
+    .section.full { margin-top: 18px; }
+    ul { margin: 0; padding-left: 20px; line-height: 1.7; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 0; border-bottom: 1px solid #ebf1f7; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.16em; color: #6d7d96; }
+    .muted { color: #748399; }
+    .footer { margin-top: 24px; font-size: 12px; color: #72839a; }
+    @media print { body { background: white; } .page { padding: 0; } .sheet { box-shadow: none; border: 0; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="sheet">
+      <h1>${escapeHtml(report.title)}</h1>
+      <p class="sub">${escapeHtml(report.subtitle ?? "Ministry reporting document")}</p>
+      <div class="meta">
+        <div class="meta-card"><div class="label">Generated For</div><div class="value">${escapeHtml(report.generatedFor ?? "Health Ministry Admin")}</div></div>
+        <div class="meta-card"><div class="label">Generated At</div><div class="value">${escapeHtml(formatDisplayDate(report.generatedAt))}</div></div>
+        <div class="meta-card"><div class="label">Reporting Window</div><div class="value">${escapeHtml(report.reportingWindow ?? "Current cycle")}</div></div>
+      </div>
+
+      <div class="grid">
+        <div class="section">
+          <h2>Executive Summary</h2>
+          ${renderList(report.executiveSummary)}
+        </div>
+        <div class="section">
+          <h2>Top Diagnoses</h2>
+          ${renderDiagnosisRows}
+        </div>
+      </div>
+
+      <div class="section full">
+        <h2>Key Metrics</h2>
+        <div class="metrics-grid">${renderMetricCards}</div>
+      </div>
+
+      <div class="grid">
+        <div class="section">
+          <h2>Operational Highlights</h2>
+          ${renderList(report.operationalHighlights)}
+        </div>
+        <div class="section">
+          <h2>Risk & Watch Items</h2>
+          ${renderList(report.riskItems)}
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="section">
+          <h2>Recommendations</h2>
+          ${renderList(report.recommendations)}
+        </div>
+        <div class="section">
+          <h2>Data Limitations</h2>
+          ${renderList(report.dataLimitations)}
+        </div>
+      </div>
+
+      <div class="footer">Generated from MediConnect ministry analytics.</div>
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 type DashboardHook = ReturnType<typeof useHealthMinistryAdminDashboard>;
@@ -1584,22 +1717,25 @@ export function HealthMinistryAdminDashboardPage() {
     setAnalyticsExportMessage(`Exported ${dashboard.incidence.length} analytics row(s) to CSV.`);
   };
 
-  const downloadReport = () => {
-    if (!dashboard.report) {
+  const generateAndDownloadReport = async () => {
+    setReportDownloadMessage(null);
+    const response = await dashboard.requestMonthlyReport();
+    if (!response?.report) {
       setReportDownloadMessage(
-        "Generate the monthly report first. No backend report means nothing real to download.",
+        "Monthly report generation failed, so there was nothing real to download.",
       );
       return;
     }
 
-    const blob = new Blob([dashboard.report], { type: "text/plain;charset=utf-8;" });
+    const documentHtml = buildMonthlyReportDocument(response.report);
+    const blob = new Blob([documentHtml], { type: "text/html;charset=utf-8;" });
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "health-ministry-monthly-report.txt";
+    link.download = "health-ministry-monthly-report.html";
     link.click();
     window.URL.revokeObjectURL(url);
-    setReportDownloadMessage("Downloaded the latest generated monthly report.");
+    setReportDownloadMessage("Generated and downloaded the monthly report document.");
   };
 
   return (
@@ -2798,12 +2934,12 @@ export function HealthMinistryAdminDashboardPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => void dashboard.requestMonthlyReport()}
+                  onClick={() => void generateAndDownloadReport()}
                   disabled={dashboard.isGeneratingReport}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-6 py-3 text-sm font-bold text-white shadow-md shadow-blue-900/15 transition-all hover:opacity-90 disabled:opacity-60 dark:bg-blue-600"
                 >
                   <Bot size={16} />
-                  {dashboard.isGeneratingReport ? "Generating..." : "Generate AI Monthly Report"}
+                  {dashboard.isGeneratingReport ? "Generating..." : "Generate & Download AI Monthly Report"}
                 </button>
               </header>
 
@@ -2972,49 +3108,31 @@ export function HealthMinistryAdminDashboardPage() {
                 </div>
               </div>
 
-              <div className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <h3 className="font-headline text-lg font-bold">Monthly AI Report</h3>
-                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                      Generated at {formatDisplayDate(dashboard.reportGeneratedAt)}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={downloadReport}
-                      className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-700 transition-colors hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+              {(analyticsExportMessage || reportDownloadMessage || dashboard.reportMessage) ? (
+                <div className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  {analyticsExportMessage ? (
+                    <div
+                      className={`rounded-xl border px-4 py-3 text-sm ${noticeClassName(analyticsExportMessage)}`}
                     >
-                      <Download size={14} />
-                      Download report
-                    </button>
-                    {dashboard.reportMessage ? (
-                      <span className="rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                        {dashboard.reportMessage}
-                      </span>
-                    ) : null}
-                  </div>
+                      {analyticsExportMessage}
+                    </div>
+                  ) : null}
+                  {reportDownloadMessage ? (
+                    <div
+                      className={`${analyticsExportMessage ? "mt-4 " : ""}rounded-xl border px-4 py-3 text-sm ${noticeClassName(reportDownloadMessage)}`}
+                    >
+                      {reportDownloadMessage}
+                    </div>
+                  ) : null}
+                  {dashboard.reportMessage ? (
+                    <div
+                      className={`${analyticsExportMessage || reportDownloadMessage ? "mt-4 " : ""}rounded-xl border px-4 py-3 text-sm ${noticeClassName(dashboard.reportMessage)}`}
+                    >
+                      {dashboard.reportMessage}
+                    </div>
+                  ) : null}
                 </div>
-                <div className="mt-5 rounded-2xl bg-slate-50 p-5 text-sm leading-relaxed text-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                  {dashboard.report ??
-                    "No report generated yet. Hit the button to generate a summary of the live registry data."}
-                </div>
-                {analyticsExportMessage ? (
-                  <div
-                    className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(analyticsExportMessage)}`}
-                  >
-                    {analyticsExportMessage}
-                  </div>
-                ) : null}
-                {reportDownloadMessage ? (
-                  <div
-                    className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeClassName(reportDownloadMessage)}`}
-                  >
-                    {reportDownloadMessage}
-                  </div>
-                ) : null}
-              </div>
+              ) : null}
             </section>
           ) : null}
 

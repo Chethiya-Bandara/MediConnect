@@ -1,4 +1,5 @@
 from collections import Counter
+import json
 from datetime import datetime, timedelta, timezone
 import re
 from typing import Any, Iterable
@@ -928,6 +929,129 @@ def _monthly_report_fallback(report_input: dict[str, Any]) -> str:
     )
 
 
+def _structured_monthly_report_fallback(report_input: dict[str, Any]) -> dict[str, Any]:
+    top_diagnoses = report_input.get("top_diagnoses") or []
+    anomalies = report_input.get("anomalies") or {}
+    performance = report_input.get("performance") or {}
+    open_anomalies = int(anomalies.get("open_count", 0) or 0)
+    total_anomalies = int(anomalies.get("total_count", 0) or 0)
+    slow_request_count = int(performance.get("slow_request_count", 0) or 0)
+    sla_ms = int(performance.get("sla_ms", SLA_MS) or SLA_MS)
+    leading_diagnosis = top_diagnoses[0]["label"] if top_diagnoses else "No diagnosis signal recorded"
+    leading_diagnosis_count = top_diagnoses[0]["count"] if top_diagnoses else 0
+
+    risk_items = [
+        f"{open_anomalies} open anomaly flag(s) remain unresolved out of {total_anomalies} total reviewed flags.",
+        f"{slow_request_count} request(s) exceeded the {sla_ms} ms SLA threshold in the latest performance sample.",
+    ]
+    if not top_diagnoses:
+        risk_items.append(
+            "Diagnosis trend quality is limited because no coded diagnosis signal was extracted from recent encounter notes."
+        )
+
+    recommendations = [
+        "Review open anomaly flags and close or escalate high-frequency events before the next reporting cycle.",
+        "Investigate slow-request hotspots and prioritise the noisiest backend paths against the SLA target.",
+    ]
+    if top_diagnoses:
+        recommendations.append(
+            f"Monitor the leading diagnosis signal, {leading_diagnosis}, and verify whether the recent rise reflects demand or data-entry concentration."
+        )
+    else:
+        recommendations.append(
+            "Improve diagnosis note structure so monthly reporting can produce stronger trend analysis."
+        )
+
+    return {
+        "title": "Monthly National Health Summary",
+        "subtitle": "Ministry analytics and operations brief",
+        "generated_for": report_input.get("generated_for"),
+        "generated_at": report_input.get("generated_at"),
+        "reporting_window": "Last 30 days",
+        "executive_summary": [
+            f"{report_input.get('registered_patients', 0)} registered patients, {report_input.get('registered_doctors', 0)} registered doctors, and {report_input.get('registered_organisations', 0)} registered organisations are currently reflected in the ministry view.",
+            f"The strongest diagnosis signal in recent encounter notes is {leading_diagnosis} with {leading_diagnosis_count} recorded case(s).",
+            f"The system logged {report_input.get('audit_events_last_24_hours', 0)} audit event(s) in the last 24 hours.",
+        ],
+        "key_metrics": [
+            {"label": "Registered Organisations", "value": str(report_input.get("registered_organisations", 0))},
+            {"label": "Approved / Active Organisations", "value": str(report_input.get("approved_organisations", 0))},
+            {"label": "Pending Organisations", "value": str(report_input.get("pending_organisations", 0))},
+            {"label": "Registered Doctors", "value": str(report_input.get("registered_doctors", 0))},
+            {"label": "Approved / Active Doctors", "value": str(report_input.get("approved_doctors", 0))},
+            {"label": "Pending Doctors", "value": str(report_input.get("pending_doctors", 0))},
+            {"label": "Registered Patients", "value": str(report_input.get("registered_patients", 0))},
+            {"label": "Encounters in Last 30 Days", "value": str(report_input.get("encounters_last_30_days", 0))},
+            {"label": "Audit Events in Last 24 Hours", "value": str(report_input.get("audit_events_last_24_hours", 0))},
+        ],
+        "top_diagnoses": top_diagnoses,
+        "operational_highlights": [
+            f"{report_input.get('approved_organisations', 0)} organisation(s) are currently approved or active.",
+            f"{report_input.get('approved_doctors', 0)} doctor account(s) are currently approved or active.",
+            f"{report_input.get('encounters_last_30_days', 0)} encounter(s) were recorded during the reporting window.",
+        ],
+        "risk_items": risk_items,
+        "recommendations": recommendations,
+        "data_limitations": report_input.get("data_limitations") or [],
+        "narrative_text": _monthly_report_fallback(report_input),
+    }
+
+
+def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        cleaned = cleaned.replace("json\n", "", 1).replace("json\r\n", "", 1)
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(cleaned[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _generate_monthly_ai_report_structure(report_input: dict[str, Any]) -> dict[str, Any] | None:
+    prompt = (
+        "Return a strict JSON object for a ministry monthly report. "
+        "Use only the provided data. Do not include markdown or commentary outside JSON. "
+        "JSON keys must be: executive_summary, operational_highlights, risk_items, recommendations. "
+        "Each value must be an array of 2 to 4 concise bullet strings for an internal ministry audience."
+    )
+    answer, issue = call_gemini_assistant(
+        {
+            "message": prompt,
+            "history": [],
+            "moh_admin_context": report_input,
+        }
+    )
+    _ = issue
+    if not answer:
+        return None
+
+    parsed = _extract_json_object(answer)
+    if not parsed:
+        return None
+
+    normalized: dict[str, list[str]] = {}
+    for key in ("executive_summary", "operational_highlights", "risk_items", "recommendations"):
+        values = parsed.get(key)
+        if not isinstance(values, list):
+            return None
+        cleaned_items = [
+            " ".join(str(item).split())
+            for item in values
+            if isinstance(item, str) and item.strip()
+        ][:4]
+        if not cleaned_items:
+            return None
+        normalized[key] = cleaned_items
+
+    return normalized
+
+
 def _generate_monthly_ai_report(report_input: dict[str, Any]) -> str | None:
     prompt = (
         "Generate a monthly MOH admin report that summarizes the provided national health statistics. "
@@ -1807,7 +1931,12 @@ def generate_report(current_user: dict = Depends(HealthMinistryOnly)):
         ],
     }
 
-    report = _generate_monthly_ai_report(report_input) or _monthly_report_fallback(report_input)
+    report = _structured_monthly_report_fallback(report_input)
+    ai_sections = _generate_monthly_ai_report_structure(report_input)
+    if ai_sections:
+        report.update(ai_sections)
+    else:
+        report["narrative_text"] = _generate_monthly_ai_report(report_input) or report["narrative_text"]
 
     return {
         "report": report,

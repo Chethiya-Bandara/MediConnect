@@ -41,6 +41,7 @@ import type {
   ManagedMedicineItem,
   ManagedMedicinePayload,
   ManagedOrganisationItem,
+  MonthlyReport,
   PatientRegistryItem,
   PatientRegistryStatus,
   PendingAdminItem,
@@ -80,7 +81,7 @@ function createEmptyStats(): HealthMinistryDashboardStats {
 function buildOverviewStats(
   dashboardStats: HealthMinistryDashboardStats,
   topDiagnoses: DiagnosisMetric[],
-  report: string | null,
+  report: MonthlyReport | null,
 ): HealthMinistryOverviewStats {
   return {
     totalIncidence: dashboardStats.totalPatients,
@@ -102,7 +103,7 @@ export function useHealthMinistryAdminDashboard() {
   const [auditLogs, setAuditLogs] = useState<HealthMinistryAuditLog[]>([]);
   const [incidence, setIncidence] = useState<DiagnosisMetric[]>([]);
   const [topDiagnoses, setTopDiagnoses] = useState<DiagnosisMetric[]>([]);
-  const [report, setReport] = useState<string | null>(null);
+  const [report, setReport] = useState<MonthlyReport | null>(null);
   const [reportGeneratedAt, setReportGeneratedAt] = useState<string | null>(null);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
@@ -526,13 +527,13 @@ export function useHealthMinistryAdminDashboard() {
       const response = await generateMonthlyReport();
       setReport(response.report);
       setReportGeneratedAt(response.generatedAt);
-      setReportMessage("Monthly report generated.");
-      return true;
+      setReportMessage(null);
+      return response;
     } catch (error) {
       setReport(null);
       setReportGeneratedAt(null);
       setReportMessage(error instanceof Error ? error.message : "Monthly report failed.");
-      return false;
+      return null;
     } finally {
       setIsGeneratingReport(false);
     }

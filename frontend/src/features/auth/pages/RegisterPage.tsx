@@ -729,7 +729,7 @@ export function RegisterPage() {
                   <small>
                     {selectedNicImageName
                       ? "Selected image will be sent to Gemini for NIC verification before registration succeeds."
-                      : "Max 5MB • JPG or PNG • registration stays blocked until verification passes"}
+                      : "Max 5MB • JPG or PNG • upload both sides of the NIC"}
                   </small>
                 </label>
                 {errors.nicImage?.message && (

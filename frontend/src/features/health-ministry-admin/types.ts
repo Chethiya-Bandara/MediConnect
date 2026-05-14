@@ -32,6 +32,32 @@ export interface HealthMinistryOverviewStats {
   reportReady: boolean;
 }
 
+export interface MonthlyReportMetric {
+  label: string;
+  value: string;
+}
+
+export interface MonthlyReportDiagnosis {
+  label: string;
+  count: number;
+}
+
+export interface MonthlyReport {
+  title: string;
+  subtitle: string | null;
+  generatedFor: string | null;
+  generatedAt: string | null;
+  reportingWindow: string | null;
+  executiveSummary: string[];
+  keyMetrics: MonthlyReportMetric[];
+  topDiagnoses: MonthlyReportDiagnosis[];
+  operationalHighlights: string[];
+  riskItems: string[];
+  recommendations: string[];
+  dataLimitations: string[];
+  narrativeText: string | null;
+}
+
 export interface HealthMinistryDashboardStats {
   totalOrganisations: number;
   pendingOrganisations: number;

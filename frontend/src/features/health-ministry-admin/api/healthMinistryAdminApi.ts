@@ -10,6 +10,7 @@ import type {
   ManagedOrganisationItem,
   ManagedMedicineItem,
   ManagedMedicinePayload,
+  MonthlyReport,
   PatientRegistryItem,
   PatientRegistryStatus,
   PendingAdminItem,
@@ -24,7 +25,21 @@ interface IncidenceRequestPayload {
 }
 
 interface MonthlyReportResponse {
-  report?: string;
+  report?: {
+    title?: string | null;
+    subtitle?: string | null;
+    generated_for?: string | null;
+    generated_at?: string | null;
+    reporting_window?: string | null;
+    executive_summary?: string[] | null;
+    key_metrics?: Array<{ label?: string | null; value?: string | number | null }> | null;
+    top_diagnoses?: Array<{ label?: string | null; count?: string | number | null }> | null;
+    operational_highlights?: string[] | null;
+    risk_items?: string[] | null;
+    recommendations?: string[] | null;
+    data_limitations?: string[] | null;
+    narrative_text?: string | null;
+  } | null;
   generated_at?: string;
 }
 
@@ -527,7 +542,46 @@ export async function generateMonthlyReport() {
   );
 
   return {
-    report: response.report ?? "No report content returned.",
+    report: normalizeMonthlyReport(response.report),
     generatedAt: response.generated_at ?? null,
+  };
+}
+
+function normalizeStringList(value: string[] | null | undefined) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function normalizeMonthlyReport(report: MonthlyReportResponse["report"]): MonthlyReport | null {
+  if (!report) return null;
+
+  return {
+    title: report.title?.trim() || "Monthly National Health Summary",
+    subtitle: report.subtitle?.trim() || null,
+    generatedFor: report.generated_for?.trim() || null,
+    generatedAt: report.generated_at?.trim() || null,
+    reportingWindow: report.reporting_window?.trim() || null,
+    executiveSummary: normalizeStringList(report.executive_summary),
+    keyMetrics: Array.isArray(report.key_metrics)
+      ? report.key_metrics
+          .map((item) => ({
+            label: item.label?.trim() || "",
+            value: item.value == null ? "" : String(item.value),
+          }))
+          .filter((item) => item.label && item.value)
+      : [],
+    topDiagnoses: Array.isArray(report.top_diagnoses)
+      ? report.top_diagnoses
+          .map((item) => ({
+            label: item.label?.trim() || "",
+            count: Number(item.count ?? 0),
+          }))
+          .filter((item) => item.label)
+      : [],
+    operationalHighlights: normalizeStringList(report.operational_highlights),
+    riskItems: normalizeStringList(report.risk_items),
+    recommendations: normalizeStringList(report.recommendations),
+    dataLimitations: normalizeStringList(report.data_limitations),
+    narrativeText: report.narrative_text?.trim() || null,
   };
 }
