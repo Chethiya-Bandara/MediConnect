@@ -2442,7 +2442,6 @@ export function HealthMinistryAdminDashboardPage() {
                             <tr>
                               <th className="px-4 py-3 font-semibold">Organisation</th>
                               <th className="px-4 py-3 font-semibold">Status</th>
-                              <th className="px-4 py-3 font-semibold">Linked facility</th>
                               <th className="px-4 py-3 font-semibold">Created</th>
                               <th className="px-4 py-3 text-right font-semibold">Action</th>
                             </tr>
@@ -2470,11 +2469,6 @@ export function HealthMinistryAdminDashboardPage() {
                                     </td>
                                     <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
                                       {formatStatusLabel(row.status)}
-                                    </td>
-                                    <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
-                                      {row.linkedTable
-                                        ? `${formatStatusLabel(row.linkedTable)} #${row.linkedRecordId ?? "?"}`
-                                        : "Organisation only"}
                                     </td>
                                     <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
                                       {formatDisplayDate(row.createdAt)}
@@ -2535,7 +2529,6 @@ export function HealthMinistryAdminDashboardPage() {
                             <tr>
                               <th className="px-4 py-3 font-semibold">Organisation</th>
                               <th className="px-4 py-3 font-semibold">Status</th>
-                              <th className="px-4 py-3 font-semibold">Linked facility</th>
                               <th className="px-4 py-3 font-semibold">Created</th>
                               <th className="px-4 py-3 text-right font-semibold">Action</th>
                             </tr>
@@ -2563,11 +2556,6 @@ export function HealthMinistryAdminDashboardPage() {
                                     </td>
                                     <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
                                       {formatStatusLabel(row.status)}
-                                    </td>
-                                    <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
-                                      {row.linkedTable
-                                        ? `${formatStatusLabel(row.linkedTable)} #${row.linkedRecordId ?? "?"}`
-                                        : "Organisation only"}
                                     </td>
                                     <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
                                       {formatDisplayDate(row.createdAt)}
