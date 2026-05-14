@@ -4,6 +4,7 @@ export const endpoints = {
     me: "/me",
     register: "/register",
     forgotPassword: "/forgot-password",
+    resetPassword: "/reset-password",
   },
   patient: {
     overview: "/patient/dashboard/overview",

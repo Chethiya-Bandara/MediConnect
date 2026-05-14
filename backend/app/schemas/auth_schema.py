@@ -3,6 +3,7 @@ import re
 from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from app.utils.helpers import get_password_errors, is_valid_password
 
 NIC_PATTERN = re.compile(r"^(?:\d{9}[VvXx]|\d{12})$")
 SLMC_LICENSE_PATTERN = re.compile(r"^SLMC-\d{5}$")
@@ -253,3 +254,25 @@ class LoginRequest(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    accessToken: str = Field(min_length=1, max_length=4096)
+    password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("accessToken")
+    @classmethod
+    def validate_access_token(cls, value: str):
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Recovery token is required")
+        return cleaned
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str):
+        cleaned = value.strip()
+        if not is_valid_password(cleaned):
+            errors = get_password_errors(cleaned)
+            raise ValueError(errors[0] if errors else "Password does not meet complexity rules")
+        return cleaned

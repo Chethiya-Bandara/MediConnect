@@ -3,6 +3,7 @@ import type {
   AuthUser,
   LoginFormValues,
   RegisterFormValues,
+  ResetPasswordFormValues,
 } from "../../../types/auth";
 import { apiRequest } from "../../../lib/api/client";
 import { endpoints } from "../../../lib/api/endpoints";
@@ -117,5 +118,29 @@ export async function requestPasswordReset(email: string): Promise<AuthActionRes
   return {
     success: true,
     message: response.message || "Reset link request sent",
+  };
+}
+
+export async function confirmPasswordReset(
+  accessToken: string,
+  payload: ResetPasswordFormValues,
+): Promise<AuthActionResult> {
+  const response = await apiRequest<{ message?: string }>(
+    endpoints.auth.resetPassword,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        accessToken,
+        password: payload.password,
+      }),
+    },
+    {
+      auth: false,
+    },
+  );
+
+  return {
+    success: true,
+    message: response.message || "Password reset successful",
   };
 }

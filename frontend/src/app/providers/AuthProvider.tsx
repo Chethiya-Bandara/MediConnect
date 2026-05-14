@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  confirmPasswordReset as confirmPasswordResetApi,
   getCurrentUser,
   loginRequest,
   registerRequest,
@@ -11,6 +12,7 @@ import type {
   AuthUser,
   LoginFormValues,
   RegisterFormValues,
+  ResetPasswordFormValues,
   UserRole,
 } from "../../types/auth";
 import {
@@ -29,6 +31,10 @@ interface AuthContextValue {
   login: (payload: LoginFormValues, rememberDevice?: boolean) => Promise<AuthActionResult>;
   register: (payload: RegisterFormValues) => Promise<AuthActionResult>;
   requestPasswordReset: (email: string) => Promise<AuthActionResult>;
+  confirmPasswordReset: (
+    accessToken: string,
+    payload: ResetPasswordFormValues,
+  ) => Promise<AuthActionResult>;
   updateUser: (payload: Partial<AuthUser>) => void;
   logout: () => void;
 }
@@ -211,6 +217,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const confirmPasswordReset = async (
+    accessToken: string,
+    payload: ResetPasswordFormValues,
+  ): Promise<AuthActionResult> => {
+    try {
+      return await confirmPasswordResetApi(accessToken, payload);
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Server error",
+      };
+    }
+  };
+
   const updateUser = (payload: Partial<AuthUser>) => {
     setUser((current) => {
       if (!current) {
@@ -239,6 +259,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       register,
       requestPasswordReset,
+      confirmPasswordReset,
       updateUser,
       logout,
     }),

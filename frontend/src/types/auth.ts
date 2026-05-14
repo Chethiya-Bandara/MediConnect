@@ -36,6 +36,11 @@ export interface LoginFormValues {
   password: string;
 }
 
+export interface ResetPasswordFormValues {
+  password: string;
+  confirmPassword: string;
+}
+
 export interface RegisterFormValues {
   fullName: string;
   preferredName: string;

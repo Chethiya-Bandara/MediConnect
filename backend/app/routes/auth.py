@@ -1,12 +1,15 @@
 import logging
+import os
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
-from app.config.supabase import supabase, supabase_admin
+import httpx
+from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
+from app.config.supabase import anon_key as supabase_anon_key, supabase, supabase_admin, url as supabase_url
 from app.middleware.file_validator import validate_upload_file
 from app.middleware.role_checker import build_user_context
 from app.schemas.auth_schema import (
     LoginRequest,
+    PasswordResetConfirmRequest,
     PasswordResetRequest,
     RegisterRequest,
 )
@@ -30,6 +33,7 @@ _STATUS_ALIASES = {
 }
 
 _BLOCKED_ORGANISATION_STATUSES = {"rejected", "suspended"}
+_LOCAL_FRONTEND_FALLBACK = "http://127.0.0.1:5173"
 
 def _normalize_for_match(value: str) -> str:
     return "".join(ch.lower() for ch in value if ch.isalnum())
@@ -42,6 +46,33 @@ def _normalize_gender(value: str) -> str:
     if normalized in {"f", "female"}:
         return "female"
     return normalized
+
+
+def _resolve_frontend_base_url(request: Request | None = None) -> str:
+    configured = os.getenv("FRONTEND_URL", "").strip()
+    if configured:
+        return configured.rstrip("/")
+
+    if request is not None:
+        forwarded_origin = request.headers.get("origin", "").strip()
+        if forwarded_origin:
+            return forwarded_origin.rstrip("/")
+
+        referer = request.headers.get("referer", "").strip()
+        if referer:
+            try:
+                parsed = httpx.URL(referer)
+                if parsed.scheme and parsed.host:
+                    port = f":{parsed.port}" if parsed.port is not None else ""
+                    return f"{parsed.scheme}://{parsed.host}{port}".rstrip("/")
+            except Exception:
+                pass
+
+    return _LOCAL_FRONTEND_FALLBACK
+
+
+def _build_password_reset_redirect_url(request: Request | None = None) -> str:
+    return f"{_resolve_frontend_base_url(request)}/reset-password"
 
 
 def _verify_registration_nic_document(
@@ -511,9 +542,16 @@ def login(data: LoginRequest):
 
 
 @router.post("/forgot-password")
-def forgot_password(payload: PasswordResetRequest):
+def forgot_password(payload: PasswordResetRequest, request: Request):
+    redirect_to = _build_password_reset_redirect_url(request)
+
     try:
-        supabase.auth.reset_password_for_email(payload.email)
+        supabase.auth.reset_password_for_email(
+            payload.email,
+            {
+                "redirect_to": redirect_to,
+            },
+        )
     except AuthApiError as exc:
         # Intentional: same response regardless of whether the email exists (account enumeration guard).
         logging.debug("Password reset AuthApiError for %s: %s", payload.email, exc)
@@ -526,6 +564,46 @@ def forgot_password(payload: PasswordResetRequest):
     return {
         "success": True,
         "message": "If an account exists for that email, a reset link has been sent.",
+    }
+
+
+@router.post("/reset-password")
+def confirm_password_reset(payload: PasswordResetConfirmRequest):
+    try:
+        response = httpx.put(
+            f"{supabase_url}/auth/v1/user",
+            headers={
+                "apikey": supabase_anon_key,
+                "Authorization": f"Bearer {payload.accessToken}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "password": payload.password,
+            },
+            timeout=10.0,
+        )
+
+        if response.status_code >= 400:
+            detail = "Password reset link is invalid or expired."
+            try:
+                payload_json = response.json()
+                message = payload_json.get("msg") or payload_json.get("message") or payload_json.get("error_description")
+                if isinstance(message, str) and message.strip():
+                    detail = message.strip()
+            except Exception:
+                pass
+            raise HTTPException(status_code=400, detail=detail)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Password could not be reset right now",
+        )
+
+    return {
+        "success": True,
+        "message": "Password reset successful. You can now log in with the new password.",
     }
 
 
