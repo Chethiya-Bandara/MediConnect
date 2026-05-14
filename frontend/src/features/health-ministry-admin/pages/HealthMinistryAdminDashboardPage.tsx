@@ -59,13 +59,13 @@ type DashboardView =
   | "performance"
   | "investigation";
 type ThemeMode = "light" | "dark";
-type ApprovalEntityFilter = "organisations" | "doctors" | "admins";
+type ApprovalEntityFilter = "doctors" | "admins";
 
 const views = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "approvals", label: "Approvals", icon: UserRoundCheck },
-  { id: "people", label: "Doctors & Admins", icon: Users },
+  { id: "approvals", label: " User Approvals", icon: UserRoundCheck },
   { id: "deletions", label: "Deletion Requests", icon: ShieldAlert },
+  { id: "people", label: "Doctors & Admins Registry", icon: Users },
   { id: "organisations", label: "Organisation Registry", icon: Building2 },
   { id: "medicines", label: "Medicine Registry", icon: Pill },
   { id: "analytics", label: "Analytics & Reports", icon: BarChart3 },
@@ -246,7 +246,6 @@ const approvalEntityOptions: Array<{
   value: ApprovalEntityFilter;
   label: string;
 }> = [
-  { value: "organisations", label: "Organisations" },
   { value: "doctors", label: "Doctors" },
   { value: "admins", label: "Admin Roles" },
 ];
@@ -1045,7 +1044,7 @@ export function HealthMinistryAdminDashboardPage() {
   const [auditSearch, setAuditSearch] = useState("");
   const [approvalsSearch, setApprovalsSearch] = useState("");
   const [approvalEntityFilter, setApprovalEntityFilter] =
-    useState<ApprovalEntityFilter>("organisations");
+    useState<ApprovalEntityFilter>("doctors");
   const [analyticsExportMessage, setAnalyticsExportMessage] = useState<string | null>(null);
   const [auditRoleFilter, setAuditRoleFilter] = useState("ALL");
   const [auditActionFilter, setAuditActionFilter] = useState("ALL");
@@ -1217,6 +1216,10 @@ export function HealthMinistryAdminDashboardPage() {
       return !deferredApprovalSearch || haystack.includes(deferredApprovalSearch);
     });
   }, [approvalEntityFilter, dashboard.pendingAdmins, deferredApprovalSearch]);
+
+  const pendingAdminsOnly = filteredPendingAdmins.filter(
+    (row) => (row.status ?? "").toLowerCase() === "pending"
+  );
 
   const filteredManagedOrganisations = useMemo(() => {
     return dashboard.managedOrganisations.filter((row) => {
@@ -1906,110 +1909,31 @@ export function HealthMinistryAdminDashboardPage() {
                     Visible results
                   </p>
                   <p className="mt-2 text-2xl font-extrabold">
-                    {approvalEntityFilter === "organisations"
-                      ? filteredPendingOrganisations.length
-                      : approvalEntityFilter === "doctors"
-                        ? filteredPendingDoctors.length
-                        : filteredPendingAdmins.length}
+                    {approvalEntityFilter === "doctors"
+                      ? filteredPendingDoctors.length
+                      : approvalEntityFilter === "admins"
+                        ? filteredPendingAdmins.length
+                        : "Admin count not available right now"}
                   </p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {approvalEntityFilter === "organisations"
-                      ? "Hospitals and pharmacies in the queue"
-                      : approvalEntityFilter === "doctors"
-                        ? "Doctor registrations awaiting review"
+                    {approvalEntityFilter === "doctors"
+                      ? "Doctor registrations awaiting review"
+                      : approvalEntityFilter === "admins"
+                        ? "Admin-role accounts under ministry control"
                         : "Admin-role accounts under ministry control"}
                   </p>
                 </div>
               </section>
 
-              <div className="space-y-8">
-                {approvalEntityFilter === "organisations" ? (
-                  <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <div className="flex flex-col gap-2 border-b border-slate-200 px-6 py-5 dark:border-slate-700">
-                    <h2 className="font-headline text-lg font-bold">
-                      Organisations ({filteredPendingOrganisations.length})
-                    </h2>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                      Hospitals and pharmacies waiting for ministry onboarding approval.
-                    </p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                        <tr>
-                          <th className="px-6 py-4">Name</th>
-                          <th className="px-6 py-4">Type</th>
-                          <th className="px-6 py-4">Status</th>
-                          <th className="px-6 py-4">Submitted</th>
-                          <th className="px-6 py-4 text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {filteredPendingOrganisations.length > 0 ? (
-                          filteredPendingOrganisations.map((row) => (
-                            <tr key={row.id}>
-                              <td className="px-6 py-4">
-                                <div className="font-semibold">
-                                  {row.name ?? `Organisation ${row.id}`}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                  ID: {row.id}
-                                </div>
-                              </td>
-                              <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
-                                <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                                  {row.type ?? "Unknown"}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
-                                {formatStatusLabel(row.status ?? "pending")}
-                              </td>
-                              <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
-                                {formatDisplayDate(row.createdAt)}
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="flex justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void handleOrganizationDecision("approved", row.id)
-                                    }
-                                    disabled={dashboard.isSubmittingApproval}
-                                    className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                                  >
-                                    <CheckCircle2 size={18} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void handleOrganizationDecision("rejected", row.id)
-                                    }
-                                    disabled={dashboard.isSubmittingApproval}
-                                    className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                                  >
-                                    <AlertTriangle size={18} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td
-                              colSpan={5}
-                              className="px-6 py-8 text-center text-slate-500 dark:text-slate-400"
-                            >
-                              {deferredApprovalSearch
-                                  ? "No organisation approvals matched your current search."
-                                  : "No pending organisation approvals right now."}
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+              {dashboard.approvalsMessage ? (
+                  <div
+                    className={`rounded-2xl border px-5 py-4 text-sm ${noticeClassName(dashboard.approvalsMessage)}`}
+                  >
+                    {dashboard.approvalsMessage}
                   </div>
                 ) : null}
+
+              <div className="space-y-8">
 
                 {approvalEntityFilter === "doctors" ? (
                   <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -2119,8 +2043,8 @@ export function HealthMinistryAdminDashboardPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {filteredPendingAdmins.length > 0 ? (
-                          filteredPendingAdmins.map((row) => (
+                        {pendingAdminsOnly.length > 0 ? (
+                          pendingAdminsOnly.map((row) => (
                             <tr key={row.userId}>
                               <td className="px-6 py-4">
                                 <div className="font-semibold">
@@ -2232,14 +2156,6 @@ export function HealthMinistryAdminDashboardPage() {
                   </div>
                 ) : null}
               </div>
-
-              {dashboard.approvalsMessage ? (
-                <div
-                  className={`rounded-2xl border px-5 py-4 text-sm ${noticeClassName(dashboard.approvalsMessage)}`}
-                >
-                  {dashboard.approvalsMessage}
-                </div>
-              ) : null}
             </section>
           ) : null}
 
