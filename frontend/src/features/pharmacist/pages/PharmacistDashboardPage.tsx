@@ -1127,7 +1127,7 @@ export function PharmacistDashboardPage() {
 
                   {!looksLikeDhid ? (
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-                      DHID ekak enter karama me thanata e patientge valid active prescriptions witharai pennanawa.
+                      When you enter a DHID, only that patient's valid active prescriptions will be shown here.
                     </div>
                   ) : dashboard.isLoadingList ? (
                     <div className="rounded-2xl bg-slate-50 px-4 py-10 text-center text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
@@ -1171,7 +1171,7 @@ export function PharmacistDashboardPage() {
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-                      Me DHID ekata valid period eka athule active prescriptions hambune na.
+                      No active prescriptions were found for this DHID during the valid period.
                     </div>
                   )}
                 </div>

@@ -669,6 +669,7 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
 
   const lookupPrescription = (queryOverride?: string) => {
     const query = normalizeLookupQuery(queryOverride ?? searchQuery);
+    const isDhidLookup = query.startsWith("dhid-");
     setActionMessage(null);
 
     if (!query) {
@@ -684,6 +685,11 @@ export function usePharmacistDashboard(pharmacistId?: string, organisationId?: n
       setSelectedPrescriptionId(exactMatch.id);
       setActionMessage("Verify / Lookup mode successful");
       return true;
+    }
+
+    if (isDhidLookup) {
+      setActionMessage("No exact DHID match found. Enter a complete DHID to continue.");
+      return false;
     }
 
     const partialMatch = filteredPrescriptions[0];
