@@ -134,18 +134,17 @@ export function PharmacyAdminDashboardPage() {
   }, []);
 
   useEffect(() => {
-    setDrafts((current) => {
-      const next = { ...current };
-      for (const item of dashboard.inventory) {
-        if (!next[item.id]) {
-          next[item.id] = {
+    setDrafts(
+      Object.fromEntries(
+        dashboard.inventory.map((item) => [
+          item.id,
+          {
             stockQuantity: String(item.stockQuantity ?? 0),
             unitPrice: String(item.unitPrice ?? 0),
-          };
-        }
-      }
-      return next;
-    });
+          },
+        ]),
+      ),
+    );
   }, [dashboard.inventory]);
   
 
