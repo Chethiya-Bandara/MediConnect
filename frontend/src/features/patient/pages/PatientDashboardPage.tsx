@@ -674,6 +674,7 @@ export function PatientDashboardPage() {
 
   const displayName = overview?.user.name || user?.name || user?.email?.split("@")[0] || "Patient";
   const legalName = overview?.user.legal_name || user?.legalName || "Not available";
+  const patientDhid = overview?.patient.dhid || "Not available";
   const latestHealthSnapshot = overview?.patient.health_snapshot ?? null;
   const upcomingAppointments = appointments.filter(
     (item) => item.status.toLowerCase() === "pending"
@@ -1528,7 +1529,32 @@ export function PatientDashboardPage() {
             <button
               type="button"
               onClick={() => setPage("settings")}
-              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-slate-200 text-sm font-black tracking-[0.08em] text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-700 dark:text-slate-100"
+              className="hidden items-center gap-4 rounded-[1.4rem] border border-slate-200/90 bg-white/90 px-4 py-2.5 text-left shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/75 dark:hover:border-slate-600 dark:hover:bg-slate-800/80 sm:flex"
+            >
+              <div className="min-w-0 border-r border-slate-200 pr-4 dark:border-slate-700">
+                <p className="truncate text-sm font-bold text-slate-900 dark:text-white">
+                  {displayName}
+                </p>
+                <p className="mt-1 truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                  {patientDhid}
+                </p>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-blue-50 text-sm font-black tracking-[0.08em] text-blue-700 shadow-sm dark:border-slate-800 dark:bg-slate-700 dark:text-slate-100">
+                {profilePhoto ? (
+                  <img
+                    src={profilePhoto}
+                    alt={`${displayName} avatar`}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  getInitials(displayName)
+                )}
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage("settings")}
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-slate-200 text-sm font-black tracking-[0.08em] text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-700 dark:text-slate-100 sm:hidden"
             >
               {profilePhoto ? (
                 <img
