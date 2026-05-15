@@ -2797,7 +2797,6 @@ export function HealthMinistryAdminDashboardPage() {
                           <th className="px-4 py-3 font-semibold">Unit</th>
                           <th className="px-4 py-3 font-semibold w-[120px]">Wholesale</th>
                           <th className="px-4 py-3 font-semibold w-[120px]">Retail</th>
-                          {/* <th className="px-4 py-3 font-semibold">Inventory links</th> removed for table clarity */}
                           <th className="px-4 py-3 font-semibold w-[120px]">Created</th>
                           <th className="px-4 py-3 text-right font-semibold w-[180px]">Action</th>
                         </tr>
@@ -2871,9 +2870,6 @@ export function HealthMinistryAdminDashboardPage() {
                                     {formatLkr(Number(draft.retailPrice))}
                                   </div>
                                 </td>
-                                {/* <td className="px-4 py-4 align-top text-slate-500 dark:text-slate-400">
-                                  {row.inventoryLinks > 0 ? `${row.inventoryLinks} stock row(s)` : "Not linked"}
-                                </td> */}
                                 <td className="px-4 py-4 align-top text-slate-500 dark:text-slate-400">
                                   {formatDisplayDate(row.createdAt)}
                                 </td>

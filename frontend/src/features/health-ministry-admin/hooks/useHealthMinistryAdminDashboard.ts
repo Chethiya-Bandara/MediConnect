@@ -415,7 +415,6 @@ export function useHealthMinistryAdminDashboard() {
       setPharmacistsRegistry(pharmacists);
       setHospitalAdminsRegistry(hospitalAdmins);
     } catch {
-      // silently fail — individual lists degrade gracefully
     } finally {
       setIsLoadingRegistry(false);
     }
@@ -568,12 +567,10 @@ export function useHealthMinistryAdminDashboard() {
     isCreatingOrganisation,
     isSubmittingMedicine,
     isGeneratingReport,
-    // deletion requests
     deletionRequests,
     deletionMessage,
     isLoadingDeletions,
     isSubmittingDeletion,
-    // people registries
     patientsRegistry,
     doctorsRegistry,
     pharmacistsRegistry,

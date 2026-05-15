@@ -1009,12 +1009,11 @@ export function DoctorDashboardPage() {
   const [bgIndex, setBgIndex] = useState(0);
 
   useEffect(() => {
-    // Only run the timer if the user is actually on the home page
     if (page !== "home") return;
 
     const interval = setInterval(() => {
       setBgIndex((prev) => (prev + 1) % WELCOME_IMAGES.length);
-    }, 5000); // Change image every 5 seconds
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [page]);
@@ -1853,7 +1852,6 @@ export function DoctorDashboardPage() {
         <div className="flex-1 px-8 pb-12 pt-24">
           {page === "home" ? (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 flex flex-col gap-12 pb-16">
-              {/* 1. HERO SECTION (Slideshow) */}
               <section className="relative -mx-4 md:-mx-8 -mt-4 md:-mt-8 flex min-h-[70vh] items-center justify-center overflow-hidden shadow-2xl shadow-blue-900/10">
                 {/* Background Slideshow Layer */}
                 <div className="absolute inset-0 z-0">
@@ -1902,7 +1900,7 @@ export function DoctorDashboardPage() {
                 </div>
               </section>
 
-              {/* SECTION: CLINICAL ECOSYSTEM (DR DASHBOARD) */}
+              {/* Dashboard */}
               <section className="mt-6 border-t border-slate-100 pt-6 dark:border-white/5">
                 <div className="mb-6 flex flex-col items-start gap-4">
                   <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300">
@@ -2034,7 +2032,7 @@ export function DoctorDashboardPage() {
                 </div>
               </section>
 
-              {/* 3. QUICK ACTIONS GRID (Mapped to Doctor Nav Items) */}
+              {/* 3. QUICK ACTIONS GRID */}
               <section>
                 <div className="mb-6 flex items-center justify-between">
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
@@ -3639,7 +3637,6 @@ export function DoctorDashboardPage() {
                 </div>
 
                 <div className="space-y-6">
-                  {/* Consistent solid Sky Blue theme */}
                   <div className="rounded-3xl border border-sky-100 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm dark:border-sky-900/50 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
                     <div className="mb-6 flex items-start justify-between gap-4">
                       <div>

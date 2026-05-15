@@ -12,7 +12,6 @@ interface AuditLogRow {
   user_id: string | null;
   organisation_id: number | string | null;
   notes: string | null;
-  // enriched fields from dashboard (may be absent in direct fetch)
   actorName?: string | null;
   actorRole?: string | null;
   organisationName?: string | null;

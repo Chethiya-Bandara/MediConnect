@@ -885,7 +885,7 @@ export function PatientDashboardPage() {
 
     const interval = setInterval(() => {
       setBgIndex((prev) => (prev + 1) % WELCOME_IMAGES.length);
-    }, 5000); // Change image every 5 seconds
+    }, 5000); 
 
     return () => clearInterval(interval);
   }, [page]);
@@ -1576,7 +1576,6 @@ export function PatientDashboardPage() {
         <div className="w-full flex-1 px-4 pb-28 pt-24 md:px-8 md:pb-12">
           {!isLoading && !dashboardError && page === "home" && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 flex flex-col gap-12 pb-16">
-              {/* 1. HERO SECTION (Slideshow) */}
               <section className="relative -mx-4 md:-mx-8 -mt-4 md:-mt-8 flex min-h-[70vh] items-center justify-center overflow-hidden shadow-2xl shadow-blue-900/10">
                 {/* Background Slideshow Layer */}
                 <div className="absolute inset-0 z-0">
@@ -1679,7 +1678,6 @@ export function PatientDashboardPage() {
                         {feature.desc}
                       </p>
 
-                      {/* Decorative Background Element */}
                       <div
                         className={`absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-${feature.color}-500/5 blur-2xl transition-opacity group-hover:opacity-100`}
                       />
@@ -1705,7 +1703,7 @@ export function PatientDashboardPage() {
                 </div>
               </section>
 
-              {/* 2. AT-A-GLANCE STATS (Blue & Green Theme) */}
+              {/* 2. STATS */}
               <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
                 <div className="group relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-8 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-slate-800/50">
                   <div className="flex items-center gap-4">
@@ -1808,7 +1806,6 @@ export function PatientDashboardPage() {
                     Consult Assistant
                   </button>
                 </div>
-                {/* Decorative patterns */}
                 <div className="absolute -right-10 -top-10 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
                 <div className="absolute -bottom-10 left-10 h-64 w-64 rounded-full bg-emerald-400/20 blur-3xl" />
               </section>
@@ -1848,7 +1845,6 @@ export function PatientDashboardPage() {
                   </div>
                 </div>
 
-                {/* UPDATE: DIGITAL ID CARD (Slightly adjusted for visual consistency) */}
                 <button
                   type="button"
                   onClick={() => setModal("digital-id")}
@@ -1866,7 +1862,7 @@ export function PatientDashboardPage() {
                 </button>
               </div>
 
-              {/* STATS GRID - Remains Standard for readability */}
+              {/* STATS GRID */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 {[
                   ["Upcoming Appointments", overview.stats.upcoming_appointments],
@@ -2716,7 +2712,6 @@ export function PatientDashboardPage() {
                   </div>
                 </div>
 
-                {/* 1. Added the linear sky blue gradient to the main container */}
                 <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.95fr)]">
                   <div className="rounded-[1.55rem] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-5 shadow-sm backdrop-blur-sm dark:border-slate-700/70 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
                     <div className="flex items-start justify-between gap-4">
