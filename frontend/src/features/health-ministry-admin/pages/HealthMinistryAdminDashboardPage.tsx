@@ -3336,11 +3336,6 @@ export function HealthMinistryAdminDashboardPage() {
               </p>
               <p>All rights reserved. Secured by Project MediConnect.</p>
             </div>
-            <div className="flex flex-wrap gap-6">
-              <span>Privacy Policy</span>
-              <span>Audit Terms</span>
-              <span>Security</span>
-            </div>
           </div>
         </footer>
       </div>
