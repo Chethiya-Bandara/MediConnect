@@ -554,7 +554,7 @@ def list_hospital_admins_registry(current_user: dict = Depends(HealthMinistryOnl
         except (TypeError, ValueError):
             organisation = None
         items.append({
-            "id": str(u["id"]),  # user_id is the stable identifier for hospital admins
+            "id": str(u["id"]),
             "user_id": u["id"],
             "name": u.get("name"),
             "email": u.get("email"),

@@ -28,7 +28,7 @@
 #   2. System rebuilds canonical payload
 #   3. SHA256 hash recomputed
 #   4. Signature verified against hash using doctor's public key
-#   5. Match → genuine ✅  Mismatch → tampered ❌
+#   5. Match → genuine Mismatch → tampered
 
 import json
 import base64

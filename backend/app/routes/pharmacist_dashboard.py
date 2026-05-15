@@ -1546,7 +1546,7 @@ def generate_bill(
             "inventory_id":   item.inventory_id,
             "medicine_name":  medicine_name,
             "quantity":       item.quantity,
-            "unit_price":     server_unit_price,   # ← always from DB
+            "unit_price":     server_unit_price,
             "line_total":     line_total,
         })
 

@@ -15,7 +15,7 @@ def mark_missed_appointments():
         .lt("end_time", cutoff) \
         .execute()
 
-    print("Updated missed appointments")
+    print("Updating missed appointments")
 
 
 scheduler = BackgroundScheduler()

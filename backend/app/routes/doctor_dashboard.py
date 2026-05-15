@@ -1799,10 +1799,10 @@ def create_availability_slot(
     if end_dt <= start_dt:
         raise HTTPException(status_code=400, detail="End time must be after start time")
     
-    # Ensure the doctor isn't creating slots for a time that has already passed
+    # Doctor isn't creating slots for a time that has already passed
     now = datetime.now(timezone.utc)
 
-    # If start_dt is 'naive' (no timezone), make it UTC for comparison
+
     if start_dt.tzinfo is None:
         start_dt = start_dt.replace(tzinfo=timezone.utc)
 

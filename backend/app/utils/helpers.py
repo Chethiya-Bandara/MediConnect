@@ -284,13 +284,6 @@ def is_valid_nic(nic: str) -> bool:
 
 # ── Search Query Sanitisation (B-5.1.2) ──────────────────────────────────────
 # Sanitises medicine search queries to prevent injection attacks.
-#
-# Even though Supabase uses parameterized queries (preventing SQL injection),
-# we still sanitise to:
-#   1. Remove LIKE wildcard abuse (% and _ characters)
-#   2. Strip dangerous special characters
-#   3. Limit query length
-#   4. Prevent NoSQL/pattern injection attempts
 
 def sanitize_search_query(query: str, max_length: int = 100) -> str:
     """

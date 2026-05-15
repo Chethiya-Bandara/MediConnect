@@ -20,7 +20,6 @@ _UNSET = object()
 
 
 def _build_httpx_client() -> httpx.Client:
-    # Supabase/PostgREST disconnects were coming from the default HTTP/2 pool.
     return httpx.Client(
         http2=False,
         follow_redirects=True,

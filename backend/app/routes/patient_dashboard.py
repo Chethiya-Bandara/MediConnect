@@ -1917,8 +1917,7 @@ def _book_slot_for_patient(context: dict, slot_id: int):
     
     now = datetime.now(timezone.utc)
 
-    # Parse the slot start time (ensure it's UTC-aware for comparison)
-    # Most Supabase SDKs return strings, so we parse it
+    # Parse the slot start time
     from dateutil import parser
     slot_start_dt = parser.isoparse(slot["start_time"])
 
@@ -3342,7 +3341,6 @@ def lookup_by_dhid(
         )
 
     # ── Always return 404 if not found (prevents enumeration) ─────
-    # Never reveal whether DHID exists or not to unauthorised callers
     if not patients:
         raise HTTPException(
             status_code=404,
