@@ -2826,8 +2826,7 @@ export function DoctorDashboardPage() {
                         </span>
                       ) : (
                         <span>
-                          No catalog match yet. Free-text is blocked now because dispensing must map
-                          to a saved medicine ID.
+                          No catalog match yet.
                         </span>
                       )}
                     </div>

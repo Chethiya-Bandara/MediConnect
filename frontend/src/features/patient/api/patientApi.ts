@@ -1,7 +1,7 @@
 import type {
   AvailableSlot,
   AssistantReply,
-  BookingOption,
+  BookingOptionsPayload,
   ConsentUpdateResult,
   DashboardAppointment,
   DashboardOverview,
@@ -38,10 +38,7 @@ export function updatePatientProfile(payload: {
 }
 
 export async function getBookingOptions() {
-  const response = await apiRequest<ApiListResponse<BookingOption>>(
-    endpoints.patient.bookingOptions,
-  );
-  return response.items;
+  return apiRequest<BookingOptionsPayload>(endpoints.patient.bookingOptions);
 }
 
 export async function getAvailableSlots(doctorId: number) {

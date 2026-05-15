@@ -66,21 +66,6 @@ def _resolve_pharmacy_record(raw_pharmacy_id):
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid pharmacy identifier")
 
-    direct_rows = execute_with_retry(
-        lambda: (
-            supabase_admin.table("pharmacies")
-            .select("*")
-            .eq("id", pharmacy_id)
-            .limit(1)
-            .execute()
-            .data
-            or []
-        ),
-        default=[],
-    )
-    if direct_rows:
-        return direct_rows[0]
-
     organisation_rows = execute_with_retry(
         lambda: (
             supabase_admin.table("pharmacies")
@@ -96,6 +81,21 @@ def _resolve_pharmacy_record(raw_pharmacy_id):
     if organisation_rows:
         return organisation_rows[0]
 
+    direct_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("pharmacies")
+            .select("*")
+            .eq("id", pharmacy_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if direct_rows:
+        return direct_rows[0]
+
     raise HTTPException(
         status_code=404,
         detail=(
@@ -108,11 +108,19 @@ def _resolve_pharmacy_record(raw_pharmacy_id):
 def _assert_admin_scope(current_user: dict, pharmacy: dict):
     admin_org_id = current_user.get("organisation_id")
     pharmacy_org_id = pharmacy.get("organisation_id")
+    pharmacy_row_id = pharmacy.get("id")
 
     if admin_org_id is None or pharmacy_org_id is None:
         return
 
-    if _coerce_int(admin_org_id, -1) != _coerce_int(pharmacy_org_id, -2):
+    normalized_admin_org_id = _coerce_int(admin_org_id, -1)
+    normalized_pharmacy_org_id = _coerce_int(pharmacy_org_id, -2)
+    normalized_pharmacy_row_id = _coerce_int(pharmacy_row_id, -3)
+
+    if normalized_admin_org_id not in {
+        normalized_pharmacy_org_id,
+        normalized_pharmacy_row_id,
+    }:
         raise HTTPException(
             status_code=403,
             detail="You can only manage staff and stock for your assigned pharmacy organisation.",

@@ -166,14 +166,15 @@ export function usePharmacyAdminDashboard(organisationId?: number | null) {
 
     try {
       const response = await addInventoryItem(payload);
-      setActionMessage(response.message ?? "Medicine added.");
+      const message = response.message ?? "Medicine added.";
+      setActionMessage(message);
       await loadInventory(payload.pharmacyId);
-      return true;
+      return { success: true as const, message };
     } catch (mutationError) {
-      setActionMessage(
-        mutationError instanceof Error ? mutationError.message : "Medicine creation failed.",
-      );
-      return false;
+      const message =
+        mutationError instanceof Error ? mutationError.message : "Medicine creation failed.";
+      setActionMessage(message);
+      return { success: false as const, message };
     } finally {
       setIsMutatingInventory(false);
     }

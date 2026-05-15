@@ -347,6 +347,76 @@ def _organisation_map(organisation_ids: set[int]):
     return {row["id"]: row for row in rows}
 
 
+def _approved_hospital_organisation_catalog():
+    hospital_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("hospitals")
+            .select("id, organisation_id")
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    organisation_lookup = _organisation_map(
+        {row["organisation_id"] for row in hospital_rows if row.get("organisation_id")}
+    )
+
+    items = []
+    seen_ids = set()
+    for row in hospital_rows:
+        organisation_id = row.get("organisation_id")
+        organisation = organisation_lookup.get(organisation_id, {})
+        organisation_status = (organisation.get("status") or "").lower()
+        if (
+            not organisation_id
+            or organisation_id in seen_ids
+            or organisation_status not in {"approved", "active"}
+        ):
+            continue
+        seen_ids.add(organisation_id)
+        items.append(
+            {
+                "id": organisation_id,
+                "name": organisation.get("name", f"Organisation #{organisation_id}"),
+                "status": _title_status(organisation.get("status") or "approved"),
+            }
+        )
+    return sorted(items, key=lambda item: item["name"].lower())
+
+
+def _approved_doctor_catalog():
+    doctor_rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("doctors")
+            .select("*")
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    approved_doctor_ids = {
+        row["id"]
+        for row in doctor_rows
+        if row.get("id") and (row.get("status") or "").lower() in {"approved", "active"}
+    }
+    doctor_lookup = _doctor_map(approved_doctor_ids)
+
+    items = []
+    for doctor_id in approved_doctor_ids:
+        doctor = doctor_lookup.get(doctor_id, {})
+        items.append(
+            {
+                "id": doctor_id,
+                "name": doctor.get("display_name", f"Doctor #{doctor_id}"),
+                "specialization": doctor.get("specialization"),
+                "status": _title_status(doctor.get("status") or "approved"),
+            }
+        )
+    return sorted(items, key=lambda item: item["name"].lower())
+
+
 def _medicine_map(medicine_ids: set[int]):
     if not medicine_ids:
         return {}
@@ -2434,7 +2504,9 @@ def get_booking_options(authorization: Optional[str] = Header(None)):
             }
             for row in active_affiliations
             if hospital_lookup.get(row["hospital_id"], {}).get("organisation_id")
-        ]
+        ],
+        "organisations": _approved_hospital_organisation_catalog(),
+        "doctors": _approved_doctor_catalog(),
     }
 
 @router.get("/available-slots", dependencies=[Depends(RoleChecker(["patient"]))])

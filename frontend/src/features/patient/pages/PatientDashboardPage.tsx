@@ -54,7 +54,9 @@ import {
 import type {
   AvailableSlot,
   AssistantChatMessage,
+  BookingDoctorOption,
   BookingOption,
+  BookingOrganisationOption,
   DashboardAppointment,
   DashboardOverview,
   DashboardRecord,
@@ -437,16 +439,20 @@ function DashboardCustomSelect({
 function DashboardSearchSelect({
   value,
   onChange,
+  onSelect,
   options,
   placeholder,
   helperText,
+  emptyMessage = "No matches found.",
   disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
+  onSelect?: (option: DashboardSelectOption) => void;
   options: DashboardSelectOption[];
   placeholder: string;
   helperText?: string;
+  emptyMessage?: string;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -505,7 +511,11 @@ function DashboardSearchSelect({
                 key={option.value}
                 type="button"
                 onClick={() => {
-                  onChange(option.label);
+                  if (onSelect) {
+                    onSelect(option);
+                  } else {
+                    onChange(option.label);
+                  }
                   setOpen(false);
                 }}
                 className="flex w-full flex-col rounded-xl px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
@@ -522,7 +532,7 @@ function DashboardSearchSelect({
             ))
           ) : (
             <div className="rounded-xl px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
-              No pharmacies matched that search.
+              {emptyMessage}
             </div>
           )}
         </div>
@@ -617,6 +627,8 @@ export function PatientDashboardPage() {
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [appointments, setAppointments] = useState<DashboardAppointment[]>([]);
   const [bookingOptions, setBookingOptions] = useState<BookingOption[]>([]);
+  const [bookingOrganisations, setBookingOrganisations] = useState<BookingOrganisationOption[]>([]);
+  const [bookingDoctors, setBookingDoctors] = useState<BookingDoctorOption[]>([]);
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [records, setRecords] = useState<DashboardRecord[]>([]);
   const [pharmacyOptionsList, setPharmacyOptionsList] = useState<PatientPharmacyOption[]>([]);
@@ -640,6 +652,8 @@ export function PatientDashboardPage() {
   const [selectedPrescriptionId, setSelectedPrescriptionId] = useState("");
   const [selectedPharmacyId, setSelectedPharmacyId] = useState("");
   const [selectedPharmacyQuery, setSelectedPharmacyQuery] = useState("");
+  const [organisationQuery, setOrganisationQuery] = useState("");
+  const [doctorQuery, setDoctorQuery] = useState("");
   const [pharmacyEstimate, setPharmacyEstimate] = useState<PharmacyEstimate | null>(null);
   const [appointmentForm, setAppointmentForm] = useState(initialForm);
   const [assistantInput, setAssistantInput] = useState("");
@@ -735,6 +749,10 @@ export function PatientDashboardPage() {
   const calculatedSnapshotBmi = calculateBmi(recordHeightCm, recordWeightKg);
 
   const organisationOptions = useMemo(() => {
+    if (bookingOrganisations.length > 0) {
+      return [...bookingOrganisations].sort((left, right) => left.name.localeCompare(right.name));
+    }
+
     const uniqueOrganisations = new Map<number, string>();
 
     bookingOptions.forEach((item) => {
@@ -744,7 +762,13 @@ export function PatientDashboardPage() {
     return Array.from(uniqueOrganisations, ([id, name]) => ({ id, name })).sort((left, right) =>
       left.name.localeCompare(right.name),
     );
-  }, [bookingOptions]);
+  }, [bookingOptions, bookingOrganisations]);
+
+  const selectedOrganisationMeta = useMemo(
+    () =>
+      organisationOptions.find((item) => String(item.id) === appointmentForm.organisationId) ?? null,
+    [appointmentForm.organisationId, organisationOptions],
+  );
 
   const doctorOptions = useMemo(() => {
     if (!appointmentForm.organisationId) {
@@ -752,25 +776,56 @@ export function PatientDashboardPage() {
     }
 
     const selectedOrganisationId = Number(appointmentForm.organisationId);
-    const uniqueDoctors = new Map<
-      number,
-      { id: number; name: string; specialization: string | null }
-    >();
+    const uniqueDoctors = new Map<number, { id: number; name: string; specialization: string | null }>();
+
+    const doctorCatalogLookup = new Map(
+      bookingDoctors.map((item) => [item.id, item] as const),
+    );
 
     bookingOptions
       .filter((item) => item.organisation_id === selectedOrganisationId)
       .forEach((item) => {
+        const catalogDoctor = doctorCatalogLookup.get(item.doctor_id);
         uniqueDoctors.set(item.doctor_id, {
           id: item.doctor_id,
-          name: item.doctor_name,
-          specialization: item.specialization,
+          name: catalogDoctor?.name ?? item.doctor_name,
+          specialization: catalogDoctor?.specialization ?? item.specialization,
         });
       });
 
     return Array.from(uniqueDoctors.values()).sort((left, right) =>
       left.name.localeCompare(right.name),
     );
-  }, [appointmentForm.organisationId, bookingOptions]);
+  }, [appointmentForm.organisationId, bookingDoctors, bookingOptions]);
+
+  const selectedDoctorMeta = useMemo(
+    () => doctorOptions.find((item) => String(item.id) === appointmentForm.doctorId) ?? null,
+    [appointmentForm.doctorId, doctorOptions],
+  );
+
+  const filteredOrganisationOptions = useMemo(() => {
+    const normalizedQuery = normalizePharmacyLookup(organisationQuery);
+    if (!normalizedQuery) {
+      return organisationOptions;
+    }
+
+    return organisationOptions.filter((item) =>
+      normalizePharmacyLookup(`${item.name} ${item.id}`).includes(normalizedQuery),
+    );
+  }, [organisationOptions, organisationQuery]);
+
+  const filteredDoctorOptions = useMemo(() => {
+    const normalizedQuery = normalizePharmacyLookup(doctorQuery);
+    if (!normalizedQuery) {
+      return doctorOptions;
+    }
+
+    return doctorOptions.filter((item) =>
+      normalizePharmacyLookup(`${item.name} ${item.specialization ?? ""} ${item.id}`).includes(
+        normalizedQuery,
+      ),
+    );
+  }, [doctorOptions, doctorQuery]);
 
   const selectedOption = useMemo(() => {
     if (!appointmentForm.organisationId || !appointmentForm.doctorId) {
@@ -924,7 +979,9 @@ export function PatientDashboardPage() {
       setPharmacyOptionsList(pharmacyOptionsData);
       setOverview(overviewData);
       setAppointments(appointmentData);
-      setBookingOptions(optionData);
+      setBookingOptions(optionData.items ?? []);
+      setBookingOrganisations(optionData.organisations ?? []);
+      setBookingDoctors(optionData.doctors ?? []);
       setRecords(recordData);
       setDispensingSummary(dispensingData);
     } catch (error) {
@@ -1064,6 +1121,18 @@ export function PatientDashboardPage() {
   }, [appointmentForm.doctorId, editingAppointment]);
 
   useEffect(() => {
+    if (selectedOrganisationMeta && organisationQuery !== selectedOrganisationMeta.name) {
+      setOrganisationQuery(selectedOrganisationMeta.name);
+    }
+  }, [organisationQuery, selectedOrganisationMeta]);
+
+  useEffect(() => {
+    if (selectedDoctorMeta && doctorQuery !== selectedDoctorMeta.name) {
+      setDoctorQuery(selectedDoctorMeta.name);
+    }
+  }, [doctorQuery, selectedDoctorMeta]);
+
+  useEffect(() => {
     if (!editingAppointment && selectedSlot) {
       setAppointmentForm((current) => ({
         ...current,
@@ -1157,6 +1226,8 @@ export function PatientDashboardPage() {
   const openCreateModal = () => {
     setEditingAppointment(null);
     setAppointmentForm(initialForm);
+    setOrganisationQuery("");
+    setDoctorQuery("");
     setAvailableSlots([]);
     setSlotError(null);
     setModal("appointment");
@@ -1460,6 +1531,82 @@ export function PatientDashboardPage() {
       (filteredPharmacyOptions.length === 1 ? filteredPharmacyOptions[0] : null);
 
     setSelectedPharmacyId(matchedOption ? String(matchedOption.id) : "");
+  };
+
+  const handleOrganisationSelect = (option: DashboardSelectOption) => {
+    setOrganisationQuery(option.label);
+    setDoctorQuery("");
+    setAppointmentForm({
+      organisationId: option.value,
+      doctorId: "",
+      appointmentDate: "",
+      slotId: "",
+      startTime: "",
+      endTime: "",
+    });
+  };
+
+  const handleOrganisationQueryChange = (value: string) => {
+    setOrganisationQuery(value);
+
+    const normalizedValue = normalizePharmacyLookup(value);
+    const matchedOption =
+      organisationOptions.find((item) => normalizePharmacyLookup(item.name) === normalizedValue) ??
+      null;
+
+    if (matchedOption) {
+      setAppointmentForm((current) => ({
+        organisationId: String(matchedOption.id),
+        doctorId:
+          current.organisationId === String(matchedOption.id) ? current.doctorId : "",
+        appointmentDate:
+          current.organisationId === String(matchedOption.id) ? current.appointmentDate : "",
+        slotId: current.organisationId === String(matchedOption.id) ? current.slotId : "",
+        startTime: current.organisationId === String(matchedOption.id) ? current.startTime : "",
+        endTime: current.organisationId === String(matchedOption.id) ? current.endTime : "",
+      }));
+      return;
+    }
+
+    setDoctorQuery("");
+    setAppointmentForm((current) => ({
+      ...current,
+      organisationId: "",
+      doctorId: "",
+      appointmentDate: "",
+      slotId: "",
+      startTime: "",
+      endTime: "",
+    }));
+  };
+
+  const handleDoctorSelect = (option: DashboardSelectOption) => {
+    setDoctorQuery(option.label);
+    setAppointmentForm((current) => ({
+      ...current,
+      doctorId: option.value,
+      appointmentDate: "",
+      slotId: "",
+      startTime: "",
+      endTime: "",
+    }));
+  };
+
+  const handleDoctorQueryChange = (value: string) => {
+    setDoctorQuery(value);
+
+    const normalizedValue = normalizePharmacyLookup(value);
+    const matchedOption =
+      doctorOptions.find((item) => normalizePharmacyLookup(item.name) === normalizedValue) ?? null;
+
+    setAppointmentForm((current) => ({
+      ...current,
+      doctorId: matchedOption ? String(matchedOption.id) : "",
+      appointmentDate: matchedOption ? current.appointmentDate : "",
+      slotId: matchedOption ? current.slotId : "",
+      startTime: matchedOption ? current.startTime : "",
+      endTime: matchedOption ? current.endTime : "",
+    }));
   };
 
   return (
@@ -3742,20 +3889,13 @@ export function PatientDashboardPage() {
                               <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">
                                 Organisation
                               </label>
-                              <DashboardCustomSelect
-                                value={appointmentForm.organisationId}
-                                onChange={(value) =>
-                                  setAppointmentForm({
-                                    organisationId: value,
-                                    doctorId: "",
-                                    appointmentDate: "",
-                                    slotId: "",
-                                    startTime: "",
-                                    endTime: "",
-                                  })
-                                }
-                                placeholder="Select organisation"
-                                options={organisationOptions.map((item) => ({
+                              <DashboardSearchSelect
+                                value={organisationQuery}
+                                onChange={handleOrganisationQueryChange}
+                                onSelect={handleOrganisationSelect}
+                                placeholder="Search or select organisation"
+                                emptyMessage="No organisations matched that search."
+                                options={filteredOrganisationOptions.map((item) => ({
                                   value: String(item.id),
                                   label: item.name,
                                   description: "Verified booking organisation",
@@ -3767,21 +3907,18 @@ export function PatientDashboardPage() {
                               <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-400">
                                 Doctor
                               </label>
-                              <DashboardCustomSelect
-                                value={appointmentForm.doctorId}
-                                onChange={(value) =>
-                                  setAppointmentForm((current) => ({
-                                    ...current,
-                                    doctorId: value,
-                                    appointmentDate: "",
-                                    slotId: "",
-                                    startTime: "",
-                                    endTime: "",
-                                  }))
-                                }
+                              <DashboardSearchSelect
+                                value={doctorQuery}
+                                onChange={handleDoctorQueryChange}
+                                onSelect={handleDoctorSelect}
                                 disabled={!appointmentForm.organisationId}
-                                placeholder="Select doctor"
-                                options={doctorOptions.map((item) => ({
+                                placeholder="Search or select doctor"
+                                emptyMessage={
+                                  appointmentForm.organisationId
+                                    ? "No doctors matched that search."
+                                    : "Select an organisation first to load doctors."
+                                }
+                                options={filteredDoctorOptions.map((item) => ({
                                   value: String(item.id),
                                   label: item.name,
                                   description: item.specialization || "Specialization not set",

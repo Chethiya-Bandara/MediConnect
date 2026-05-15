@@ -337,7 +337,7 @@ export function PharmacyAdminDashboardPage() {
       return;
     }
 
-    const success = await dashboard.createMedicine({
+    const result = await dashboard.createMedicine({
       pharmacyId: activeOrganizationId,
       medicineId: matchedMedicine.id,
       medicineName: matchedMedicine.name,
@@ -345,14 +345,14 @@ export function PharmacyAdminDashboardPage() {
       unitPrice: matchedMedicine.retailPrice ?? normalizeNumberInput(createForm.unitPrice),
     });
 
-    if (success) {
+    if (result.success) {
       setCreateForm({ medicineName: "", stockQuantity: "", unitPrice: "" });
       setCatalogSuggestions([]);
       setSelectedCatalogMedicine(null);
       setShowCreateForm(false);
-      setInventoryFeedback("New inventory item added successfully.");
+      setInventoryFeedback(result.message || "New inventory item added successfully.");
     } else {
-      setInventoryFeedback(dashboard.actionMessage ?? "Inventory item creation failed.");
+      setInventoryFeedback(result.message || "Inventory item creation failed.");
     }
   };
 
@@ -377,14 +377,6 @@ export function PharmacyAdminDashboardPage() {
       }));
     }
   };
-
-  const actionBanner = dashboard.actionMessage ? (
-    <div
-      className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(dashboard.actionMessage)}`}
-    >
-      {dashboard.actionMessage}
-    </div>
-  ) : null;
 
   const errorBanner = dashboard.error ? (
     <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
@@ -478,7 +470,6 @@ export function PharmacyAdminDashboardPage() {
       <main className="ml-64 min-h-screen px-8 pb-12 pt-24">
         <div className="mb-6 space-y-3">
           {errorBanner}
-          {actionBanner}
           {inventoryFeedback ? (
             <div
               className={`rounded-2xl border px-4 py-3 text-sm ${noticeClassName(inventoryFeedback)}`}

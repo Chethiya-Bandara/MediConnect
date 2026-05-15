@@ -89,6 +89,25 @@ export interface BookingOption {
   status: string;
 }
 
+export interface BookingOrganisationOption {
+  id: number;
+  name: string;
+  status: string;
+}
+
+export interface BookingDoctorOption {
+  id: number;
+  name: string;
+  specialization: string | null;
+  status: string;
+}
+
+export interface BookingOptionsPayload {
+  items: BookingOption[];
+  organisations?: BookingOrganisationOption[];
+  doctors?: BookingDoctorOption[];
+}
+
 export interface AvailableSlot {
   id: number;
   doctor_id: number;
