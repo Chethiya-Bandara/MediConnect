@@ -354,6 +354,15 @@ def _local_date(value: Optional[str]) -> Optional[str]:
     return parsed.astimezone(SRI_LANKA_TZ).date().isoformat()
 
 
+def _slot_is_still_relevant(slot: dict) -> bool:
+    end_time = _parse_iso_datetime(slot.get("end_time"))
+    start_time = _parse_iso_datetime(slot.get("start_time"))
+    pivot = end_time or start_time
+    if not pivot:
+        return False
+    return pivot.astimezone(SRI_LANKA_TZ) >= datetime.now(SRI_LANKA_TZ)
+
+
 def _is_missing_column_error(exc: Exception, column_name: str) -> bool:
     return column_name in str(exc).lower() and "column" in str(exc).lower()
 
@@ -1896,6 +1905,8 @@ def get_availability(
                 ),
             ) from exc
         raise
+
+    slots = [row for row in slots if _slot_is_still_relevant(row)]
 
     if slot_date:
         slots = [row for row in slots if _local_date(row.get("start_time")) == slot_date]
