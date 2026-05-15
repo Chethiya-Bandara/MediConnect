@@ -3738,9 +3738,9 @@ export function DoctorDashboardPage() {
               <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
                 <Lock size={28} />
               </div>
-              <h3 className="mb-2 text-xl font-bold dark:text-white">Finalize & Lock?</h3>
+              <h3 className="mb-2 text-xl font-bold dark:text-white">Finalize & Submit?</h3>
               <p className="mb-8 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-                This saves the encounter and pushes the prescription into the actual patient record.
+                This saves the encounter and uploads the prescription into the patient record.
               </p>
               <div className="flex gap-3">
                 <button
