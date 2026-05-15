@@ -18,6 +18,7 @@ import { cn } from "../../../lib/utils/cn";
 import { formatDate } from "../../../lib/utils/formatDate";
 import { useAuth } from "../../auth/context/AuthContext";
 import { searchPharmacyCatalogMedicines, updatePharmacyAdminProfile } from "../api/pharmacyAdminApi";
+import { lowStockThreshold } from "../constants";
 import { usePharmacyAdminDashboard } from "../hooks/usePharmacyAdminDashboard";
 import { SettingsSection } from "../sections/SettingsSection";
 import type {
@@ -269,9 +270,9 @@ export function PharmacyAdminDashboardPage() {
     return dashboard.filteredInventory.filter((item) => {
       if (inventoryStatusFilter === "ALL") return true;
       const quantity = item.stockQuantity ?? 0;
-      if (inventoryStatusFilter === "LOW") return quantity > 0 && quantity <= 25;
+      if (inventoryStatusFilter === "LOW") return quantity > 0 && quantity <= lowStockThreshold;
       if (inventoryStatusFilter === "OUT") return quantity <= 0;
-      if (inventoryStatusFilter === "HEALTHY") return quantity > 25;
+      if (inventoryStatusFilter === "HEALTHY") return quantity > lowStockThreshold;
       return true;
     });
   }, [dashboard.filteredInventory, inventoryStatusFilter]);
@@ -864,7 +865,8 @@ export function PharmacyAdminDashboardPage() {
                           unitPrice: String(item.unitPrice ?? 0),
                         };
                         const lowStock =
-                          (item.stockQuantity ?? 0) > 0 && (item.stockQuantity ?? 0) <= 25;
+                          (item.stockQuantity ?? 0) > 0 &&
+                          (item.stockQuantity ?? 0) <= lowStockThreshold;
                         const outOfStock = (item.stockQuantity ?? 0) <= 0;
                         const dirty =
                           draft.stockQuantity !== String(item.stockQuantity ?? 0) ||

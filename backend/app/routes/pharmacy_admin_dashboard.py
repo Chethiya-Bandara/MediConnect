@@ -105,6 +105,33 @@ def _resolve_pharmacy_record(raw_pharmacy_id):
     )
 
 
+def _pharmacy_row_or_404(pharmacy_row_id):
+    if pharmacy_row_id is None:
+        raise HTTPException(status_code=400, detail="Pharmacy row identifier is required")
+
+    try:
+        normalized_id = int(pharmacy_row_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid pharmacy row identifier")
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("pharmacies")
+            .select("*")
+            .eq("id", normalized_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+    if rows:
+        return rows[0]
+
+    raise HTTPException(status_code=404, detail=f"Pharmacy row {normalized_id} was not found.")
+
+
 def _assert_admin_scope(current_user: dict, pharmacy: dict):
     admin_org_id = current_user.get("organisation_id")
     pharmacy_org_id = pharmacy.get("organisation_id")
@@ -418,6 +445,84 @@ def _build_dispensed_medicine_report(dispensing_rows: list[dict]):
         ),
         default=[],
     )
+
+
+def _inventory_rows_for_medicine(pharmacy_id: int, medicine_id: int):
+    return execute_with_retry(
+        lambda: (
+            supabase_admin.table("inventory")
+            .select("*")
+            .eq("pharmacy_id", pharmacy_id)
+            .eq("medicine_id", medicine_id)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        ),
+        default=[],
+    )
+
+
+def _inventory_group_key(row: dict):
+    medicine_id = row.get("medicine_id")
+    if medicine_id is not None:
+        return f"medicine:{medicine_id}"
+    fallback_name = (row.get("medicine_name") or row.get("drug_name") or row.get("id") or "").strip()
+    return f"name:{fallback_name.lower()}"
+
+
+def _coalesced_inventory_rows(rows: list[dict]):
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(_inventory_group_key(row), []).append(row)
+
+    coalesced = []
+    for group_rows in grouped.values():
+        ordered = sorted(
+            group_rows,
+            key=lambda row: _parse_datetime(row.get("updated_at") or row.get("created_at"))
+            or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        primary = ordered[0]
+        total_stock_quantity = sum(_coerce_int(row.get("stock_quantity")) for row in ordered)
+        latest_timestamp = primary.get("updated_at") or primary.get("created_at")
+        earliest_created = min(
+            (
+                _parse_datetime(row.get("created_at"))
+                or datetime.min.replace(tzinfo=timezone.utc)
+                for row in ordered
+            ),
+            default=datetime.min.replace(tzinfo=timezone.utc),
+        )
+        coalesced.append(
+            {
+                **primary,
+                "stock_quantity": total_stock_quantity,
+                "created_at": (
+                    earliest_created.isoformat()
+                    if earliest_created != datetime.min.replace(tzinfo=timezone.utc)
+                    else primary.get("created_at")
+                ),
+                "updated_at": latest_timestamp,
+            }
+        )
+
+    return sorted(
+        coalesced,
+        key=lambda row: _parse_datetime(row.get("updated_at") or row.get("created_at"))
+        or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+
+def _delete_inventory_rows_by_ids(row_ids: list[str | int]):
+    if not row_ids:
+        return
+    if len(row_ids) == 1:
+        supabase_admin.table("inventory").delete().eq("id", row_ids[0]).execute()
+        return
+    supabase_admin.table("inventory").delete().in_("id", row_ids).execute()
     prescription_item_ids = {
         row.get("prescription_item_id")
         for row in dispensing_item_rows
@@ -541,7 +646,9 @@ def _build_staff_rows(pharmacy: dict):
 
 
 def _build_dashboard_payload(pharmacy: dict):
-    inventory_rows = _inventory_rows_for_pharmacy(_coerce_int(pharmacy.get("id")))
+    inventory_rows = _coalesced_inventory_rows(
+        _inventory_rows_for_pharmacy(_coerce_int(pharmacy.get("id")))
+    )
     medicine_lookup = _medicine_map(
         {row.get("medicine_id") for row in inventory_rows if row.get("medicine_id") is not None}
     )
@@ -643,13 +750,42 @@ def add_medicine(
             ),
         )
 
+    existing_rows = _inventory_rows_for_medicine(pharmacy["id"], medicine["id"])
+    unit_price = medicine.get("retail_price") or data.unit_price or 0
+    now_iso = datetime.utcnow().isoformat()
+
+    if existing_rows:
+        primary_row = existing_rows[0]
+        duplicate_row_ids = [row.get("id") for row in existing_rows[1:] if row.get("id") is not None]
+        next_stock_quantity = sum(_coerce_int(row.get("stock_quantity")) for row in existing_rows) + data.stock_quantity
+
+        res = supabase_admin.table("inventory").update(
+            {
+                "stock_quantity": next_stock_quantity,
+                "unit_price": unit_price,
+                "updated_at": now_iso,
+            }
+        ).eq("id", primary_row["id"]).execute()
+
+        if not res.data:
+            raise HTTPException(status_code=400, detail="Failed to update existing medicine stock")
+
+        _delete_inventory_rows_by_ids(duplicate_row_ids)
+
+        return {
+            "message": "Medicine stock updated.",
+            "pharmacy_id": pharmacy["organisation_id"],
+            "medicine_name": medicine.get("name"),
+            "unit_price": unit_price,
+        }
+
     res = supabase_admin.table("inventory").insert(
         {
             "pharmacy_id": pharmacy["id"],
             "medicine_id": medicine["id"],
             "stock_quantity": data.stock_quantity,
-            "unit_price": medicine.get("retail_price") or data.unit_price or 0,
-            "created_at": datetime.utcnow().isoformat(),
+            "unit_price": unit_price,
+            "created_at": now_iso,
         }
     ).execute()
 
@@ -660,7 +796,7 @@ def add_medicine(
         "message": "Medicine added",
         "pharmacy_id": pharmacy["organisation_id"],
         "medicine_name": medicine.get("name"),
-        "unit_price": medicine.get("retail_price") or data.unit_price or 0,
+        "unit_price": unit_price,
     }
 
 
@@ -670,8 +806,15 @@ def update_inventory(
     current_user: dict = Depends(RoleChecker(["pharmacy_admin"])),
 ):
     existing_row = _inventory_item_or_404(data.id)
-    pharmacy = _resolve_pharmacy_record(existing_row.get("pharmacy_id"))
+    pharmacy = _pharmacy_row_or_404(existing_row.get("pharmacy_id"))
     _assert_admin_scope(current_user, pharmacy)
+
+    sibling_rows = _inventory_rows_for_medicine(
+        _coerce_int(existing_row.get("pharmacy_id")),
+        _coerce_int(existing_row.get("medicine_id")),
+    ) if existing_row.get("medicine_id") is not None else [existing_row]
+    primary_row = sibling_rows[0]
+    duplicate_row_ids = [row.get("id") for row in sibling_rows[1:] if row.get("id") is not None]
 
     res = supabase_admin.table("inventory").update(
         {
@@ -679,10 +822,12 @@ def update_inventory(
             "unit_price": data.unit_price,
             "updated_at": datetime.utcnow().isoformat(),
         }
-    ).eq("id", data.id).execute()
+    ).eq("id", primary_row["id"]).execute()
 
     if not res.data:
         raise HTTPException(status_code=404, detail="Item not found")
+
+    _delete_inventory_rows_by_ids(duplicate_row_ids)
 
     return {"message": "Inventory updated"}
 
@@ -695,7 +840,7 @@ def get_inventory(
     pharmacy = _resolve_pharmacy_record(pharmacy_id)
     _assert_admin_scope(current_user, pharmacy)
 
-    rows = _inventory_rows_for_pharmacy(_coerce_int(pharmacy.get("id")))
+    rows = _coalesced_inventory_rows(_inventory_rows_for_pharmacy(_coerce_int(pharmacy.get("id"))))
     medicine_lookup = _medicine_map(
         {row.get("medicine_id") for row in rows if row.get("medicine_id")}
     )
@@ -721,13 +866,15 @@ def delete_medicine(
     current_user: dict = Depends(RoleChecker(["pharmacy_admin"])),
 ):
     existing_row = _inventory_item_or_404(item_id)
-    pharmacy = _resolve_pharmacy_record(existing_row.get("pharmacy_id"))
+    pharmacy = _pharmacy_row_or_404(existing_row.get("pharmacy_id"))
     _assert_admin_scope(current_user, pharmacy)
 
-    res = supabase_admin.table("inventory").delete().eq("id", item_id).execute()
-
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Item not found")
+    sibling_rows = _inventory_rows_for_medicine(
+        _coerce_int(existing_row.get("pharmacy_id")),
+        _coerce_int(existing_row.get("medicine_id")),
+    ) if existing_row.get("medicine_id") is not None else [existing_row]
+    sibling_row_ids = [row.get("id") for row in sibling_rows if row.get("id") is not None]
+    _delete_inventory_rows_by_ids(sibling_row_ids)
 
     return {"message": "Medicine removed"}
 

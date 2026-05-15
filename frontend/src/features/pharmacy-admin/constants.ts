@@ -2,7 +2,7 @@ import { Badge, BarChart3, Boxes } from "lucide-react";
 import type { ComponentType } from "react";
 import type { PharmacyAdminSection } from "./types";
 
-export const lowStockThreshold = 10;
+export const lowStockThreshold = 25;
 
 export const pharmacyAdminSectionTabs: Array<{
   id: PharmacyAdminSection;
