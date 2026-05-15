@@ -169,15 +169,22 @@ function DashboardCustomSelect({
   onChange,
   options,
   placeholder,
+  searchPlaceholder = "Search...",
+  emptyMessage = "No options found.",
   disabled = false,
+  searchable = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   options: DashboardSelectOption[];
   placeholder: string;
+  searchPlaceholder?: string;
+  emptyMessage?: string;
   disabled?: boolean;
+  searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -192,6 +199,16 @@ function DashboardCustomSelect({
   }, []);
 
   const selected = options.find((option) => option.value === value);
+  const filteredOptions = searchable
+    ? options.filter((option) => {
+        const normalizedQuery = searchQuery.trim().toLowerCase();
+        if (!normalizedQuery) {
+          return true;
+        }
+
+        return option.label.toLowerCase().includes(normalizedQuery);
+      })
+    : options;
 
   return (
     <div
@@ -206,7 +223,13 @@ function DashboardCustomSelect({
         disabled={disabled}
         onClick={() => {
           if (!disabled) {
-            setOpen((current) => !current);
+            setOpen((current) => {
+              const nextOpen = !current;
+              if (!nextOpen) {
+                setSearchQuery("");
+              }
+              return nextOpen;
+            });
           }
         }}
       >
@@ -219,23 +242,46 @@ function DashboardCustomSelect({
 
       {open && !disabled ? (
         <div className="custom-select__menu" role="listbox">
-          {options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="option"
-              aria-selected={value === option.value}
-              className={`custom-select__option custom-select__option--compact ${
-                value === option.value ? "custom-select__option--selected" : ""
-              }`}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              <span className="custom-select__option-label">{option.label}</span>
-            </button>
-          ))}
+          {searchable ? (
+            <div className="px-3 pb-2">
+              <div className="relative">
+                <Search
+                  size={16}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={value === option.value}
+                className={`custom-select__option custom-select__option--compact ${
+                  value === option.value ? "custom-select__option--selected" : ""
+                }`}
+                onClick={() => {
+                  onChange(option.value);
+                  setSearchQuery("");
+                  setOpen(false);
+                }}
+              >
+                <span className="custom-select__option-label">{option.label}</span>
+              </button>
+            ))
+          ) : (
+            <div className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{emptyMessage}</div>
+          )}
         </div>
       ) : null}
     </div>
@@ -863,13 +909,11 @@ export function DoctorDashboardPage() {
   );
 
   const joinRequestHospitalOptions = useMemo<DashboardSelectOption[]>(
-    () => [
-      { value: "", label: "Select hospital to join" },
-      ...requestableHospitals.map((hospital) => ({
+    () =>
+      requestableHospitals.map((hospital) => ({
         value: String(hospital.id),
         label: hospital.name,
       })),
-    ],
     [requestableHospitals],
   );
 
@@ -3222,6 +3266,9 @@ export function DoctorDashboardPage() {
                             }
                             options={joinRequestHospitalOptions}
                             placeholder="Select hospital to join"
+                            searchPlaceholder="Search hospitals"
+                            emptyMessage="No matching hospitals found."
+                            searchable
                           />
                         </div>
                         <button

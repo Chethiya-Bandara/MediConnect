@@ -2261,7 +2261,7 @@ def request_affiliation(
     if (hospital.get("type") or "").lower() != "hospital":
         raise HTTPException(status_code=400, detail="Selected organisation is not a hospital")
 
-    if (hospital.get("status") or "").lower() != "approved":
+    if (hospital.get("status") or "").lower() not in {"approved", "active"}:
         raise HTTPException(status_code=400, detail="Hospital is not approved for doctor affiliation yet")
 
     existing = (
