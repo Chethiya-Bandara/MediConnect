@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import date, datetime
 from typing import Optional
 
 import httpx
@@ -34,6 +35,67 @@ _STATUS_ALIASES = {
 
 _BLOCKED_ORGANISATION_STATUSES = {"rejected", "suspended"}
 _LOCAL_FRONTEND_FALLBACK = "http://127.0.0.1:5173"
+
+
+def _is_underage_patient(role: str, dob: str | None) -> bool:
+    normalized_role = str(role or "").strip().lower()
+    if normalized_role != "patient" or not dob:
+        return False
+
+    try:
+        birth_date = datetime.fromisoformat(dob).date()
+    except ValueError:
+        return False
+
+    today = date.today()
+    age = today.year - birth_date.year - (
+        (today.month, today.day) < (birth_date.month, birth_date.day)
+    )
+    return age < 18
+
+
+def _normalize_registration_failure(exc: Exception) -> HTTPException:
+    message = str(exc).strip()
+    lowered = message.lower()
+
+    if isinstance(exc, AuthApiError):
+        if "already registered" in lowered or "already been registered" in lowered:
+            return HTTPException(status_code=400, detail="Email already exists.")
+        return HTTPException(
+            status_code=400,
+            detail="Registration could not be completed with the provided account details.",
+        )
+
+    if "duplicate key value" in lowered or "already exists" in lowered:
+        if "email" in lowered:
+            return HTTPException(status_code=400, detail="Email already exists.")
+        if "guardian_nic" in lowered:
+            return HTTPException(
+                status_code=400,
+                detail="A registration with this guardian NIC already exists.",
+            )
+        if "nic" in lowered:
+            return HTTPException(
+                status_code=400,
+                detail="A registration with this NIC already exists.",
+            )
+
+    if "guardian nic" in lowered:
+        return HTTPException(
+            status_code=400,
+            detail="Guardian NIC is required for patients under 18 years old.",
+        )
+
+    if 'null value in column "nic" of relation "patients"' in lowered:
+        return HTTPException(
+            status_code=400,
+            detail="Guardian-only patient registration could not be completed. Please verify the guardian details and try again.",
+        )
+
+    return HTTPException(
+        status_code=400,
+        detail="Registration could not be completed with the provided details. Please review the form and try again.",
+    )
 
 def _normalize_for_match(value: str) -> str:
     return "".join(ch.lower() for ch in value if ch.isalnum())
@@ -372,9 +434,15 @@ async def register(
         nicImageFileType=nicImage.content_type,
     )
 
+    is_underage_patient = _is_underage_patient(user.role, user.dob)
     expected_nic = user.nic or user.parentNic
     if not expected_nic:
-        raise HTTPException(status_code=400, detail="NIC is required for verification")
+        raise HTTPException(
+            status_code=400,
+            detail="Guardian NIC is required for patients under 18 years old."
+            if is_underage_patient
+            else "NIC is required for verification",
+        )
 
     _verify_registration_nic_document(
         file_bytes=file_bytes,
@@ -383,9 +451,9 @@ async def register(
         expected_full_name=user.fullName or "",
         expected_dob=user.dob or "",
         expected_gender=user.gender or "",
-        require_name_match=bool(user.nic),
-        require_dob_match=bool(user.nic),
-        require_gender_match=bool(user.nic),
+        require_name_match=bool(user.nic) and not is_underage_patient,
+        require_dob_match=bool(user.nic) and not is_underage_patient,
+        require_gender_match=bool(user.nic) and not is_underage_patient,
     )
 
     # ── Password Complexity Validation (Bihanga B-1.1.3) ──────────
@@ -400,13 +468,21 @@ async def register(
         )
 
     role = user.role
-    auth_res = supabase.auth.sign_up({
-        "email": user.email,
-        "password": user.password
-    })
+    try:
+        auth_res = supabase.auth.sign_up({
+            "email": user.email,
+            "password": user.password
+        })
+    except AuthApiError as exc:
+        raise _normalize_registration_failure(exc) from exc
+    except Exception as exc:
+        raise _normalize_registration_failure(exc) from exc
 
     if not auth_res.user:
-        raise HTTPException(status_code=400, detail="Registration failed")
+        raise HTTPException(
+            status_code=400,
+            detail="Registration could not be completed with the provided account details.",
+        )
 
     user_id = auth_res.user.id
 
@@ -440,6 +516,7 @@ async def register(
                 "pref_name": user.preferredName,
                 "address": user.address,
                 "nic": user.nic,
+                "guardian_nic": user.parentNic,
                 "status": user_status,
             }
         ).execute()
@@ -456,8 +533,12 @@ async def register(
                 "user_id": user_id,
                 "dhid": dhid
             }
-            if user.nic:
-                patient_record["nic"] = hash_nic(user.nic)
+            # The current patients table requires a non-null nic value.
+            # For underage guardian-only registrations, we persist the guardian NIC hash
+            # until the patient later receives and submits their own NIC.
+            nic_for_patient_record = user.nic or user.parentNic
+            if nic_for_patient_record:
+                patient_record["nic"] = hash_nic(nic_for_patient_record)
 
             supabase_admin.table("patients").insert(patient_record).execute()
 
@@ -501,12 +582,10 @@ async def register(
     except HTTPException:
         supabase_admin.auth.admin.delete_user(user_id)
         raise
-    except Exception:
+    except Exception as exc:
+        logging.exception("Registration failed after auth signup for user_id=%s role=%s", user_id, role)
         supabase_admin.auth.admin.delete_user(user_id)
-        raise HTTPException(
-            status_code=500,
-            detail="Registration could not be completed right now",
-        )
+        raise _normalize_registration_failure(exc) from exc
 
     return {"success": True, "message": "Registration successful"}
 
