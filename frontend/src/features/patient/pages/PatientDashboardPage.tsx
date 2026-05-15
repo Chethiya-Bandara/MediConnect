@@ -870,6 +870,15 @@ export function PatientDashboardPage() {
     }));
   }, [appointments]);
 
+  const sortedUpcoming = upcomingAppointments
+  .slice()
+  .sort(
+    (a, b) =>
+      new Date(a.start_time).getTime() -
+      new Date(b.start_time).getTime()
+  )
+  .slice(0, 4);
+
   const showToast = (message: string, tone: "success" | "error" | "info" = "success") => {
     if (toastTimeoutRef.current) {
       window.clearTimeout(toastTimeoutRef.current);
@@ -1935,7 +1944,7 @@ export function PatientDashboardPage() {
                         className="rounded-xl border-0 bg-slate-50 p-5 text-left shadow-none dark:bg-slate-800/50"
                       />
                     ) : (
-                      upcomingAppointments.slice(0, 4).map((item) => (
+                      sortedUpcoming.map((item) => (
                         <article
                           key={item.id}
                           className="rounded-[1.4rem] bg-slate-50 p-4 dark:bg-slate-800/50"
