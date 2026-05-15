@@ -780,10 +780,45 @@ def _prescription_items_by_prescription(prescription_ids) -> dict:
         default=list,
     )
 
+    dispensed_quantity_lookup = _dispensed_quantity_by_prescription_item(
+        {row.get("id") for row in rows if row.get("id") is not None}
+    )
+
     mapped = {}
     for row in rows:
+        item_id = row.get("id")
+        row = {
+            **row,
+            "dispensed_quantity": dispensed_quantity_lookup.get(item_id, 0),
+        }
         mapped.setdefault(row["prescription_id"], []).append(_serialize_prescription_item(row))
     return mapped
+
+
+def _dispensed_quantity_by_prescription_item(prescription_item_ids) -> dict[int, int]:
+    item_ids = _sorted_unique(prescription_item_ids)
+    if not item_ids:
+        return {}
+
+    rows = execute_with_retry(
+        lambda: (
+            supabase_admin.table("dispensing_items")
+            .select("prescription_item_id, quantity_dispensed")
+            .in_("prescription_item_id", item_ids)
+            .execute()
+            .data
+            or []
+        ),
+        default=list,
+    )
+
+    totals: dict[int, int] = {}
+    for row in rows:
+        item_id = _coerce_int(row.get("prescription_item_id"))
+        if item_id is None:
+            continue
+        totals[item_id] = totals.get(item_id, 0) + max(_coerce_int(row.get("quantity_dispensed")) or 0, 0)
+    return totals
 
 
 def _inventory_map_for_pharmacy(pharmacy_id: int | None, medicine_ids) -> dict:
@@ -1251,7 +1286,8 @@ def dispense_prescription(
             raise HTTPException(404, f"Item {item_id} not found")
 
         prescribed_quantity = _prescribed_quantity(db_item.data)
-        remaining = prescribed_quantity - (_coerce_int(db_item.data.get("dispensed_quantity")) or 0)
+        historical_dispensed = _dispensed_quantity_by_prescription_item({item_id}).get(item_id, 0)
+        remaining = prescribed_quantity - historical_dispensed
 
         if qty > remaining:
             raise HTTPException(400, f"Cannot dispense more than remaining ({remaining})")
@@ -1262,7 +1298,7 @@ def dispense_prescription(
 
         inventory_item = reduce_stock(medicine_id, pharmacy_id, qty)
 
-        new_dispensed = (_coerce_int(db_item.data.get("dispensed_quantity")) or 0) + qty
+        new_dispensed = historical_dispensed + qty
         supabase_admin.table("prescription_items").update({
             "dispensed_quantity": new_dispensed
         }).eq("id", item_id).execute()
@@ -1294,8 +1330,20 @@ def dispense_prescription(
         )
     )
 
+    all_item_dispensed_lookup = _dispensed_quantity_by_prescription_item(
+        {item.get("id") for item in all_items.data if item.get("id") is not None}
+    )
+    for line_item in dispensing_line_items:
+        prescription_item_id = _coerce_int(line_item.get("prescription_item_id"))
+        if prescription_item_id is None:
+            continue
+        all_item_dispensed_lookup[prescription_item_id] = (
+            all_item_dispensed_lookup.get(prescription_item_id, 0)
+            + max(_coerce_int(line_item.get("quantity_dispensed")) or 0, 0)
+        )
+
     fully_done = all(
-        (_coerce_int(item.get("dispensed_quantity")) or 0) >= _prescribed_quantity(item)
+        all_item_dispensed_lookup.get(item.get("id"), 0) >= _prescribed_quantity(item)
         for item in all_items.data
     )
 

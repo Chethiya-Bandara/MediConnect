@@ -1207,8 +1207,6 @@ export function PharmacistDashboardPage() {
                               plan,
                               metrics,
                               quantityToDispense,
-                              previewDispensedQuantity,
-                              previewRemainingQuantity,
                             }) => {
                               const isOutOfStock =
                                 item.availabilityMessage ===
@@ -1268,18 +1266,26 @@ export function PharmacistDashboardPage() {
                                     Prescribed: {metrics.prescribedQuantity ?? "N/A"} {metrics.quantityLabel}
                                   </p>
                                   <p className="text-slate-500 dark:text-slate-400">
-                                    Dispensed so far: {previewDispensedQuantity} {metrics.quantityLabel}
+                                    Dispensed so far: {metrics.dispensedQuantity}{" "}
+                                    {metrics.quantityLabel}
                                   </p>
                                   <p
                                     className={cn(
                                       "font-medium",
-                                      (previewRemainingQuantity ?? 0) > 0
+                                      (metrics.remainingQuantity ?? 0) > 0
                                         ? "text-red-600 dark:text-red-400"
                                         : "text-emerald-600 dark:text-emerald-400",
                                     )}
                                   >
-                                    Remaining: {previewRemainingQuantity ?? "Unknown"} {metrics.quantityLabel}
+                                    Remaining: {metrics.remainingQuantity ?? "Unknown"}{" "}
+                                    {metrics.quantityLabel}
                                   </p>
+                                  {quantityToDispense > 0 ? (
+                                    <p className="text-sky-700 dark:text-sky-300">
+                                      Pending in this request: {quantityToDispense}{" "}
+                                      {metrics.quantityLabel}
+                                    </p>
+                                  ) : null}
                                   {metrics.unitKind === "ml" || metrics.unitKind === "drops" ? (
                                     <p className="text-slate-500 dark:text-slate-400">
                                       {metrics.dailyDose && metrics.durationDays
