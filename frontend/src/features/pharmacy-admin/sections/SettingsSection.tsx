@@ -122,7 +122,7 @@ export function SettingsSection({
 
   return (
     <section className="space-y-8 transition-opacity duration-300">
-      <div className="rounded-[2rem] border border-slate-200 bg-white px-8 py-7 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <div className="rounded-[2rem] border border-slate-200/90 bg-[radial-gradient(circle_at_top_left,_rgba(96,165,250,0.22),_transparent_34%),linear-gradient(135deg,_rgba(30,64,175,0.10),_rgba(255,255,255,0.95)_36%,_rgba(241,245,249,0.92)_100%)] px-8 py-7 shadow-sm dark:border-slate-700/70 dark:bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_38%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(15,23,42,0.9)_58%,_rgba(30,41,59,0.94))]">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 text-2xl font-black text-cyan-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-blue-300">
@@ -151,7 +151,7 @@ export function SettingsSection({
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+        <div className="rounded-[2rem] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm backdrop-blur-sm dark:border-slate-700/70 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-cyan-700 dark:text-blue-400">
@@ -303,7 +303,7 @@ export function SettingsSection({
         </div>
 
         <div className="space-y-6">
-          <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <div className="rounded-[2rem] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(224,242,254,0.7),rgba(186,230,253,0.4))] p-8 shadow-sm backdrop-blur-sm dark:border-slate-700/70 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.6),rgba(8,10,15,0.8))]">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-500 dark:text-slate-400">
