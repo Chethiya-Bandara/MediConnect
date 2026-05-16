@@ -145,7 +145,7 @@ export function ResetPasswordPage() {
           <h1>Set a new password and get back into the portal.</h1>
           <p>
             Use a strong new password for your National Health Portal account. This recovery link
-            works only for password reset and expires if left hanging around too long.
+            works only for password reset and expires after a certain time period.
           </p>
         </section>
 

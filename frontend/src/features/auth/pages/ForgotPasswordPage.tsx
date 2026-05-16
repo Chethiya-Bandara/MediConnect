@@ -49,7 +49,7 @@ export function ForgotPasswordPage() {
       <main className="auth-main login-layout">
         <section className="login-hero">
           <p className="hero-kicker">Credential Recovery</p>
-          <h1>Reset your portal access without the usual circus.</h1>
+          <h1>Reset your portal access.</h1>
           <p>
             Enter the email linked to your account and we will trigger the password recovery flow
             through the secure auth service.
