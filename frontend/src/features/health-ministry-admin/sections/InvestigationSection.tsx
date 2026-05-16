@@ -12,9 +12,40 @@ interface AuditLogRow {
   user_id: string | null;
   organisation_id: number | string | null;
   notes: string | null;
+  actorNic?: string | null;
   actorName?: string | null;
   actorRole?: string | null;
   organisationName?: string | null;
+}
+
+function normalizeAuditRow(row: AuditLogRow & Record<string, unknown>): AuditLogRow {
+  return {
+    ...row,
+    actorNic:
+      typeof row.actorNic === "string"
+        ? row.actorNic
+        : typeof row.actor_nic === "string"
+          ? row.actor_nic
+          : null,
+    actorName:
+      typeof row.actorName === "string"
+        ? row.actorName
+        : typeof row.actor_name === "string"
+          ? row.actor_name
+          : null,
+    actorRole:
+      typeof row.actorRole === "string"
+        ? row.actorRole
+        : typeof row.actor_role === "string"
+          ? row.actor_role
+          : null,
+    organisationName:
+      typeof row.organisationName === "string"
+        ? row.organisationName
+        : typeof row.organisation_name === "string"
+          ? row.organisation_name
+          : null,
+  };
 }
 
 interface AuditLogsResponse {
@@ -85,8 +116,8 @@ function downloadCsv(rows: AuditLogRow[]) {
     "Action",
     "Entity",
     "Entity ID",
-    "User ID",
-    "Organisation ID",
+    "NIC",
+    "Organisation",
     "Notes",
   ];
   const lines = rows.map((r) =>
@@ -96,8 +127,12 @@ function downloadCsv(rows: AuditLogRow[]) {
       r.action ?? "",
       r.entity ?? "",
       String(r.entity_id ?? ""),
-      r.user_id ?? "",
-      String(r.organisation_id ?? ""),
+      r.actorNic ?? r.user_id ?? "",
+      r.organisationName
+        ? `${r.organisationName}${r.organisation_id ? ` (#${r.organisation_id})` : ""}`
+        : r.organisation_id
+          ? `#${r.organisation_id}`
+          : "",
       r.notes ?? "",
     ]
       .map((c) => `"${c.replace(/"/g, '""')}"`)
@@ -149,7 +184,7 @@ export function InvestigationSection() {
       try {
         const url = `${endpoints.healthMinistryAdmin.investigationLogs}?${params.toString()}`;
         const data = await apiRequest<AuditLogsResponse>(url);
-        setRows(data.logs ?? []);
+        setRows((data.logs ?? []).map((row) => normalizeAuditRow(row as AuditLogRow & Record<string, unknown>)));
         setTotal(data.count ?? 0);
         setOffset(newOffset);
         setHasSearched(true);
@@ -187,7 +222,7 @@ export function InvestigationSection() {
             Investigation Mode
           </h1>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            Server-side filtered search across all audit logs. Filter by user,
+            Server-side filtered search across all audit logs. Filter by NIC,
             organisation, time range, and action type.
           </p>
         </div>
@@ -217,15 +252,15 @@ export function InvestigationSection() {
       <div className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-              User ID
+              <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+              NIC
             </label>
             <input
               type="text"
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="UUID of the actor..."
+              placeholder="Actor NIC..."
               className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-slate-500"
             />
           </div>
@@ -357,8 +392,8 @@ export function InvestigationSection() {
                   <th className="px-5 py-4 font-semibold">Action</th>
                   <th className="px-5 py-4 font-semibold">Entity</th>
                   <th className="px-5 py-4 font-semibold">Entity ID</th>
-                  <th className="px-5 py-4 font-semibold">User ID</th>
-                  <th className="px-5 py-4 font-semibold">Org ID</th>
+                  <th className="px-5 py-4 font-semibold">NIC</th>
+                  <th className="px-5 py-4 font-semibold">Organisation</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -384,10 +419,14 @@ export function InvestigationSection() {
                       {row.entity_id ?? "—"}
                     </td>
                     <td className="px-5 py-4 font-mono text-[11px] text-slate-500 dark:text-slate-400 max-w-[180px] truncate">
-                      {row.user_id ?? "—"}
+                      {row.actorNic ?? row.user_id ?? "—"}
                     </td>
                     <td className="px-5 py-4 text-xs text-slate-500 dark:text-slate-400">
-                      {row.organisation_id ?? "—"}
+                      {row.organisationName
+                        ? `${row.organisationName}${row.organisation_id ? ` (#${row.organisation_id})` : ""}`
+                        : row.organisation_id
+                          ? `#${row.organisation_id}`
+                          : "National Scope"}
                     </td>
                   </tr>
                 ))}
